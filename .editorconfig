@@ -20,6 +20,7 @@ csharp_using_directive_placement = outside_namespace:warning
 
 # File header. The Apache short header is:
 # // Copyright 2026 TesterArmy.
+# // Modified by Dario Kondratiuk.
 # // SPDX-License-Identifier: Apache-2.0
-file_header_template = Copyright 2026 TesterArmy.\nSPDX-License-Identifier: Apache-2.0
+file_header_template = Copyright 2026 TesterArmy.\nModified by Dario Kondratiuk.\nSPDX-License-Identifier: Apache-2.0
 dotnet_diagnostic.IDE0073.severity = warning
