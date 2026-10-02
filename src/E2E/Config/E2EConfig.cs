@@ -8,8 +8,8 @@ using E2E.Internal;
 namespace E2E;
 
 /// <summary>
-/// JSON config read by the <c>e2e</c> tool. Code hosts can skip the file and pass
-/// <see cref="RunOptions"/> directly. There is no default model: set <see cref="Agent"/>
+/// JSON config a host can load. Pass the values through <see cref="RunOptions"/>
+/// or the NUnit fixture. There is no default model: set <see cref="Agent"/>
 /// or run tests that do not call one.
 /// </summary>
 public sealed class E2EConfig

@@ -10,8 +10,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 | --- | --- |
 | `e2e` and `@e2e-dev/web` | `E2E` (`WebEngine` is Playwright, in the same package) |
 | NUnit `[Test]` | `E2E.NUnit.E2ETest`. The fixture commits the replay cache from the NUnit result |
-| `e2e` bin | `E2E.Cli`, command `e2e` |
-| `e2e.config.ts` | `e2e.config.json` plus `RunOptions` |
+| `e2e.config.ts` | `E2EConfig.Load` reads `e2e.config.json`. Hosts pass the values to `RunOptions` or the NUnit fixture |
 | Vercel AI SDK model | `OpenAiCompatibleModel` (chat completions and tool calls) |
 | — | `DocumentEngine`, an in-memory page for hosts that do not want a browser |
 
@@ -33,6 +32,7 @@ A passing locator expectation or `agent.assert` after `act` writes the recording
 
 ## Not ported
 
+- The `e2e` command-line tool
 - `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
 - MCP server, `e2e init`, `e2e login`, OAuth subscriptions (ChatGPT, Copilot, Grok)
 - Vision, screenshots, traces, and video

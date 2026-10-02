@@ -13,13 +13,7 @@ dotnet add package E2E
 dotnet add package E2E.NUnit
 ```
 
-The library targets `net10.0` and includes `WebEngine`, which drives Chromium, Firefox, and WebKit through [Microsoft.Playwright](https://playwright.dev/dotnet/). The CLI is a .NET tool:
-
-```bash
-dotnet tool install -g E2E.Cli
-```
-
-Install a browser once, from the build output of the project that references `E2E`:
+The library targets `net10.0` and includes `WebEngine`, which drives Chromium, Firefox, and WebKit through [Microsoft.Playwright](https://playwright.dev/dotnet/). Install a browser once, from the build output of the project that references `E2E`:
 
 ```bash
 pwsh bin/Debug/net10.0/playwright.ps1 install chromium
@@ -46,15 +40,7 @@ public sealed class BillingTests
 
 An `act` that a later `assert` or locator `Expect` verifies is recorded. The next run replays those actions with no model calls until the screen no longer matches. Tests that never call the agent need no model.
 
-Run a test assembly:
-
-```bash
-e2e run tests/Billing.csproj
-e2e run --grep upgrade
-e2e run --no-cache
-```
-
-`e2e.config.json` selects the model. There is no default model and no shared API key.
+Run the tests with NUnit (`dotnet test`) or with `Runner.RunAsync`. There is no default model and no shared API key. A host can load the same shape from `e2e.config.json` with `E2EConfig.Load`.
 
 ```json
 {
@@ -130,6 +116,5 @@ Unit tests use `DocumentEngine` and a scripted model. They do not need an API ke
 | --- | --- |
 | `e2e` test, expect, agent, cache, runner, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
 | NUnit | `E2E.NUnit` (`E2ETest`) |
-| `e2e` CLI | `E2E.Cli` (`e2e`) |
 
 `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, and `@e2e-dev/eas` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).

@@ -35,7 +35,6 @@ Subclass `E2E.NUnit.E2ETest` and use `[Test]`. `App`, `Agent`, and `Screen` are 
 ```bash
 dotnet test
 dotnet run --project samples/E2E.Sample
-e2e run path/to/Tests.csproj --grep billing
 ```
 
 A second passing run should report `cache replayed` and zero model calls for that `act`. `assert` still calls the model.
