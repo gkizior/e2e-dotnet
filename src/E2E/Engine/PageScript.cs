@@ -2,7 +2,7 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
-namespace E2E.Web;
+namespace E2E.Engine;
 
 internal static class PageScript
 {

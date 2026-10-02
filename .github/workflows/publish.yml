@@ -31,7 +31,6 @@ jobs:
       - name: Pack
         run: |
           dotnet pack src/E2E/E2E.csproj -c Release -o artifacts --nologo
-          dotnet pack src/E2E.Web/E2E.Web.csproj -c Release -o artifacts --nologo
           dotnet pack src/E2E.Cli/E2E.Cli.csproj -c Release -o artifacts --nologo
 
       - name: NuGet login

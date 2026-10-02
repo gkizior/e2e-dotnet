@@ -6,6 +6,5 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\E2E\E2E.csproj" />
-    <ProjectReference Include="..\..\src\E2E.Web\E2E.Web.csproj" />
   </ItemGroup>
 </Project>

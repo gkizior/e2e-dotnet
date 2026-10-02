@@ -5,7 +5,7 @@
 using System.Net;
 using System.Text;
 using E2E;
-using E2E.Web;
+using E2E.Engine;
 
 namespace E2E.Tests;
 

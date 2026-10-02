@@ -8,8 +8,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 
 | JavaScript | .NET |
 | --- | --- |
-| `e2e` | `E2E` |
-| `@e2e-dev/web` | `E2E.Web` (`WebEngine`, Playwright) |
+| `e2e` and `@e2e-dev/web` | `E2E` (`WebEngine` is Playwright, in the same package) |
 | `e2e` bin | `E2E.Cli`, command `e2e` |
 | `e2e.config.ts` | `e2e.config.json` plus `RunOptions` |
 | Vercel AI SDK model | `OpenAiCompatibleModel` (chat completions and tool calls) |

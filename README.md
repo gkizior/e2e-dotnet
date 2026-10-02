@@ -10,19 +10,18 @@ License: Apache License 2.0. Copyright 2026 TesterArmy.
 
 ```bash
 dotnet add package E2E
-dotnet add package E2E.Web
 ```
 
-The library targets `net10.0`. The CLI is a .NET tool:
+The library targets `net10.0` and includes `WebEngine`, which drives Chromium, Firefox, and WebKit through [Microsoft.Playwright](https://playwright.dev/dotnet/). The CLI is a .NET tool:
 
 ```bash
 dotnet tool install -g E2E.Cli
 ```
 
-`E2E.Web` drives Chromium, Firefox, and WebKit through [Microsoft.Playwright](https://playwright.dev/dotnet/). Install a browser once:
+Install a browser once, from the build output of the project that references `E2E`:
 
 ```bash
-pwsh src/E2E.Web/bin/Debug/net10.0/playwright.ps1 install chromium
+pwsh bin/Debug/net10.0/playwright.ps1 install chromium
 ```
 
 ## A test
@@ -105,8 +104,7 @@ Unit tests use `DocumentEngine` and a scripted model. They do not need an API ke
 
 | JavaScript | .NET |
 | --- | --- |
-| `e2e` test, expect, agent, cache, runner | `E2E` |
-| `@e2e-dev/web` | `E2E.Web` |
+| `e2e` test, expect, agent, cache, runner, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
 | `e2e` CLI | `E2E.Cli` (`e2e`) |
 
 `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, and `@e2e-dev/eas` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).

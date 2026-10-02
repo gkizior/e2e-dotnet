@@ -4,7 +4,6 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/E2E.Cli/E2E.Cli.csproj" />
-    <Project Path="src/E2E.Web/E2E.Web.csproj" />
     <Project Path="src/E2E/E2E.csproj" />
   </Folder>
   <Folder Name="/tests/">

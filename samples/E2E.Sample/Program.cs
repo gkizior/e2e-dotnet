@@ -6,7 +6,6 @@ using System.Net;
 using System.Text;
 using E2E;
 using E2E.Engine;
-using E2E.Web;
 
 var web = args.Contains("--web");
 var cache = Path.Combine(Path.GetTempPath(), "e2e-sample", Guid.NewGuid().ToString("n"));

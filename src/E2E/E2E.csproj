@@ -3,14 +3,14 @@
     <RootNamespace>E2E</RootNamespace>
     <AssemblyName>E2E</AssemblyName>
     <PackageId>E2E</PackageId>
-    <Description>Community .NET port of the e2e agentic testing framework. Describe a goal, drive the app, and check it with locators. Not an official TesterArmy product.</Description>
-    <PackageTags>e2e;testing;agent;llm</PackageTags>
+    <Description>Community .NET port of the e2e agentic testing framework. Describe a goal, drive the app with Playwright, and check it with locators. Not an official TesterArmy product.</Description>
+    <PackageTags>e2e;testing;agent;llm;playwright;web</PackageTags>
     <IsPackable>true</IsPackable>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <InternalsVisibleTo Include="E2E.Tests" />
-    <InternalsVisibleTo Include="E2E.Web" />
   </ItemGroup>
 </Project>

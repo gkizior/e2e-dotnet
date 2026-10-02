@@ -2,11 +2,10 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
-using E2E.Engine;
 using E2E.Internal;
 using Microsoft.Playwright;
 
-namespace E2E.Web;
+namespace E2E.Engine;
 
 /// <summary>
 /// Browser engine for the web target. It drives Chromium through Playwright,
