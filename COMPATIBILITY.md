@@ -10,15 +10,14 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 | --- | --- |
 | `e2e` and `@e2e-dev/web` | `E2E` (`WebEngine` is Playwright, in the same package) |
 | NUnit `[Test]` | `E2E.NUnit.E2ETest`. The fixture commits the replay cache from the NUnit result |
-| `e2e.config.ts` | `E2EConfig.Load` reads `e2e.config.json`. Hosts pass the values to `RunOptions` or the NUnit fixture |
+| `e2e.config.ts` | `E2EConfig.Load` reads `e2e.config.json`. A host applies the values on the NUnit fixture |
 | Vercel AI SDK model | `OpenAiCompatibleModel` (chat completions and tool calls) |
 | — | `DocumentEngine`, an in-memory page for hosts that do not want a browser |
 
 ## Ported
 
-- `test` / `describe` as `[E2ETest]` and `[E2ESuite]`, or `Suite.Test`
-- `beforeAll`, `afterAll`, `beforeEach`, `afterEach`
-- `skip`, `only` (rejected when `CI=true`), retries, timeout, tags, `--grep`
+- NUnit `[Test]`, `[SetUp]`, `[TearDown]`, `[OneTimeSetUp]`, and `[OneTimeTearDown]`
+- `Assert.Ignore`, `[Retry]`, `[Timeout]`, and `[Category]`
 - Screen queries: role, text, label, test id, placeholder, `filter`, `first`, `nth`
 - Actions: tap, fill, press, check, uncheck, clear
 - Locator expectations: visible, hidden, text, count, enabled, disabled, checked, value. They poll until the assertion timeout
@@ -26,13 +25,12 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - Replay cache for a verified `act`: role, name, test id, and path. Modes are `self-finalized`, `agent-concluded`, and `missed`
 - `Values.Unique` and `Secret`. Secret values are redacted from prompts
 - OpenAI-compatible tool calling
-- JSON report and a short markdown summary
 
 A passing locator expectation or `agent.assert` after `act` writes the recording. `agent.assert`, `waitFor`, and `extract` always run live. Retries do not replay.
 
 ## Not ported
 
-- The `e2e` command-line tool
+- The `e2e` command-line tool, the custom runner, `[E2ETest]` discovery, `--grep`, `test.only`, and the JSON report
 - `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
 - MCP server, `e2e init`, `e2e login`, OAuth subscriptions (ChatGPT, Copilot, Grok)
 - Vision, screenshots, traces, and video

@@ -6,7 +6,7 @@ namespace E2E;
 
 /// <summary>
 /// A value the model must not see. Prompts, transcripts, and reports receive
-/// <c>&lt;secret:name&gt;</c>. The runner fills the real value itself.
+/// <c>&lt;secret:name&gt;</c>. The agent fills the real value itself.
 /// </summary>
 public sealed class Secret
 {

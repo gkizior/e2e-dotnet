@@ -4,7 +4,7 @@
 
 namespace E2E;
 
-/// <summary>Base exception for the runner, the agent, and engines. <see cref="Code"/> is stable.</summary>
+/// <summary>Base exception for the agent and engines. <see cref="Code"/> is stable.</summary>
 public class E2EException : Exception
 {
     public E2EException(string code, string message)

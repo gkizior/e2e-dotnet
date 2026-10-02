@@ -15,42 +15,53 @@ public sealed class WebEngineTests
     public async Task Chromium_upgrades_the_plan_when_a_browser_is_installed()
     {
         using var site = await TinySite.StartAsync();
-        var suite = new Suite("web");
-        suite.Test("upgrades", async ctx =>
+        E2ESession session;
+        try
         {
-            await ctx.App.OpenAsync("/");
-            await ctx.Agent.ActAsync("upgrade the workspace to the Pro plan");
-            await Expect.That(ctx.Screen.GetByRole("status")).ToContainTextAsync("Pro");
-        });
-
-        var result = await Runner.RunAsync(suite, new RunOptions
-        {
-            Engine = new WebEngine(headless: true),
-            Model = new ScriptedModel(request =>
+            session = await E2ESession.StartAsync(new E2ESessionOptions
             {
-                var text = string.Join('\n', request.Messages.Select(message => message.Content));
-                if (text.Contains("tapped", StringComparison.Ordinal))
+                Engine = new WebEngine(headless: true),
+                Model = new ScriptedModel(request =>
                 {
-                    return ModelResponses.Done("passed", "upgraded");
-                }
+                    var text = string.Join('\n', request.Messages.Select(message => message.Content));
+                    if (text.Contains("tapped", StringComparison.Ordinal))
+                    {
+                        return ModelResponses.Done("passed", "upgraded");
+                    }
 
-                return ModelResponses.Tap("button", "Upgrade to Pro");
-            }),
-            BaseUrl = site.Url,
-            CacheEnabled = false,
-            ReportPath = null,
-            AssertionTimeout = TimeSpan.FromSeconds(5),
-            ActionTimeout = TimeSpan.FromSeconds(10),
-            StepTimeout = TimeSpan.FromSeconds(20),
-            TestTimeout = TimeSpan.FromSeconds(30),
-        });
-
-        if (result.Tests.Count == 1 && result.Tests[0].ErrorCode == "ENVIRONMENT_UNAVAILABLE")
+                    return ModelResponses.Tap("button", "Upgrade to Pro");
+                }),
+                BaseUrl = site.Url,
+                CacheEnabled = false,
+                TestTitle = "web > upgrades",
+                AssertionTimeout = TimeSpan.FromSeconds(5),
+                ActionTimeout = TimeSpan.FromSeconds(10),
+                StepTimeout = TimeSpan.FromSeconds(20),
+                TestTimeout = TimeSpan.FromSeconds(30),
+            });
+        }
+        catch (EngineException ex) when (ex.Code == "ENVIRONMENT_UNAVAILABLE")
         {
             return;
         }
 
-        Assert.Equal(0, result.ExitCode);
+        await using (session)
+        {
+            Exception? error = null;
+            try
+            {
+                await session.App.OpenAsync("/");
+                await session.Agent.ActAsync("upgrade the workspace to the Pro plan");
+                await Expect.That(session.Screen.GetByRole("status")).ToContainTextAsync("Pro");
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
+
+            session.Complete(error);
+            Assert.Null(error);
+        }
     }
 }
 

@@ -7,7 +7,7 @@ using E2E.Internal;
 
 namespace E2E;
 
-/// <summary>One turn of the agent model. Tool calls are executed by the runner, never by the model itself.</summary>
+/// <summary>One turn of the agent model. Tool calls are executed by the agent, never by the model itself.</summary>
 public interface IAgentModel
 {
     /// <summary>Provider and model id, printed in the run summary. Changing it does not miss the replay cache.</summary>

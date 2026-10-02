@@ -83,7 +83,7 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
             }
             catch (JsonException ex)
             {
-                throw new AgentException("MODEL_OUTPUT_INVALID", "The model provider returned JSON the runner could not read.", ex);
+                throw new AgentException("MODEL_OUTPUT_INVALID", "The model provider returned JSON that could not be read.", ex);
             }
         }
     }

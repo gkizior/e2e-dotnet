@@ -18,7 +18,7 @@ public sealed class CoreTests
             await Expect.That(ctx.Screen.GetByRole("status", "Pro")).ToBeVisibleAsync();
         });
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.Null(result.Error);
     }
 
     [Fact]
@@ -35,8 +35,8 @@ public sealed class CoreTests
             await ctx.Screen.GetByRole("button", "Save").TapAsync();
         }, world);
 
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal("STRICT_MODE", result.Tests[0].ErrorCode);
+        var error = Assert.IsType<TestException>(result.Error);
+        Assert.Equal("STRICT_MODE", error.Code);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public sealed class CoreTests
             await ctx.Screen.GetByRole("button", "Save").First().TapAsync();
         }, world);
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.Null(result.Error);
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public sealed class CoreTests
             await Expect.That(ctx.Screen.GetByRole("status", "Ready")).ToBeVisibleAsync();
         }, world, assertionTimeout: TimeSpan.FromSeconds(2));
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.Null(result.Error);
     }
 
     [Fact]
@@ -89,8 +89,8 @@ public sealed class CoreTests
             },
             assertionTimeout: TimeSpan.FromMilliseconds(200));
 
-        Assert.Equal(1, result.ExitCode);
-        Assert.Equal("ASSERTION_FAILED", result.Tests[0].ErrorCode);
+        var error = Assert.IsType<TestException>(result.Error);
+        Assert.Equal("ASSERTION_FAILED", error.Code);
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public sealed class CoreTests
             await Expect.That(ctx.Screen.GetByRole("status")).ToContainTextAsync("Pro");
         }, model: Script());
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.Null(result.Error);
         Assert.True(result.ModelCalls > 0);
     }
 
@@ -143,12 +143,12 @@ public sealed class CoreTests
         }
 
         var first = await RunAsync(Body, model: Model(), cacheDirectory: directory);
-        Assert.Equal(0, first.ExitCode);
+        Assert.Null(first.Error);
         Assert.True(actCalls > 0);
         actCalls = 0;
 
         var second = await RunAsync(Body, model: Model(), cacheDirectory: directory);
-        Assert.Equal(0, second.ExitCode);
+        Assert.Null(second.Error);
         Assert.Equal(0, actCalls);
         Assert.Equal(1, second.Replayed);
     }
@@ -207,7 +207,7 @@ public sealed class CoreTests
             model,
             directory);
 
-        Assert.Equal(0, second.ExitCode);
+        Assert.Null(second.Error);
         Assert.Equal(1, second.Missed);
         Assert.Equal(0, second.Replayed);
     }
@@ -236,7 +236,7 @@ public sealed class CoreTests
             world,
             model: captured = new ScriptedModel(_ => ModelResponses.Done("passed", "signed in")));
 
-        Assert.Equal(0, result.ExitCode);
+        Assert.Null(result.Error);
         var prompt = string.Join('\n', captured!.Requests.SelectMany(request => request.Messages.Select(message => message.Content)));
         Assert.DoesNotContain("s3cret-value", prompt);
         Assert.Contains("<secret:password>", prompt, StringComparison.Ordinal);
@@ -270,55 +270,11 @@ public sealed class CoreTests
         }
 
         var first = await RunAsync(Body, world, Model(), directory);
-        Assert.Equal(0, first.ExitCode);
+        Assert.Null(first.Error);
         email = "ada+2@example.test";
         var second = await RunAsync(Body, world, Model(), directory);
-        Assert.Equal(0, second.ExitCode);
+        Assert.Null(second.Error);
         Assert.Equal(1, second.Replayed);
-    }
-
-    [Fact]
-    public async Task Before_each_opens_the_page_and_skip_does_not_fail()
-    {
-        var suite = new Suite("billing");
-        suite.BeforeEach(ctx => ctx.App.OpenAsync("/settings/billing"));
-        suite.Test("skipped inside", ctx =>
-        {
-            ctx.Skip(true, "not ready");
-            return Task.CompletedTask;
-        });
-        var result = await Runner.RunAsync(suite, Options(BillingWorld.Create()));
-        Assert.Equal(TestStatus.Skipped, result.Tests[0].Status);
-        Assert.Equal(0, result.ExitCode);
-    }
-
-    [Fact]
-    public async Task Only_is_rejected_in_ci()
-    {
-        var previous = Environment.GetEnvironmentVariable("CI");
-        Environment.SetEnvironmentVariable("CI", "true");
-        try
-        {
-            var suite = new Suite();
-            suite.Test("focused", _ => Task.CompletedTask, new TestOptions { Only = true });
-            var error = await Assert.ThrowsAsync<TestException>(() => Runner.RunAsync(suite, Options(BillingWorld.Create())));
-            Assert.Equal("ONLY_IN_CI", error.Code);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("CI", previous);
-        }
-    }
-
-    [Fact]
-    public void Discovery_reads_attributes()
-    {
-        DiscoveredFixture.BeforeAllCount = 0;
-        var suite = SuiteDiscovery.Discover(typeof(DiscoveredFixture).Assembly);
-        var tests = suite.Tests.Where(test => test.Title.StartsWith("discovered >", StringComparison.Ordinal)).ToList();
-        Assert.Contains(tests, test => test.Title == "discovered > opens");
-        Assert.Contains(tests, test => test.Options.Skip == "not ready");
-        Assert.Contains(tests, test => test.Tags.Contains("billing"));
     }
 
     [Fact]
@@ -351,18 +307,6 @@ public sealed class CoreTests
         Assert.Equal("done", response.ToolCalls[0].Name);
         Assert.Equal(4, response.Usage!.InputTokens);
         Assert.Contains("/chat/completions", handler.RequestUri!.AbsoluteUri, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Markdown_report_lists_the_test()
-    {
-        var markdown = Report.ToMarkdown(new RunResult
-        {
-            Tests = [new TestResult { Title = "billing > upgrades", Status = TestStatus.Passed }],
-            Replayed = 1,
-        });
-        Assert.Contains("billing > upgrades", markdown, StringComparison.Ordinal);
-        Assert.Contains("1 replayed", markdown, StringComparison.Ordinal);
     }
 
     private static IReadOnlyList<ModelTool> AgentToolList()
@@ -404,37 +348,40 @@ public sealed class CoreTests
         return Path.Combine(Path.GetTempPath(), "e2e-tests", Guid.NewGuid().ToString("n"));
     }
 
-    private static Task<RunResult> RunAsync(
+    private readonly record struct Attempt(Exception? Error, int ModelCalls, int Replayed, int Missed);
+
+    private static async Task<Attempt> RunAsync(
         Func<TestContext, Task> body,
         DocumentWorld? world = null,
         IAgentModel? model = null,
         string? cacheDirectory = null,
         TimeSpan? assertionTimeout = null)
     {
-        var suite = new Suite("billing");
-        suite.Test("case", body);
-        return Runner.RunAsync(suite, Options(world ?? BillingWorld.Create(), model, cacheDirectory, assertionTimeout));
-    }
-
-    private static RunOptions Options(
-        DocumentWorld world,
-        IAgentModel? model = null,
-        string? cacheDirectory = null,
-        TimeSpan? assertionTimeout = null)
-    {
-        return new RunOptions
+        await using var session = await E2ESession.StartAsync(new E2ESessionOptions
         {
-            Engine = new DocumentEngine(world),
+            Engine = new DocumentEngine(world ?? BillingWorld.Create()),
             Model = model,
             BaseUrl = "https://billing.test",
-            CacheDirectory = cacheDirectory ?? Path.Combine(Path.GetTempPath(), "e2e-empty", Guid.NewGuid().ToString("n")),
+            Cache = cacheDirectory is null ? null : new FileStepCache(cacheDirectory),
             CacheEnabled = cacheDirectory is not null,
-            ReportPath = null,
+            TestTitle = "billing > case",
             AssertionTimeout = assertionTimeout ?? TimeSpan.FromSeconds(2),
             ActionTimeout = TimeSpan.FromMilliseconds(300),
             TestTimeout = TimeSpan.FromSeconds(10),
             StepTimeout = TimeSpan.FromSeconds(5),
-        };
+        });
+        Exception? error = null;
+        try
+        {
+            await body(session.Context);
+        }
+        catch (Exception ex)
+        {
+            error = ex;
+        }
+
+        session.Complete(error);
+        return new Attempt(error, session.ModelCalls, session.Replayed, session.Missed);
     }
 
     private sealed class StubHandler : HttpMessageHandler
@@ -453,24 +400,5 @@ public sealed class CoreTests
                 Content = new StringContent(_body, System.Text.Encoding.UTF8, "application/json"),
             });
         }
-    }
-}
-
-[E2ESuite("discovered", Tags = new[] { "billing" })]
-public sealed class DiscoveredFixture
-{
-    public static int BeforeAllCount { get; set; }
-
-    [E2EBeforeAll]
-    public static void Once() => BeforeAllCount++;
-
-    [E2ETest("opens")]
-    public void Opens()
-    {
-    }
-
-    [E2ETest("later", Skip = "not ready")]
-    public void Later()
-    {
     }
 }

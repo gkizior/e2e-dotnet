@@ -59,19 +59,6 @@ There is no default model and no shared API key. A host can load the same shape 
 
 `baseUrl` can point at any OpenAI-compatible server, including a local one. Tests without agent steps ignore it.
 
-## In-process host
-
-A program can host the runner itself. `DocumentEngine` is an in-memory page, useful for samples and for tests of the runner. A real browser uses `WebEngine`.
-
-```csharp
-var result = await Runner.RunAsync(suite, new RunOptions
-{
-    Engine = new WebEngine(),
-    Model = new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = "gpt-4.1-mini" }),
-    BaseUrl = "http://127.0.0.1:4173",
-});
-```
-
 ## Sample
 
 The sample is that billing test as an NUnit project. It uses the document engine and a scripted model, so it needs no browser and no API key. The second test replays the tap and does not ask the model to act.
@@ -92,7 +79,7 @@ Unit tests use `DocumentEngine` and a scripted model. They do not need an API ke
 
 | JavaScript | .NET |
 | --- | --- |
-| `e2e` test, expect, agent, cache, runner, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
+| `e2e` test, expect, agent, cache, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
 | NUnit | `E2E.NUnit` (`E2ETest`) |
 
 `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, and `@e2e-dev/eas` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).
