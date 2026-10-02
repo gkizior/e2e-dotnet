@@ -9,35 +9,32 @@ The public flow matches [tester-army/e2e](https://github.com/tester-army/e2e). D
 
 ## Write a test
 
+Subclass `E2E.NUnit.E2ETest` and use `[Test]`. `App`, `Agent`, and `Screen` are available after setup. The replay cache commits from the NUnit result. Override `CreateModel` and `CreateEngine` for a scripted model or `DocumentEngine`.
+
 ```csharp
-[E2ESuite("billing")]
-public sealed class BillingTests
+public sealed class BillingTests : E2ETest
 {
-    [E2ETest("a member upgrades to Pro")]
-    public async Task Upgrades(App app, Agent agent, Screen screen)
+    [Test]
+    public async Task Member_upgrades_to_Pro()
     {
-        await app.OpenAsync("/settings/billing");
-        await agent.ActAsync("upgrade the workspace to the Pro plan");
-        await agent.AssertAsync("the invoice preview shows a prorated amount");
-        await Expect.That(screen.GetByRole("status")).ToContainTextAsync("Pro");
+        await App.OpenAsync("/settings/billing");
+        await Agent.ActAsync("upgrade the workspace to the Pro plan");
+        await Agent.AssertAsync("the invoice preview shows a prorated amount");
+        await Expect.That(Screen.GetByRole("status")).ToContainTextAsync("Pro");
     }
 }
 ```
 
 One goal per `ActAsync`. Follow it with `AssertAsync` or `Expect.That` so the replay cache can keep the step. Put fresh emails and timestamps in `Values.Unique`. Put passwords in `Secret.Create` so the model never sees the value.
 
-## NUnit
-
-Subclass `E2E.NUnit.E2ETest` and use `[Test]`. `App`, `Agent`, and `Screen` are available after setup. The replay cache commits from the NUnit result. Override `CreateModel` and `CreateEngine` for a scripted model or `DocumentEngine`.
-
 ## Run
 
 ```bash
 dotnet test
-dotnet run --project samples/E2E.Sample
+dotnet test --project samples/E2E.Sample
 ```
 
-A second passing run should report `cache replayed` and zero model calls for that `act`. `assert` still calls the model.
+A second passing run of the same test replays the `act` and does not call the model for it. `assert` still calls the model.
 
 ## Cache misses
 

@@ -23,24 +23,28 @@ pwsh bin/Debug/net10.0/playwright.ps1 install chromium
 
 ```csharp
 using E2E;
+using E2E.NUnit;
+using NUnit.Framework;
 
-[E2ESuite("billing")]
-public sealed class BillingTests
+public sealed class BillingTests : E2ETest
 {
-    [E2ETest("a member upgrades to Pro")]
-    public async Task Upgrades(App app, Agent agent, Screen screen)
+    protected override IAgentModel? CreateModel() =>
+        new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = "gpt-4.1-mini" });
+
+    [Test]
+    public async Task Member_upgrades_to_Pro()
     {
-        await app.OpenAsync("/settings/billing");
-        await agent.ActAsync("upgrade the workspace to the Pro plan");
-        await agent.AssertAsync("the invoice preview shows a prorated amount");
-        await Expect.That(screen.GetByRole("status")).ToContainTextAsync("Pro");
+        await App.OpenAsync("/settings/billing");
+        await Agent.ActAsync("upgrade the workspace to the Pro plan");
+        await Agent.AssertAsync("the invoice preview shows a prorated amount");
+        await Expect.That(Screen.GetByRole("status")).ToContainTextAsync("Pro");
     }
 }
 ```
 
-An `act` that a later `assert` or locator `Expect` verifies is recorded. The next run replays those actions with no model calls until the screen no longer matches. Tests that never call the agent need no model.
+`E2ETest` starts a `WebEngine` session for each `[Test]`. Override `CreateEngine` with a `DocumentEngine` when the test should not open a browser. An `act` that a later `assert` or locator `Expect` verifies is recorded. The next run replays those actions with no model calls until the screen no longer matches. A failure deletes unverified acts. `Assert.Ignore` leaves the cache alone. `[Retry]` runs the later attempts live. Tests that never call the agent need no model.
 
-Run the tests with NUnit (`dotnet test`) or with `Runner.RunAsync`. There is no default model and no shared API key. A host can load the same shape from `e2e.config.json` with `E2EConfig.Load`.
+There is no default model and no shared API key. A host can load the same shape from `e2e.config.json` with `E2EConfig.Load`.
 
 ```json
 {
@@ -70,37 +74,11 @@ var result = await Runner.RunAsync(suite, new RunOptions
 
 ## Sample
 
-The sample runs the billing upgrade twice. The second run replays the tap and does not ask the model to act. It uses the document engine unless you pass `--web`.
+The sample is that billing test as an NUnit project. It uses the document engine and a scripted model, so it needs no browser and no API key. The second test replays the tap and does not ask the model to act.
 
 ```bash
-dotnet run --project samples/E2E.Sample
-dotnet run --project samples/E2E.Sample -- --web
+dotnet test --project samples/E2E.Sample
 ```
-
-`--web` serves a small billing page and drives it with Playwright. It needs Chromium installed.
-
-## NUnit
-
-`E2E.NUnit` runs each test as an NUnit `[Test]`. The base class starts a `WebEngine` session and commits the replay cache from the NUnit result. Override `CreateEngine` or `CreateModel` when the test should not use a browser or the default model.
-
-```csharp
-using E2E;
-using E2E.NUnit;
-using NUnit.Framework;
-
-public sealed class BillingTests : E2ETest
-{
-    [Test]
-    public async Task Member_upgrades_to_Pro()
-    {
-        await App.OpenAsync("/settings/billing");
-        await Agent.ActAsync("upgrade the workspace to the Pro plan");
-        await Expect.That(Screen.GetByRole("status")).ToContainTextAsync("Pro");
-    }
-}
-```
-
-A passing test records verified acts. A failure deletes unverified ones. `Assert.Ignore` leaves the cache alone. `[Retry]` runs the later attempts live.
 
 ## Tests
 
