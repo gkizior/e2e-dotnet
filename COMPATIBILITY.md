@@ -9,6 +9,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 | JavaScript | .NET |
 | --- | --- |
 | `e2e` and `@e2e-dev/web` | `E2E` (`WebEngine` is Playwright, in the same package) |
+| NUnit `[Test]` | `E2E.NUnit.E2ETest`. The fixture commits the replay cache from the NUnit result |
 | `e2e` bin | `E2E.Cli`, command `e2e` |
 | `e2e.config.ts` | `e2e.config.json` plus `RunOptions` |
 | Vercel AI SDK model | `OpenAiCompatibleModel` (chat completions and tool calls) |

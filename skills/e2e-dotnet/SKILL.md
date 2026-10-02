@@ -26,6 +26,10 @@ public sealed class BillingTests
 
 One goal per `ActAsync`. Follow it with `AssertAsync` or `Expect.That` so the replay cache can keep the step. Put fresh emails and timestamps in `Values.Unique`. Put passwords in `Secret.Create` so the model never sees the value.
 
+## NUnit
+
+Subclass `E2E.NUnit.E2ETest` and use `[Test]`. `App`, `Agent`, and `Screen` are available after setup. The replay cache commits from the NUnit result. Override `CreateModel` and `CreateEngine` for a scripted model or `DocumentEngine`.
+
 ## Run
 
 ```bash

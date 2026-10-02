@@ -10,6 +10,7 @@ License: Apache License 2.0. Copyright 2026 TesterArmy.
 
 ```bash
 dotnet add package E2E
+dotnet add package E2E.NUnit
 ```
 
 The library targets `net10.0` and includes `WebEngine`, which drives Chromium, Firefox, and WebKit through [Microsoft.Playwright](https://playwright.dev/dotnet/). The CLI is a .NET tool:
@@ -92,6 +93,29 @@ dotnet run --project samples/E2E.Sample -- --web
 
 `--web` serves a small billing page and drives it with Playwright. It needs Chromium installed.
 
+## NUnit
+
+`E2E.NUnit` runs each test as an NUnit `[Test]`. The base class starts a `WebEngine` session and commits the replay cache from the NUnit result. Override `CreateEngine` or `CreateModel` when the test should not use a browser or the default model.
+
+```csharp
+using E2E;
+using E2E.NUnit;
+using NUnit.Framework;
+
+public sealed class BillingTests : E2ETest
+{
+    [Test]
+    public async Task Member_upgrades_to_Pro()
+    {
+        await App.OpenAsync("/settings/billing");
+        await Agent.ActAsync("upgrade the workspace to the Pro plan");
+        await Expect.That(Screen.GetByRole("status")).ToContainTextAsync("Pro");
+    }
+}
+```
+
+A passing test records verified acts. A failure deletes unverified ones. `Assert.Ignore` leaves the cache alone. `[Retry]` runs the later attempts live.
+
 ## Tests
 
 ```bash
@@ -105,6 +129,7 @@ Unit tests use `DocumentEngine` and a scripted model. They do not need an API ke
 | JavaScript | .NET |
 | --- | --- |
 | `e2e` test, expect, agent, cache, runner, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
+| NUnit | `E2E.NUnit` (`E2ETest`) |
 | `e2e` CLI | `E2E.Cli` (`e2e`) |
 
 `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, and `@e2e-dev/eas` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).

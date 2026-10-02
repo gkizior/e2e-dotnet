@@ -195,7 +195,7 @@ public static class Runner
         var attempts = Math.Max(1, test.Options.Retries + 1);
         var clock = Stopwatch.StartNew();
         Exception? error = null;
-        AttemptScope? scope = null;
+        E2ESession? scope = null;
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
             AttemptOutcome outcome;
@@ -214,7 +214,7 @@ public static class Runner
                 continue;
             }
 
-            scope = outcome.Scope;
+            scope = outcome.Session;
             if (outcome.Error is SkipException skip)
             {
                 clock.Stop();
@@ -251,16 +251,7 @@ public static class Runner
         var described = Describe(error ?? new TestException("TEST_FAILED", "The test failed."));
         write("  fail  " + test.Title + " (" + Milliseconds(clock.Elapsed) + "ms)");
         write("        " + described.Code + ": " + described.Message);
-        return FromScope(test.Title, TestStatus.Failed, described.Code, described.Message, clock.Elapsed, scope ?? new AttemptScope
-        {
-            Session = null!,
-            Model = null,
-            Cache = null,
-            CacheEnabled = false,
-            TestTitle = test.Title,
-            EnginePlatform = options.Engine.Platform,
-            EngineVersion = options.Engine.Version,
-        });
+        return FromScope(test.Title, TestStatus.Failed, described.Code, described.Message, clock.Elapsed, scope);
     }
 
     private static async Task<AttemptOutcome> RunAttemptAsync(
@@ -271,51 +262,33 @@ public static class Runner
         CancellationToken cancellationToken)
     {
         var timeout = test.Options.Timeout ?? options.TestTimeout;
-        using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        attemptCancellation.CancelAfter(timeout);
-        await using var session = await options.Engine.StartAsync(
-            new EngineStartOptions { BaseUrl = options.BaseUrl, ActionTimeout = options.ActionTimeout },
-            attemptCancellation.Token).ConfigureAwait(false);
-        var scope = new AttemptScope
-        {
-            Session = session,
-            Model = options.Model,
-            Cache = cache,
-            CacheEnabled = options.CacheEnabled && attempt == 1,
-            TestTitle = test.Title,
-            EnginePlatform = options.Engine.Platform,
-            EngineVersion = options.Engine.Version,
-            Attempt = attempt,
-            ActionTimeout = options.ActionTimeout,
-            StepTimeout = options.StepTimeout,
-            MaxModelCalls = options.MaxModelCalls,
-            Token = () => attemptCancellation.Token,
-        };
-        var app = new App(session, options.BaseUrl, () => attemptCancellation.Token);
-        var agent = new Agent(scope);
-        var screen = new Screen(
-            token => session.ObserveAsync(token),
-            (node, action, token) => session.PerformAsync(node, action, token),
-            () => attemptCancellation.Token,
-            scope.MarkVerified,
-            options.AssertionTimeout);
-        var context = new TestContext
-        {
-            App = app,
-            Agent = agent,
-            Screen = screen,
-            CancellationToken = attemptCancellation.Token,
-        };
+        await using var session = await E2ESession.StartAsync(
+            new E2ESessionOptions
+            {
+                Engine = options.Engine,
+                Model = options.Model,
+                BaseUrl = options.BaseUrl,
+                Cache = cache,
+                CacheEnabled = options.CacheEnabled && attempt == 1,
+                TestTitle = test.Title,
+                TestTimeout = timeout,
+                ActionTimeout = options.ActionTimeout,
+                AssertionTimeout = options.AssertionTimeout,
+                StepTimeout = options.StepTimeout,
+                MaxModelCalls = options.MaxModelCalls,
+                Attempt = attempt,
+            },
+            cancellationToken).ConfigureAwait(false);
 
         Exception? bodyError = null;
         try
         {
             if (test.BeforeEach is not null)
             {
-                await test.BeforeEach(context).ConfigureAwait(false);
+                await test.BeforeEach(session.Context).ConfigureAwait(false);
             }
 
-            await test.Body(context).ConfigureAwait(false);
+            await test.Body(session.Context).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -330,7 +303,7 @@ public static class Runner
         {
             try
             {
-                await test.AfterEach(context).ConfigureAwait(false);
+                await test.AfterEach(session.Context).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || cancellationToken.IsCancellationRequested)
             {
@@ -338,34 +311,13 @@ public static class Runner
             }
         }
 
-        SaveCache(scope, bodyError, cancellationToken);
-        return new AttemptOutcome(scope, bodyError);
+        session.Complete(bodyError, cancellationToken);
+        return new AttemptOutcome(session, bodyError);
     }
 
-    private readonly record struct AttemptOutcome(AttemptScope Scope, Exception? Error);
+    private readonly record struct AttemptOutcome(E2ESession Session, Exception? Error);
 
-    private static void SaveCache(AttemptScope scope, Exception? error, CancellationToken cancellationToken)
-    {
-        if (!scope.CacheEnabled || scope.Cache is null || cancellationToken.IsCancellationRequested)
-        {
-            return;
-        }
-
-        var preserve = error is SkipException || error is AgentException { Code: "MODEL_UNAVAILABLE" or "MODEL_PROVIDER_FAILED" };
-        foreach (var act in scope.Acts)
-        {
-            if (act.Verified && act.Entry is { Actions.Count: > 0 } && !act.ParamCollision)
-            {
-                scope.Cache.Write(act.Key, act.Entry);
-            }
-            else if (!preserve)
-            {
-                scope.Cache.Delete(act.Key);
-            }
-        }
-    }
-
-    private static TestResult FromScope(string title, TestStatus status, string? code, string? error, TimeSpan duration, AttemptScope scope)
+    private static TestResult FromScope(string title, TestStatus status, string? code, string? error, TimeSpan duration, E2ESession? scope)
     {
         return new TestResult
         {
@@ -374,12 +326,12 @@ public static class Runner
             ErrorCode = code,
             Error = error,
             Duration = duration,
-            Replayed = scope.Replayed,
-            HandedOff = scope.HandedOff,
-            Missed = scope.Missed,
-            ModelCalls = scope.ModelCalls,
-            InputTokens = scope.InputTokens,
-            OutputTokens = scope.OutputTokens,
+            Replayed = scope?.Replayed ?? 0,
+            HandedOff = scope?.HandedOff ?? 0,
+            Missed = scope?.Missed ?? 0,
+            ModelCalls = scope?.ModelCalls ?? 0,
+            InputTokens = scope?.InputTokens ?? 0,
+            OutputTokens = scope?.OutputTokens ?? 0,
         };
     }
 

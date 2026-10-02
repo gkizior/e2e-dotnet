@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>E2E.NUnit</RootNamespace>
+    <AssemblyName>E2E.NUnit</AssemblyName>
+    <PackageId>E2E.NUnit</PackageId>
+    <Description>NUnit fixture for the E2E .NET port. Each test gets an engine session, and the replay cache commits from the NUnit result.</Description>
+    <PackageTags>e2e;testing;nunit;agent</PackageTags>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\E2E\E2E.csproj" />
+    <PackageReference Include="NUnit" Version="5.0.0" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
