@@ -1,0 +1,14 @@
+e2e for .NET
+Copyright 2026 TesterArmy
+
+This product is a community .NET port of e2e
+(https://github.com/tester-army/e2e).
+
+It is an independent reimplementation of the public testing API. It is not a
+copy of the TypeScript sources, not an official TesterArmy product, and not
+endorsed by TesterArmy.
+
+Licensed under the Apache License, Version 2.0.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0

@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>E2E.Sample</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\E2E\E2E.csproj" />
+    <ProjectReference Include="..\..\src\E2E.Web\E2E.Web.csproj" />
+  </ItemGroup>
+</Project>

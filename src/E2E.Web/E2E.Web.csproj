@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>E2E.Web</RootNamespace>
+    <AssemblyName>E2E.Web</AssemblyName>
+    <PackageId>E2E.Web</PackageId>
+    <Description>Playwright web engine for the E2E .NET port. Chromium, Firefox, and WebKit through Microsoft.Playwright. Not an official TesterArmy product.</Description>
+    <PackageTags>e2e;testing;playwright;web</PackageTags>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\E2E\E2E.csproj" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
