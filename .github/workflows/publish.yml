@@ -1,0 +1,44 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nuget:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Test
+        run: dotnet test E2E.slnx -c Release --nologo
+
+      - name: Pack
+        run: |
+          dotnet pack src/E2E/E2E.csproj -c Release -o artifacts --nologo
+          dotnet pack src/E2E.Web/E2E.Web.csproj -c Release -o artifacts --nologo
+          dotnet pack src/E2E.Cli/E2E.Cli.csproj -c Release -o artifacts --nologo
+
+      - name: NuGet login
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: kblok
+
+      - name: Push
+        run: dotnet nuget push "artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate

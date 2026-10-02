@@ -10,6 +10,8 @@
     <ToolCommandName>e2e</ToolCommandName>
     <IsPackable>true</IsPackable>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Playwright copies .ps1 helpers into the tool output. They are not NuGet install scripts. -->
+    <NoWarn>$(NoWarn);NU5111</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\E2E\E2E.csproj" />
