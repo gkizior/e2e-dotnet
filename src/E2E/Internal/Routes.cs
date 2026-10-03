@@ -2,9 +2,11 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Text.RegularExpressions;
+
 namespace E2E.Internal;
 
-internal static class Routes
+internal static partial class Routes
 {
     public static string PathOf(string url)
     {
@@ -28,25 +30,39 @@ internal static class Routes
         return path.StartsWith('/') ? path : "/" + path;
     }
 
-    public static string Resolve(string? baseUrl, string url)
+    public static string Resolve(string? baseUrl, string? url)
     {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            url = "/";
-        }
-
-        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            return url;
-        }
-
+        // No URL opens the base URL itself, as an empty reference does in WHATWG resolution.
+        url = url?.Trim() ?? string.Empty;
+        Uri? resolved;
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            return url.StartsWith('/') ? url : "/" + url;
+            // Checked by scheme because on Unix Uri reads "/x" as the absolute file:///x.
+            if (!SchemePattern().IsMatch(url))
+            {
+                throw new TestException("APP_URL_REQUIRED", "Navigation to \"" + url + "\" needs an app URL; the test declares no base URL.");
+            }
+
+            Uri.TryCreate(url, UriKind.Absolute, out resolved);
+        }
+        else
+        {
+            Uri.TryCreate(new Uri(baseUrl, UriKind.Absolute), url, out resolved);
         }
 
-        var left = baseUrl.EndsWith('/') ? baseUrl : baseUrl + "/";
-        var right = url.StartsWith('/') ? url[1..] : url;
-        return new Uri(new Uri(left, UriKind.Absolute), right).AbsoluteUri;
+        if (resolved is null)
+        {
+            throw new TestException("POLICY_DENIED", "Malformed URL: " + url);
+        }
+
+        if (resolved.Scheme is "file" or "data" or "javascript")
+        {
+            throw new TestException("POLICY_DENIED", "Forbidden URL scheme: " + resolved.Scheme + ":");
+        }
+
+        return resolved.AbsoluteUri;
     }
+
+    [GeneratedRegex("^[A-Za-z][A-Za-z0-9+.-]*:")]
+    private static partial Regex SchemePattern();
 }

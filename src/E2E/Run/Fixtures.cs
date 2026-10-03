@@ -7,7 +7,7 @@ using E2E.Internal;
 
 namespace E2E;
 
-/// <summary>Opens the app under test. A relative URL is resolved against the target base URL.</summary>
+/// <summary>Opens the app under test. A relative URL is resolved against the target base URL; no URL opens the base URL.</summary>
 public sealed class App
 {
     private readonly IEngineSession _session;
@@ -21,7 +21,7 @@ public sealed class App
         _token = token;
     }
 
-    public Task OpenAsync(string url = "/", CancellationToken cancellationToken = default)
+    public Task OpenAsync(string? url = null, CancellationToken cancellationToken = default)
     {
         var token = cancellationToken == default ? _token() : cancellationToken;
         return _session.OpenAsync(Routes.Resolve(_baseUrl, url), token);

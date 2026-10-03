@@ -20,6 +20,8 @@ public sealed class ReplayTests : E2ETest
 
     protected override IAgentModel? CreateModel() => BillingModel();
 
+    protected override string? BaseUrl => "https://billing.test";
+
     protected override string CacheTitle(global::NUnit.Framework.TestContext.TestAdapter test) => "billing > upgrades";
 
     [Test]

@@ -112,6 +112,7 @@ public sealed class SessionTests
 
                 return ModelResponses.Tap("button", "Upgrade to Pro");
             }),
+            BaseUrl = "https://billing.test",
             Cache = new FileStepCache(directory),
             CacheEnabled = true,
             TestTitle = "billing > upgrades",
