@@ -16,6 +16,10 @@ public sealed class ConfigFixtureTests : E2ETest
           "targets": [{ "app": { "url": "https://billing.test" } }],
           "actionTimeout": 2000,
           "cache": { "mode": "off" },
+          "agents": {
+            "default": { "maxSteps": 7, "judgmentTimeout": 9000, "context": "Billing is under Settings." },
+            "careful": { "model": "gpt-4.1", "judge": "o4-mini", "maxModelCalls": 4 }
+          },
           "secrets": { "admin-token": "token-from-config" }
         }
         """,
@@ -36,6 +40,14 @@ public sealed class ConfigFixtureTests : E2ETest
         Assert.That(CacheMode, Is.EqualTo(CacheMode.Off));
         Assert.That(ActionTimeout, Is.EqualTo(TimeSpan.FromSeconds(2)));
         Assert.That(Secrets.Get("admin-token").Name, Is.EqualTo("admin-token"));
+        Assert.That(MaxSteps, Is.EqualTo(7));
+        Assert.That(JudgmentTimeout, Is.EqualTo(TimeSpan.FromSeconds(9)));
+        Assert.That(AgentContext, Is.EqualTo("Billing is under Settings."));
+        var agents = CreateAgents();
+        Assert.That(agents.Keys, Is.EqualTo(new[] { "careful" }));
+        Assert.That(agents["careful"].Model!.Name, Is.EqualTo("gpt-4.1"));
+        Assert.That(agents["careful"].Judge!.Name, Is.EqualTo("o4-mini"));
+        Assert.That(agents["careful"].MaxModelCalls, Is.EqualTo(4));
 
         await App.OpenAsync("/settings/billing");
         await Expect.That(Screen.GetByRole("heading", "Billing")).ToBeVisibleAsync();

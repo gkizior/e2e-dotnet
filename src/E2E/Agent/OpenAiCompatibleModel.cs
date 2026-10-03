@@ -5,6 +5,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace E2E;
 
@@ -148,14 +149,34 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
             },
         }).ToArray();
 
-        var payload = new
+        var payload = new JsonObject
         {
-            model = _options.Model,
-            messages,
-            tools,
-            tool_choice = "auto",
+            ["model"] = _options.Model,
+            ["messages"] = JsonSerializer.SerializeToNode(messages),
+            ["tools"] = JsonSerializer.SerializeToNode(tools),
+            ["tool_choice"] = "auto",
         };
-        return JsonSerializer.Serialize(payload);
+
+        // Provider options ride the request body as given, so a field such as reasoning_effort reaches the server.
+        if (request.ProviderOptions is not null && request.ProviderOptions.TryGetValue(_options.Provider, out var extra))
+        {
+            if (extra.ValueKind != JsonValueKind.Object)
+            {
+                throw new ConfigurationException("INVALID_CONFIG", "providerOptions." + _options.Provider + " must be an object of provider options");
+            }
+
+            foreach (var field in extra.EnumerateObject())
+            {
+                if (field.Name is "model" or "messages" or "tools")
+                {
+                    throw new ConfigurationException("INVALID_CONFIG", "providerOptions." + _options.Provider + "." + field.Name + " cannot replace a field the client sets");
+                }
+
+                payload[field.Name] = JsonNode.Parse(field.Value.GetRawText());
+            }
+        }
+
+        return payload.ToJsonString();
     }
 
     private static ModelResponse Parse(string body)
@@ -211,6 +232,12 @@ public sealed class OpenAiCompatibleModelOptions
     public required string Model { get; init; }
 
     public string BaseUrl { get; init; } = "https://api.openai.com/v1";
+
+    /// <summary>
+    /// The key this client reads in <see cref="ModelRequest.ProviderOptions"/>. Its fields are added
+    /// to the chat-completions body as given. Defaults to <c>openai</c>.
+    /// </summary>
+    public string Provider { get; init; } = "openai";
 
     public string? ApiKey { get; init; }
 

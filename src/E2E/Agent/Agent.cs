@@ -5,6 +5,8 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Schema;
+using System.Text.Json.Serialization.Metadata;
 using E2E.Engine;
 using E2E.Internal;
 
@@ -34,6 +36,17 @@ public sealed class Agent
         "status failed with code ASSERTION_INCONCLUSIVE when the screen does not show enough to decide. " +
         "You do not see earlier steps. Do not call any tool except done.";
 
+    // assert and extract make one model call and one repair round.
+    private const int JudgmentModelCalls = 2;
+
+    // The most bytes an act instruction may hold.
+    private const int MaxInstructionBytes = 8_192;
+
+    // How often waitFor looks for a changed screen once its interval has passed.
+    private static readonly TimeSpan WaitForTick = TimeSpan.FromMilliseconds(250);
+
+    private static readonly JsonSerializerOptions ExtractJson = CreateExtractJson();
+
     private static readonly HashSet<string> ActionTools =
         new(["navigate", "tap", "fill", "fill_secret", "press", "select", "check", "uncheck", "clear", "back", "scroll", "scroll_to"], StringComparer.Ordinal);
 
@@ -47,10 +60,14 @@ public sealed class Agent
     public async Task<ActResult> ActAsync(string instruction, ActOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instruction);
-        var maxCalls = Budget(options?.MaxModelCalls, _scope.MaxModelCalls, "MaxModelCalls");
-        var budget = new ActionBudget(Budget(options?.MaxSteps, _scope.MaxSteps, "MaxSteps"));
+        CheckInstruction(instruction);
+        var agent = _scope.Select(options?.Agent);
+        var maxCalls = Budget(options?.MaxModelCalls, agent.MaxModelCalls, "MaxModelCalls");
+        var budget = new ActionBudget(Budget(options?.MaxSteps, agent.MaxSteps, "MaxSteps"));
+        var timeout = ResolveTimeout(options?.Timeout, _scope.StepTimeout);
+        ActParams.Validate(options?.Params);
         var callsBefore = _scope.ModelCalls;
-        using var linked = Link(cancellationToken, options?.Timeout ?? _scope.StepTimeout);
+        using var linked = Link(cancellationToken, timeout);
         var token = linked.Token;
         _scope.Remember(options?.Params);
         var signature = CacheKeys.Create(_scope.EnginePlatform, _scope.EngineVersion, _scope.TestTitle, instruction, options?.Params);
@@ -117,7 +134,7 @@ public sealed class Agent
                 messages.Add(new ModelMessage { Role = "user", Content = "Stop acting. Call done with a verdict." });
             }
 
-            var response = await CallModelAsync(ActSystem, messages, AgentTools.ActFor(_scope.EngineCapabilities), token).ConfigureAwait(false);
+            var response = await CallModelAsync(agent.Model, ActSystemFor(agent), messages, AgentTools.ActFor(_scope.EngineCapabilities), agent, token).ConfigureAwait(false);
             if (response.ToolCalls.Count == 0)
             {
                 messages.Add(new ModelMessage { Role = "assistant", Content = response.Content });
@@ -202,150 +219,210 @@ public sealed class Agent
             throw budget.Stop(null);
         }
 
-        throw new AgentException("STEP_NO_CONCLUSION", "The step used " + maxCalls.ToString(CultureInfo.InvariantCulture) + " model call(s) without a verdict.");
+        // Asking for one more call than the budget allows is a hard stop, as upstream: blocked, not a verdict.
+        throw new AgentException("STEP_BUDGET_EXHAUSTED", "agent.act exhausted its model-call budget of " + maxCalls.ToString(CultureInfo.InvariantCulture), blocked: true);
     }
 
     public Task AssertAsync(string statement, AssertOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
-        return JudgeAsync(statement, options?.Timeout ?? _scope.StepTimeout, cancellationToken, verify: true);
+        var agent = _scope.Select(options?.Agent);
+        return JudgeAsync(statement, ResolveTimeout(options?.Timeout, agent.JudgmentTimeout), agent, cancellationToken);
     }
 
     public async Task WaitForAsync(string statement, WaitForOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
-        var timeout = options?.Timeout ?? _scope.StepTimeout;
-        var interval = options?.Interval ?? E2EDefaults.WaitForInterval;
-        var maxCalls = Budget(options?.MaxModelCalls, _scope.MaxModelCalls, "MaxModelCalls");
+        var agent = _scope.Select(options?.Agent);
+        var interval = Interval(options?.Interval);
+        var timeout = ResolveTimeout(options?.Timeout, agent.JudgmentTimeout);
+        var maxCalls = Budget(options?.MaxModelCalls, agent.MaxModelCalls, "MaxModelCalls");
         using var linked = Link(cancellationToken, timeout);
         var token = linked.Token;
         var deadline = DateTime.UtcNow + timeout;
-        string? last = null;
-        var calls = 0;
-        while (true)
+        var callsBefore = _scope.ModelCalls;
+        var last = "the statement did not hold";
+        try
         {
-            token.ThrowIfCancellationRequested();
-            var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-            var snapshot = SnapshotText.Render(observation, _scope.Secrets);
-            if (!string.Equals(snapshot, last, StringComparison.Ordinal))
+            var snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Secrets);
+            while (true)
             {
-                last = snapshot;
-                calls++;
-                if (calls > maxCalls)
-                {
-                    throw new AgentException("STEP_BUDGET_EXHAUSTED", "waitFor used its model-call budget of " + maxCalls.ToString(CultureInfo.InvariantCulture) + ".", blocked: true);
-                }
-
-                var verdict = await JudgeOnceAsync(statement, snapshot, token).ConfigureAwait(false);
+                var verdict = await JudgeOnceAsync(statement, snapshot, agent, maxCalls - (_scope.ModelCalls - callsBefore), token).ConfigureAwait(false);
                 if (string.Equals(verdict.Status, "passed", StringComparison.Ordinal))
                 {
                     _scope.MarkVerified();
                     return;
                 }
-            }
 
-            if (DateTime.UtcNow >= deadline)
-            {
-                throw new AgentException("STEP_TIMEOUT", "waitFor timed out before the screen matched.");
-            }
+                last = string.IsNullOrWhiteSpace(verdict.Summary) ? last : verdict.Summary;
 
-            await Task.Delay(interval, token).ConfigureAwait(false);
+                // The next judgment waits for the interval and for a screen that changed since the last one.
+                var judged = snapshot;
+                var judgedAt = DateTime.UtcNow;
+                while (true)
+                {
+                    if (DateTime.UtcNow >= deadline)
+                    {
+                        throw new AgentException("STEP_TIMEOUT", "waitFor timed out; last judgment: " + last);
+                    }
+
+                    if (_scope.ModelCalls - callsBefore >= maxCalls)
+                    {
+                        throw new AgentException("STEP_BUDGET_EXHAUSTED", "waitFor exhausted its model-call budget; last judgment: " + last);
+                    }
+
+                    var untilInterval = interval - (DateTime.UtcNow - judgedAt);
+                    var wait = untilInterval > TimeSpan.Zero ? untilInterval : (interval < WaitForTick ? interval : WaitForTick);
+                    var remaining = deadline - DateTime.UtcNow;
+                    if (remaining > TimeSpan.Zero)
+                    {
+                        await Task.Delay(wait < remaining ? wait : remaining, token).ConfigureAwait(false);
+                    }
+
+                    snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Secrets);
+                    if (DateTime.UtcNow - judgedAt >= interval && !string.Equals(snapshot, judged, StringComparison.Ordinal))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException ex) when (linked.IsCancellationRequested && !cancellationToken.IsCancellationRequested && !_scope.Token().IsCancellationRequested)
+        {
+            throw new AgentException("STEP_TIMEOUT", "waitFor timed out; last judgment: " + last, ex);
         }
     }
 
-    public async Task<T> ExtractAsync<T>(string instruction, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Reads data of type <typeparamref name="T"/> from the current screen. <typeparamref name="T"/> is the
+    /// schema: its JSON schema is sent to the judge, and the answer must deserialize into it with required
+    /// members and nullable annotations respected. An answer that does not gets one repair round, then
+    /// <c>MODEL_OUTPUT_INVALID</c>.
+    /// </summary>
+    public async Task<T> ExtractAsync<T>(string instruction, ExtractOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instruction);
-        using var linked = Link(cancellationToken, _scope.StepTimeout);
+        var agent = _scope.Select(options?.Agent);
+        using var linked = Link(cancellationToken, ResolveTimeout(options?.Timeout, agent.JudgmentTimeout));
         var token = linked.Token;
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
         var snapshot = SnapshotText.Render(observation, _scope.Secrets);
-        var shape = ShapeOf(typeof(T));
+        var schema = JsonSchemaExporter.GetJsonSchemaAsNode(ExtractJson, typeof(T));
+        var tools = AgentTools.ExtractFor(schema);
         var messages = new List<ModelMessage>
         {
             new()
             {
                 Role = "user",
-                Content = SnapshotText.Redact("Instruction: " + instruction + "\n\nReturn JSON with this shape: " + shape + "\n\n", _scope.Secrets) + snapshot,
+                Content = SnapshotText.Redact("Instruction: " + instruction + "\n\nReturn data matching this JSON schema: " + schema.ToJsonString() + "\n\n", _scope.Secrets) + snapshot,
             },
         };
-        var response = await CallModelAsync(JudgeSystem, messages, AgentTools.Extract, token).ConfigureAwait(false);
-        var call = response.ToolCalls.FirstOrDefault(item => string.Equals(item.Name, "extract", StringComparison.Ordinal));
-        if (call is null)
+        for (var call = 1; ; call++)
         {
-            messages.Add(new ModelMessage { Role = "assistant", Content = response.Content, ToolCalls = response.ToolCalls });
-            messages.Add(new ModelMessage { Role = "user", Content = "Call extract with the data. If it is not on screen, call done with status failed and code ASSERTION_INCONCLUSIVE." });
-            response = await CallModelAsync(JudgeSystem, messages, AgentTools.Extract, token).ConfigureAwait(false);
-            call = response.ToolCalls.FirstOrDefault(item => string.Equals(item.Name, "extract", StringComparison.Ordinal));
-        }
-
-        if (call is null)
-        {
-            var done = response.ToolCalls.FirstOrDefault(item => string.Equals(item.Name, "done", StringComparison.Ordinal));
-            if (done is not null)
+            var response = await CallModelAsync(agent.Judge, JudgeSystemFor(agent), messages, tools, agent, token).ConfigureAwait(false);
+            var extract = response.ToolCalls.FirstOrDefault(item => string.Equals(item.Name, "extract", StringComparison.Ordinal));
+            string issue;
+            string? previous = null;
+            IReadOnlyList<string> fields = [];
+            if (extract is null)
             {
-                throw new AgentException("ASSERTION_INCONCLUSIVE", Args.String(done.Arguments, "summary") ?? "The screen did not contain the data.");
+                var done = response.ToolCalls.FirstOrDefault(item => string.Equals(item.Name, "done", StringComparison.Ordinal));
+                if (done is not null)
+                {
+                    throw new AgentException("ASSERTION_INCONCLUSIVE", "nothing to extract: " + (Args.String(done.Arguments, "summary") ?? "the screen does not show the requested data"));
+                }
+
+                issue = "call extract with the data, or done when the screen does not show it";
+                previous = response.Content;
+            }
+            else if (!extract.Arguments.TryGetProperty("data", out var data) && !TryProperty(extract.Arguments, "data", out data))
+            {
+                issue = "extract takes the data in a data field";
+                previous = JsonSerializer.Serialize(extract.Arguments);
+            }
+            else
+            {
+                previous = JsonSerializer.Serialize(data);
+                try
+                {
+                    var value = data.Deserialize<T>(ExtractJson);
+                    if (value is not null)
+                    {
+                        return value;
+                    }
+
+                    issue = "the data is null";
+                }
+                catch (JsonException ex)
+                {
+                    issue = ex.Message;
+                    fields = TopLevelField(ex.Path);
+                }
+
+                if (call >= JudgmentModelCalls)
+                {
+                    throw new AgentException("MODEL_OUTPUT_INVALID", "extracted data failed schema validation: " + issue);
+                }
             }
 
-            throw new AgentException("MODEL_OUTPUT_INVALID", "extract did not return data.");
-        }
-
-        if (!call.Arguments.TryGetProperty("data", out var data) && !TryProperty(call.Arguments, "data", out data))
-        {
-            throw new AgentException("ASSERTION_INCONCLUSIVE", "The model did not return data for this extract.");
-        }
-
-        try
-        {
-            var value = data.Deserialize<T>(JsonDefaults.Options);
-            if (value is null)
+            if (call >= JudgmentModelCalls)
             {
-                throw new AgentException("ASSERTION_INCONCLUSIVE", "The model returned empty data.");
+                throw new AgentException("MODEL_OUTPUT_INVALID", "extract did not return data: " + issue);
             }
 
-            return value;
-        }
-        catch (JsonException ex)
-        {
-            throw new AgentException("MODEL_OUTPUT_INVALID", "extract data did not match the requested shape.", ex);
+            AddRejected(messages, response);
+            messages.Add(new ModelMessage
+            {
+                Role = "user",
+                Content = SnapshotText.Redact(
+                    Repair(
+                        issue,
+                        previous,
+                        fields,
+                        "Correct a misread or a wrong shape. When the screen cannot satisfy the errors, call done with status failed and code ASSERTION_INCONCLUSIVE and say in summary what is missing, rather than change values."),
+                    _scope.Secrets),
+            });
         }
     }
 
-    private async Task JudgeAsync(string statement, TimeSpan timeout, CancellationToken cancellationToken, bool verify)
+    private async Task JudgeAsync(string statement, TimeSpan timeout, ResolvedAgent agent, CancellationToken cancellationToken)
     {
         using var linked = Link(cancellationToken, timeout);
         var token = linked.Token;
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-        var verdict = await JudgeOnceAsync(statement, SnapshotText.Render(observation, _scope.Secrets), token).ConfigureAwait(false);
+        var verdict = await JudgeOnceAsync(statement, SnapshotText.Render(observation, _scope.Secrets), agent, JudgmentModelCalls, token).ConfigureAwait(false);
         if (string.Equals(verdict.Status, "passed", StringComparison.Ordinal))
         {
-            if (verify)
-            {
-                _scope.MarkVerified();
-            }
-
+            _scope.MarkVerified();
             return;
         }
 
         throw new AgentException(verdict.Code!, verdict.Summary ?? "The statement did not hold.");
     }
 
-    private async Task<Verdict> JudgeOnceAsync(string statement, string snapshot, CancellationToken token)
+    // One judgment, with a repair round when the judge did not call done and the budget has a call left.
+    private async Task<Verdict> JudgeOnceAsync(string statement, string snapshot, ResolvedAgent agent, int callsLeft, CancellationToken token)
     {
         var messages = new List<ModelMessage>
         {
             new() { Role = "user", Content = SnapshotText.Redact("Statement: " + statement + "\n\n", _scope.Secrets) + snapshot },
         };
-        var response = await CallModelAsync(JudgeSystem, messages, AgentTools.Judge, token).ConfigureAwait(false);
+        var system = JudgeSystemFor(agent);
+        var response = await CallModelAsync(agent.Judge, system, messages, AgentTools.Judge, agent, token).ConfigureAwait(false);
         var verdict = ReadVerdict(response);
         if (verdict is not null)
         {
             return verdict.Value;
         }
 
-        messages.Add(new ModelMessage { Role = "assistant", Content = response.Content, ToolCalls = response.ToolCalls });
+        if (callsLeft < 2)
+        {
+            throw new AgentException("MODEL_OUTPUT_INVALID", "The judge did not call done.");
+        }
+
+        AddRejected(messages, response);
         messages.Add(new ModelMessage { Role = "user", Content = "Call done with status passed or failed." });
-        response = await CallModelAsync(JudgeSystem, messages, AgentTools.Judge, token).ConfigureAwait(false);
+        response = await CallModelAsync(agent.Judge, system, messages, AgentTools.Judge, agent, token).ConfigureAwait(false);
         verdict = ReadVerdict(response);
         if (verdict is null)
         {
@@ -353,6 +430,61 @@ public sealed class Agent
         }
 
         return verdict.Value;
+    }
+
+    // A rejected answer stays in the transcript, with a reply to each of its tool calls.
+    private static void AddRejected(List<ModelMessage> messages, ModelResponse response)
+    {
+        messages.Add(new ModelMessage { Role = "assistant", Content = response.Content, ToolCalls = response.ToolCalls });
+        foreach (var call in response.ToolCalls)
+        {
+            messages.Add(new ModelMessage { Role = "tool", ToolCallId = call.Id, Name = call.Name, Content = "rejected" });
+        }
+    }
+
+    private static string Repair(string issue, string? previous, IReadOnlyList<string> fields, string outlet)
+    {
+        var builder = new StringBuilder();
+        builder.Append("<previous-attempt-rejected>\n");
+        builder.Append("Your previous response was rejected. Do not repeat it.\n");
+        if (previous is not null)
+        {
+            builder.Append("previous response: ").Append(previous.Length > 2000 ? previous[..2000] : previous).Append('\n');
+        }
+
+        builder.Append("validation errors: ").Append(issue).Append('\n');
+        builder.Append(fields.Count == 0
+            ? "Field paths in the errors describe the exact output shape required."
+            : "The value must be a JSON object whose top-level fields include: " + string.Join(", ", fields) + ".");
+        builder.Append('\n');
+        builder.Append("Return a corrected response that satisfies every error above.\n");
+        builder.Append(outlet).Append('\n');
+        builder.Append("</previous-attempt-rejected>");
+        return builder.ToString();
+    }
+
+    // The first member of a JSON path such as $.price or $['unit price'][0].
+    private static IReadOnlyList<string> TopLevelField(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || !path.StartsWith('$') || path.Length < 2)
+        {
+            return [];
+        }
+
+        if (path[1] == '.')
+        {
+            var end = path.IndexOfAny(['.', '['], 2);
+            var name = end < 0 ? path[2..] : path[2..end];
+            return name.Length == 0 ? [] : [name];
+        }
+
+        if (path.Length > 3 && path[1] == '[' && path[2] == '\'')
+        {
+            var end = path.IndexOf("']", 3, StringComparison.Ordinal);
+            return end < 0 ? [] : [path[3..end]];
+        }
+
+        return [];
     }
 
     private static Verdict? ReadVerdict(ModelResponse response)
@@ -1152,9 +1284,15 @@ public sealed class Agent
         return SnapshotText.Redact(builder.ToString(), _scope.Secrets);
     }
 
-    private async Task<ModelResponse> CallModelAsync(string system, List<ModelMessage> messages, IReadOnlyList<ModelTool> tools, CancellationToken token)
+    private async Task<ModelResponse> CallModelAsync(
+        IAgentModel? model,
+        string system,
+        List<ModelMessage> messages,
+        IReadOnlyList<ModelTool> tools,
+        ResolvedAgent agent,
+        CancellationToken token)
     {
-        if (_scope.Model is null)
+        if (model is null)
         {
             throw new AgentException("MODEL_UNAVAILABLE", "No model is configured. Agent steps need an IAgentModel, or a replay that finishes on its own.");
         }
@@ -1162,7 +1300,14 @@ public sealed class Agent
         ModelResponse response;
         try
         {
-            response = await _scope.Model.CompleteAsync(new ModelRequest { System = system, Messages = messages, Tools = tools }, token).ConfigureAwait(false);
+            var request = new ModelRequest
+            {
+                System = SnapshotText.Redact(system, _scope.Secrets),
+                Messages = messages,
+                Tools = tools,
+                ProviderOptions = agent.ProviderOptions,
+            };
+            response = await model.CompleteAsync(request, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!_scope.Token().IsCancellationRequested)
         {
@@ -1339,22 +1484,6 @@ public sealed class Agent
         return node.Name is null ? role : role + " \"" + node.Name + "\"";
     }
 
-    private static string ShapeOf(Type type)
-    {
-        if (type == typeof(string) || type.IsPrimitive)
-        {
-            return "{ \"value\": " + type.Name + " }";
-        }
-
-        var properties = type.GetProperties();
-        if (properties.Length == 0)
-        {
-            return type.Name;
-        }
-
-        return "{ " + string.Join(", ", properties.Select(property => "\"" + property.Name + "\": " + property.PropertyType.Name)) + " }";
-    }
-
     private static bool TryProperty(JsonElement element, string name, out JsonElement value)
     {
         if (element.ValueKind == JsonValueKind.Object)
@@ -1371,6 +1500,83 @@ public sealed class Agent
 
         value = default;
         return false;
+    }
+
+    // The configured system text follows the built-in rules, and the project context follows both.
+    private static string ActSystemFor(ResolvedAgent agent)
+    {
+        var system = ActSystem;
+        if (!string.IsNullOrWhiteSpace(agent.System))
+        {
+            system += "\n\n" + agent.System;
+        }
+
+        if (!string.IsNullOrWhiteSpace(agent.Context))
+        {
+            system += "\n\nProject context:\n" + agent.Context;
+        }
+
+        return system;
+    }
+
+    // A judge never sees the act system text, so nothing in it can talk a judge into a verdict.
+    private static string JudgeSystemFor(ResolvedAgent agent)
+    {
+        return string.IsNullOrWhiteSpace(agent.Context)
+            ? JudgeSystem
+            : JudgeSystem + "\n\n<project-context>\n" + agent.Context + "\n</project-context>";
+    }
+
+    private static void CheckInstruction(string instruction)
+    {
+        var bytes = Encoding.UTF8.GetByteCount(instruction.Normalize(NormalizationForm.FormC));
+        if (bytes > MaxInstructionBytes)
+        {
+            throw new TestException(
+                "INVALID_ARGUMENT",
+                "agent.act instruction is " + bytes.ToString(CultureInfo.InvariantCulture) + " bytes; the maximum is " + MaxInstructionBytes.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    private static TimeSpan ResolveTimeout(TimeSpan? requested, TimeSpan fallback)
+    {
+        if (requested is null)
+        {
+            return fallback;
+        }
+
+        if (requested <= TimeSpan.Zero)
+        {
+            throw new TestException("INVALID_ARGUMENT", "timeout must be a positive duration");
+        }
+
+        return requested.Value;
+    }
+
+    private static TimeSpan Interval(TimeSpan? requested)
+    {
+        var value = requested ?? E2EDefaults.WaitForInterval;
+        if (value < TimeSpan.FromMilliseconds(100) || value > TimeSpan.FromMilliseconds(60_000))
+        {
+            throw new TestException(
+                "INVALID_ARGUMENT",
+                "interval must be from 100 through 60000 milliseconds, got " + value.TotalMilliseconds.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return value;
+    }
+
+    private static JsonSerializerOptions CreateExtractJson()
+    {
+        var options = new JsonSerializerOptions(JsonDefaults.Options)
+        {
+            RespectNullableAnnotations = true,
+            RespectRequiredConstructorParameters = true,
+            WriteIndented = false,
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        };
+        options.MakeReadOnly();
+        return options;
     }
 
     /// <summary>A per-call budget can only lower the configured limit, never raise it.</summary>
@@ -1446,21 +1652,48 @@ public sealed class ActOptions
 
     /// <summary>Model-call budget. Defaults to the configured <c>MaxModelCalls</c> and can only lower it.</summary>
     public int? MaxModelCalls { get; init; }
+
+    /// <summary>The named agent that runs the step. Defaults to <c>default</c>.</summary>
+    public string? Agent { get; init; }
 }
 
+/// <summary><c>agent.assert</c>: one judgment and one repair round, within <see cref="Timeout"/>.</summary>
 public sealed class AssertOptions
 {
+    /// <summary>Defaults to the agent's <c>JudgmentTimeout</c> (30 s).</summary>
     public TimeSpan? Timeout { get; init; }
+
+    /// <summary>The named agent whose judge decides. Defaults to <c>default</c>.</summary>
+    public string? Agent { get; init; }
 }
 
+/// <summary><c>agent.waitFor</c>: a judgment at most once per <see cref="Interval"/>, and only on a changed screen, until <see cref="Timeout"/>.</summary>
 public sealed class WaitForOptions
 {
+    /// <summary>Defaults to the agent's <c>JudgmentTimeout</c> (30 s).</summary>
     public TimeSpan? Timeout { get; init; }
 
+    /// <summary>Least time between two judgments, 100 ms through 60 s. Defaults to 3 s.</summary>
     public TimeSpan? Interval { get; init; }
 
-    /// <summary>Judgment budget. Defaults to the configured <c>MaxModelCalls</c> and can only lower it.</summary>
+    /// <summary>Model-call budget. Defaults to the configured <c>MaxModelCalls</c> and can only lower it.</summary>
     public int? MaxModelCalls { get; init; }
+
+    /// <summary>The named agent whose judge decides. Defaults to <c>default</c>.</summary>
+    public string? Agent { get; init; }
+}
+
+/// <summary>
+/// <c>agent.extract</c>: one extraction and one repair round. The type argument of
+/// <see cref="Agent.ExtractAsync{T}"/> is the schema.
+/// </summary>
+public sealed class ExtractOptions
+{
+    /// <summary>Defaults to the agent's <c>JudgmentTimeout</c> (30 s).</summary>
+    public TimeSpan? Timeout { get; init; }
+
+    /// <summary>The named agent whose judge reads the screen. Defaults to <c>default</c>.</summary>
+    public string? Agent { get; init; }
 }
 
 public sealed class ActResult
@@ -1493,7 +1726,8 @@ internal sealed class AttemptScope
 
     public required IEngineSession Session { get; init; }
 
-    public required IAgentModel? Model { get; init; }
+    /// <summary>The agents by name. <c>default</c> is always present.</summary>
+    public required IReadOnlyDictionary<string, ResolvedAgent> Agents { get; init; }
 
     public required IStepCache? Cache { get; init; }
 
@@ -1522,10 +1756,6 @@ internal sealed class AttemptScope
     public TimeSpan ReplayTimeout { get; init; } = E2EDefaults.ReplayTimeout;
 
     public TimeSpan StepTimeout { get; init; } = E2EDefaults.StepTimeout;
-
-    public int MaxModelCalls { get; init; } = E2EDefaults.MaxModelCalls;
-
-    public int MaxSteps { get; init; } = E2EDefaults.MaxSteps;
 
     public Func<CancellationToken> Token { get; init; } = static () => CancellationToken.None;
 
@@ -1559,6 +1789,23 @@ internal sealed class AttemptScope
         var index = _callIndexes.GetValueOrDefault(signature);
         _callIndexes[signature] = index + 1;
         return index;
+    }
+
+    /// <summary>The agent a call names, or <c>default</c>. An unknown name is <c>INVALID_ARGUMENT</c>.</summary>
+    public ResolvedAgent Select(string? name)
+    {
+        if (name is not null && name.Trim().Length == 0)
+        {
+            throw new TestException("INVALID_ARGUMENT", "agent must be the name of a configured agent");
+        }
+
+        name ??= "default";
+        if (Agents.TryGetValue(name, out var agent))
+        {
+            return agent;
+        }
+
+        throw new TestException("INVALID_ARGUMENT", "unknown agent \"" + name + "\"; configured: " + string.Join(", ", Agents.Keys));
     }
 
     public void Remember(IReadOnlyDictionary<string, object?>? parameters)

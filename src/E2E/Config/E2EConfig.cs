@@ -10,7 +10,7 @@ namespace E2E;
 
 /// <summary>
 /// The resolved <c>e2e.config.json</c>. The JSON shape follows upstream <c>e2e.config.ts</c>:
-/// <c>targets[].app.url</c>, <c>agents.default</c>, top-level timeouts in milliseconds,
+/// <c>targets[].app.url</c>, named <c>agents</c>, top-level timeouts in milliseconds,
 /// <c>retries</c>, <c>cache</c>, and <c>secrets</c>. Unknown keys fail with
 /// <c>INVALID_CONFIG</c>. <c>E2ETest</c> finds and applies this file; a fixture can
 /// still override each value. There is no default model.
@@ -49,10 +49,10 @@ public sealed class E2EConfig
     private static readonly string[] UnsupportedAppKeys =
         ["bundleId", "appPath", "identity", "environment", "launchArguments", "permissions", "command", "readyUrl"];
 
-    private static readonly string[] AgentKeys = ["model", "baseUrl", "apiKeyEnv", "maxModelCalls"];
+    private static readonly string[] AgentKeys =
+        ["model", "judge", "system", "context", "baseUrl", "apiKeyEnv", "maxSteps", "maxModelCalls", "judgmentTimeout", "providerOptions"];
 
-    private static readonly string[] UnsupportedAgentKeys =
-        ["judge", "system", "context", "tools", "executor", "maxSteps", "judgmentTimeout", "maxObservationBytes", "maxInputTokens", "providerOptions"];
+    private static readonly string[] UnsupportedAgentKeys = ["tools", "executor", "maxObservationBytes", "maxInputTokens"];
 
     private static readonly string[] CacheKeys = ["mode", "dir", "strict"];
 
@@ -298,18 +298,54 @@ public sealed class E2EConfig
                 }
 
                 CheckKeys(value, label, AgentKeys, UnsupportedAgentKeys, null);
+                var context = AnyString(value, "context", label + ".context");
+                ResolvedAgent.CheckContext(context, label + ".context");
                 agents[property.Name] = new AgentConfig
                 {
                     Model = OptionalString(value, "model", label + ".model"),
+                    Judge = OptionalString(value, "judge", label + ".judge"),
+                    System = AnyString(value, "system", label + ".system"),
+                    Context = context,
                     BaseUrl = OptionalString(value, "baseUrl", label + ".baseUrl"),
                     ApiKeyEnv = OptionalString(value, "apiKeyEnv", label + ".apiKeyEnv") ?? "OPENAI_API_KEY",
-                    MaxModelCalls = Property(value, "maxModelCalls") is { } calls ? Integer(calls, label + ".maxModelCalls", 1, int.MaxValue) : E2EDefaults.MaxModelCalls,
+                    MaxSteps = Property(value, "maxSteps") is { } steps ? Integer(steps, label + ".maxSteps", 1, ResolvedAgent.MaxBudget) : E2EDefaults.MaxSteps,
+                    MaxModelCalls = Property(value, "maxModelCalls") is { } calls ? Integer(calls, label + ".maxModelCalls", 1, ResolvedAgent.MaxBudget) : E2EDefaults.MaxModelCalls,
+                    JudgmentTimeout = Property(value, "judgmentTimeout") is { } judgment
+                        ? TimeSpan.FromMilliseconds(Integer(judgment, label + ".judgmentTimeout", 1, int.MaxValue))
+                        : E2EDefaults.JudgmentTimeout,
+                    ProviderOptions = ReadProviderOptions(Property(value, "providerOptions"), label),
                 };
             }
         }
 
         agents.TryAdd("default", new AgentConfig());
         return new ReadOnlyDictionary<string, AgentConfig>(agents);
+    }
+
+    private static ReadOnlyDictionary<string, JsonElement>? ReadProviderOptions(JsonElement? raw, string label)
+    {
+        if (raw is null)
+        {
+            return null;
+        }
+
+        if (raw.Value.ValueKind != JsonValueKind.Object)
+        {
+            throw Invalid(label + ".providerOptions must be an object of provider options by provider");
+        }
+
+        var options = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var provider in raw.Value.EnumerateObject())
+        {
+            if (provider.Value.ValueKind != JsonValueKind.Object)
+            {
+                throw Invalid(label + ".providerOptions." + provider.Name + " must be an object of provider options");
+            }
+
+            options[provider.Name] = provider.Value.Clone();
+        }
+
+        return new ReadOnlyDictionary<string, JsonElement>(options);
     }
 
     private static CacheConfig ReadCache(JsonElement? raw, string projectRoot, bool ci)
@@ -516,6 +552,22 @@ public sealed class E2EConfig
         return text;
     }
 
+    // A string that may be empty, as upstream system and context.
+    private static string? AnyString(JsonElement value, string name, string label)
+    {
+        if (Property(value, name) is not { } property)
+        {
+            return null;
+        }
+
+        if (property.ValueKind != JsonValueKind.String)
+        {
+            throw Invalid(label + " must be a string");
+        }
+
+        return property.GetString();
+    }
+
     private static TimeSpan Milliseconds(JsonElement root, string name, TimeSpan fallback)
     {
         return Property(root, name) is { } raw ? TimeSpan.FromMilliseconds(Integer(raw, name, 1, int.MaxValue)) : fallback;
@@ -560,30 +612,70 @@ public sealed class AppConfig
 }
 
 /// <summary>
-/// One entry of <c>agents</c>. Upstream <c>model</c> is an AI SDK instance; here it is an
-/// OpenAI-compatible model id, with <see cref="BaseUrl"/> and <see cref="ApiKeyEnv"/> beside it.
+/// One entry of <c>agents</c>. Upstream <c>model</c> and <c>judge</c> are AI SDK instances; here they
+/// are OpenAI-compatible model ids that share <see cref="BaseUrl"/> and <see cref="ApiKeyEnv"/>.
+/// Each entry starts from the defaults; none inherits another's values.
 /// </summary>
 public sealed class AgentConfig
 {
     public string? Model { get; init; }
 
+    /// <summary>The model id that judges <c>assert</c>, <c>waitFor</c>, and <c>extract</c>. Unset, the judge is <see cref="Model"/>.</summary>
+    public string? Judge { get; init; }
+
+    /// <summary>Text appended to the act rules. Judges never see it.</summary>
+    public string? System { get; init; }
+
+    /// <summary>Project context told to every model call, at most 16384 UTF-8 bytes.</summary>
+    public string? Context { get; init; }
+
     public string? BaseUrl { get; init; }
 
     public string ApiKeyEnv { get; init; } = "OPENAI_API_KEY";
 
+    /// <summary>1 through 100.</summary>
+    public int MaxSteps { get; init; } = E2EDefaults.MaxSteps;
+
+    /// <summary>1 through 100.</summary>
     public int MaxModelCalls { get; init; } = E2EDefaults.MaxModelCalls;
 
+    public TimeSpan JudgmentTimeout { get; init; } = E2EDefaults.JudgmentTimeout;
+
+    /// <summary>Provider options by provider. <see cref="OpenAiCompatibleModel"/> adds the <c>openai</c> entry to its request body.</summary>
+    public IReadOnlyDictionary<string, JsonElement>? ProviderOptions { get; init; }
+
     /// <summary>An <see cref="OpenAiCompatibleModel"/> for <see cref="Model"/>, or null when no model is set.</summary>
-    public IAgentModel? CreateModel()
+    public IAgentModel? CreateModel() => Create(Model);
+
+    /// <summary>An <see cref="OpenAiCompatibleModel"/> for <see cref="Judge"/>, or null when no judge is set.</summary>
+    public IAgentModel? CreateJudge() => Create(Judge);
+
+    /// <summary>The <see cref="AgentOptions"/> this entry describes, with its models created.</summary>
+    public AgentOptions CreateOptions()
     {
-        if (Model is null)
+        return new AgentOptions
+        {
+            Model = CreateModel(),
+            Judge = CreateJudge(),
+            System = System,
+            Context = Context,
+            MaxSteps = MaxSteps,
+            MaxModelCalls = MaxModelCalls,
+            JudgmentTimeout = JudgmentTimeout,
+            ProviderOptions = ProviderOptions,
+        };
+    }
+
+    private IAgentModel? Create(string? model)
+    {
+        if (model is null)
         {
             return null;
         }
 
         return BaseUrl is null
-            ? new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = Model, ApiKeyEnv = ApiKeyEnv })
-            : new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = Model, BaseUrl = BaseUrl, ApiKeyEnv = ApiKeyEnv });
+            ? new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = model, ApiKeyEnv = ApiKeyEnv })
+            : new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = model, BaseUrl = BaseUrl, ApiKeyEnv = ApiKeyEnv });
     }
 }
 

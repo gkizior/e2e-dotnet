@@ -48,6 +48,58 @@ public sealed class ConfigTests
     }
 
     [Fact]
+    public void Reads_named_agents_with_every_ported_key()
+    {
+        var config = Parse("""
+            {
+              "agents": {
+                "default": { "model": "gpt-4.1-mini" },
+                "careful": {
+                  "model": "gpt-4.1",
+                  "judge": "o4-mini",
+                  "system": "Check each field before you submit.",
+                  "context": "The billing page is under Settings.",
+                  "maxSteps": 10,
+                  "maxModelCalls": 12,
+                  "judgmentTimeout": 45000,
+                  "providerOptions": { "openai": { "reasoning_effort": "low" } }
+                }
+              }
+            }
+            """);
+
+        var careful = config.Agents["careful"];
+        Assert.Equal("gpt-4.1", careful.Model);
+        Assert.Equal("o4-mini", careful.Judge);
+        Assert.Equal("Check each field before you submit.", careful.System);
+        Assert.Equal("The billing page is under Settings.", careful.Context);
+        Assert.Equal(10, careful.MaxSteps);
+        Assert.Equal(12, careful.MaxModelCalls);
+        Assert.Equal(TimeSpan.FromSeconds(45), careful.JudgmentTimeout);
+        Assert.Equal("low", careful.ProviderOptions!["openai"].GetProperty("reasoning_effort").GetString());
+        Assert.Equal("o4-mini", careful.CreateJudge()!.Name);
+        var options = careful.CreateOptions();
+        Assert.Equal("gpt-4.1", options.Model!.Name);
+        Assert.Equal("o4-mini", options.Judge!.Name);
+
+        // No agent inherits another's values.
+        Assert.Null(config.Agent.Judge);
+        Assert.Null(config.Agent.CreateJudge());
+        Assert.Equal(E2EDefaults.MaxSteps, config.Agent.MaxSteps);
+        Assert.Equal(E2EDefaults.JudgmentTimeout, config.Agent.JudgmentTimeout);
+    }
+
+    [Fact]
+    public void Rejects_an_agent_context_over_16_KiB()
+    {
+        var json = "{ \"agents\": { \"default\": { \"context\": \"" + new string('a', 16_385) + "\" } } }";
+        var error = Assert.Throws<ConfigurationException>(() => Parse(json));
+        Assert.Equal("INVALID_CONFIG", error.Code);
+        Assert.Equal("agents.default.context is 16385 bytes; the maximum is 16384", error.Message);
+        Assert.Equal(new string('a', 16_384), Parse(json.Replace(new string('a', 16_385), new string('a', 16_384), StringComparison.Ordinal)).Agent.Context);
+    }
+
+    [Fact]
     public void Defaults_match_upstream()
     {
         var config = Parse("{}");
@@ -61,6 +113,9 @@ public sealed class ConfigTests
         Assert.Equal(TimeSpan.FromSeconds(30), config.CleanupTimeout);
         Assert.Equal(0, config.Retries);
         Assert.Null(config.Agent.CreateModel());
+        Assert.Equal(25, config.Agent.MaxSteps);
+        Assert.Equal(25, config.Agent.MaxModelCalls);
+        Assert.Equal(TimeSpan.FromSeconds(30), config.Agent.JudgmentTimeout);
         Assert.Equal(CacheMode.ReadWrite, config.Cache.Mode);
         Assert.Equal(Path.Combine(Root, ".e2e", "cache"), config.Cache.Directory);
         Assert.False(config.Cache.Strict);
@@ -100,7 +155,13 @@ public sealed class ConfigTests
     [InlineData("""{ "targets": [{ "app": { "url": "http://x", "port": 1 } }] }""", "unknown targets[0].app key \"port\"")]
     [InlineData("""{ "targets": [{ "platform": "ios" }] }""", "targets[0].platform \"ios\" is not supported")]
     [InlineData("""{ "agents": { "default": { "modle": "m" } } }""", "unknown agents.default key \"modle\"; did you mean \"model\"?")]
-    [InlineData("""{ "agents": { "default": { "maxSteps": 3 } } }""", "agents.default key \"maxSteps\" is not supported by the .NET port")]
+    [InlineData("""{ "agents": { "default": { "maxInputTokens": 3 } } }""", "agents.default key \"maxInputTokens\" is not supported by the .NET port")]
+    [InlineData("""{ "agents": { "default": { "tools": {} } } }""", "agents.default key \"tools\" is not supported by the .NET port")]
+    [InlineData("""{ "agents": { "default": { "maxSteps": 101 } } }""", "agents.default.maxSteps must be an integer from 1 to 100")]
+    [InlineData("""{ "agents": { "fast": { "maxModelCalls": 0 } } }""", "agents.fast.maxModelCalls must be an integer from 1 to 100")]
+    [InlineData("""{ "agents": { "default": { "judgmentTimeout": 0 } } }""", "agents.default.judgmentTimeout must be a positive integer")]
+    [InlineData("""{ "agents": { "default": { "system": 3 } } }""", "agents.default.system must be a string")]
+    [InlineData("""{ "agents": { "default": { "providerOptions": { "openai": 1 } } } }""", "agents.default.providerOptions.openai must be an object of provider options")]
     [InlineData("""{ "timeout": 0 }""", "timeout must be a positive integer")]
     [InlineData("""{ "retries": 11 }""", "retries must be an integer from 0 to 10")]
     [InlineData("""{ "secrets": { "pin": "12345" } }""", "secret \"pin\" must be at least 6 characters")]

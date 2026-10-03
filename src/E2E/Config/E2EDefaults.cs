@@ -25,8 +25,11 @@ public static class E2EDefaults
     /// <summary>Upstream <c>cleanupTimeout</c>.</summary>
     public static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>How long one agent step (<c>act</c>, <c>assert</c>, <c>waitFor</c>, <c>extract</c>) may run.</summary>
+    /// <summary>How long one <c>act</c> may run. A .NET-only setting; upstream bounds <c>act</c> by the test timeout.</summary>
     public static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Upstream <c>judgmentTimeout</c>: the deadline of one <c>assert</c>, <c>waitFor</c>, or <c>extract</c>.</summary>
+    public static readonly TimeSpan JudgmentTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>How long a replay waits for each recorded target and for the recorded end state.</summary>
     public static readonly TimeSpan ReplayTimeout = TimeSpan.FromSeconds(15);

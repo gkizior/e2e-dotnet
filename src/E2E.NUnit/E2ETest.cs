@@ -54,6 +54,32 @@ public abstract class E2ETest
     /// <summary>The model for <c>agents.default</c>, or null when the config sets no model.</summary>
     protected virtual IAgentModel? CreateModel() => Config.Agent.CreateModel();
 
+    /// <summary>The judge for <c>agents.default</c>: <c>agents.default.judge</c>, or null to judge with <see cref="CreateModel"/>.</summary>
+    protected virtual IAgentModel? CreateJudge() => Config.Agent.CreateJudge();
+
+    /// <summary>
+    /// The named agents besides <c>default</c>, picked per call with the <c>Agent</c> option.
+    /// Defaults to every other <c>agents.&lt;name&gt;</c> entry in the config.
+    /// </summary>
+    protected virtual IReadOnlyDictionary<string, AgentOptions> CreateAgents()
+    {
+        return Config.Agents
+            .Where(pair => !string.Equals(pair.Key, "default", StringComparison.Ordinal))
+            .ToDictionary(pair => pair.Key, pair => pair.Value.CreateOptions(), StringComparer.Ordinal);
+    }
+
+    /// <summary><c>agents.default.system</c>: text appended to the act rules.</summary>
+    protected virtual string? AgentSystem => Config.Agent.System;
+
+    /// <summary><c>agents.default.context</c>: project context told to every model call.</summary>
+    protected virtual string? AgentContext => Config.Agent.Context;
+
+    /// <summary><c>agents.default.judgmentTimeout</c>.</summary>
+    protected virtual TimeSpan JudgmentTimeout => Config.Agent.JudgmentTimeout;
+
+    /// <summary><c>agents.default.providerOptions</c>.</summary>
+    protected virtual IReadOnlyDictionary<string, System.Text.Json.JsonElement>? ProviderOptions => Config.Agent.ProviderOptions;
+
     /// <summary><c>targets[0].app.url</c>.</summary>
     protected virtual string? BaseUrl => Config.Target.App.Url;
 
@@ -76,6 +102,7 @@ public abstract class E2ETest
 
     protected virtual TimeSpan CleanupTimeout => Config.CleanupTimeout;
 
+    /// <summary>How long one <c>ActAsync</c> may run unless its options say otherwise. A .NET-only setting.</summary>
     protected virtual TimeSpan StepTimeout => E2EDefaults.StepTimeout;
 
     /// <summary>How long a replay waits for each recorded target and for the recorded end state.</summary>
@@ -84,8 +111,8 @@ public abstract class E2ETest
     /// <summary><c>agents.default.maxModelCalls</c>.</summary>
     protected virtual int MaxModelCalls => Config.Agent.MaxModelCalls;
 
-    /// <summary>Actions one <c>ActAsync</c> may take. <c>ActOptions.MaxSteps</c> can only lower it.</summary>
-    protected virtual int MaxSteps => E2EDefaults.MaxSteps;
+    /// <summary><c>agents.default.maxSteps</c>: actions one <c>ActAsync</c> may take. <c>ActOptions.MaxSteps</c> can only lower it.</summary>
+    protected virtual int MaxSteps => Config.Agent.MaxSteps;
 
     /// <summary>Cache identity for this test. The default is the NUnit full name, so each test keeps its own replay.</summary>
     protected virtual string CacheTitle(global::NUnit.Framework.TestContext.TestAdapter test)
@@ -121,6 +148,12 @@ public abstract class E2ETest
             {
                 Engine = engine,
                 Model = CreateModel(),
+                Judge = CreateJudge(),
+                AgentSystem = AgentSystem,
+                AgentContext = AgentContext,
+                JudgmentTimeout = JudgmentTimeout,
+                ProviderOptions = ProviderOptions,
+                Agents = CreateAgents(),
                 BaseUrl = BaseUrl,
                 Cache = cacheMode == CacheMode.Off ? null : new FileStepCache(CacheDirectory),
                 CacheEnabled = cacheMode != CacheMode.Off,

@@ -23,6 +23,12 @@ public sealed class ModelRequest
     public required IReadOnlyList<ModelMessage> Messages { get; init; }
 
     public required IReadOnlyList<ModelTool> Tools { get; init; }
+
+    /// <summary>
+    /// The agent's provider options, keyed by provider, for the model to pass on. Null when none are set.
+    /// <see cref="OpenAiCompatibleModel"/> adds the entry under its provider name to the request body.
+    /// </summary>
+    public IReadOnlyDictionary<string, JsonElement>? ProviderOptions { get; init; }
 }
 
 public sealed class ModelMessage

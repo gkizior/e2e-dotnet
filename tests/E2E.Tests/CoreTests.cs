@@ -542,7 +542,7 @@ public sealed class CoreTests
     }
 
     [Fact]
-    public async Task Act_without_a_verdict_has_no_conclusion()
+    public async Task Act_out_of_model_calls_is_blocked_on_its_budget()
     {
         var result = await RunAsync(
             async ctx =>
@@ -553,7 +553,10 @@ public sealed class CoreTests
             model: new ScriptedModel(_ => new ModelResponse { Content = "thinking" }));
 
         var error = Assert.IsType<AgentException>(result.Error);
-        Assert.Equal("STEP_NO_CONCLUSION", error.Code);
+        Assert.Equal("STEP_BUDGET_EXHAUSTED", error.Code);
+        Assert.True(error.Blocked);
+        Assert.Equal("agent.act exhausted its model-call budget of 2", error.Message);
+        Assert.Equal(2, result.ModelCalls);
     }
 
     [Theory]

@@ -60,6 +60,7 @@ public sealed class E2ESession : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(options.Engine);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.TestTitle);
+        var agents = ResolveAgents(options);
 
         var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (options.TestTimeout > TimeSpan.Zero && options.TestTimeout != Timeout.InfiniteTimeSpan)
@@ -103,7 +104,7 @@ public sealed class E2ESession : IAsyncDisposable
         var scope = new AttemptScope
         {
             Session = engine,
-            Model = options.Model,
+            Agents = agents,
             Cache = options.Cache,
             CacheEnabled = cacheOn,
             CacheWrite = cacheOn && options.CacheMode == CacheMode.ReadWrite,
@@ -117,8 +118,6 @@ public sealed class E2ESession : IAsyncDisposable
             ActionTimeout = options.ActionTimeout,
             ReplayTimeout = options.ReplayTimeout,
             StepTimeout = options.StepTimeout,
-            MaxModelCalls = options.MaxModelCalls,
-            MaxSteps = options.MaxSteps,
             Token = () => timeout.Token,
             TestFailed = options.TestFailed ?? (static () => false),
         };
@@ -222,6 +221,48 @@ public sealed class E2ESession : IAsyncDisposable
         }
     }
 
+    // The session's own agent settings are the default agent. Agents names the others.
+    private static Dictionary<string, ResolvedAgent> ResolveAgents(E2ESessionOptions options)
+    {
+        var agents = new Dictionary<string, ResolvedAgent>(StringComparer.Ordinal)
+        {
+            ["default"] = ResolvedAgent.From("default", new AgentOptions
+            {
+                Model = options.Model,
+                Judge = options.Judge,
+                System = options.AgentSystem,
+                Context = options.AgentContext,
+                MaxSteps = options.MaxSteps,
+                MaxModelCalls = options.MaxModelCalls,
+                JudgmentTimeout = options.JudgmentTimeout,
+                ProviderOptions = options.ProviderOptions,
+            }),
+        };
+        if (options.Agents is null)
+        {
+            return agents;
+        }
+
+        foreach (var pair in options.Agents)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key))
+            {
+                throw new ConfigurationException("INVALID_CONFIG", "agent names must be non-empty");
+            }
+
+            if (string.Equals(pair.Key, "default", StringComparison.Ordinal))
+            {
+                throw new ConfigurationException(
+                    "INVALID_CONFIG",
+                    "Agents cannot hold \"default\"; the session's Model, Judge, AgentSystem, AgentContext, MaxSteps, MaxModelCalls, JudgmentTimeout, and ProviderOptions are the default agent");
+            }
+
+            agents[pair.Key] = ResolvedAgent.From(pair.Key, pair.Value);
+        }
+
+        return agents;
+    }
+
     private static bool Bounded(TimeSpan timeout) => timeout > TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan;
 
     private void Commit(Exception? error, CancellationToken cancellationToken)
@@ -267,7 +308,29 @@ public sealed class E2ESessionOptions
 {
     public required IEngine Engine { get; init; }
 
+    /// <summary>The default agent's model.</summary>
     public IAgentModel? Model { get; init; }
+
+    /// <summary>The default agent's judge for <c>assert</c>, <c>waitFor</c>, and <c>extract</c>. Defaults to <see cref="Model"/>.</summary>
+    public IAgentModel? Judge { get; init; }
+
+    /// <summary>The default agent's upstream <c>system</c>: text appended to the act rules. Judges never see it.</summary>
+    public string? AgentSystem { get; init; }
+
+    /// <summary>The default agent's upstream <c>context</c>: told to every model call, at most 16384 UTF-8 bytes.</summary>
+    public string? AgentContext { get; init; }
+
+    /// <summary>The default agent's <c>judgmentTimeout</c>: the deadline of one <c>assert</c>, <c>waitFor</c>, or <c>extract</c>.</summary>
+    public TimeSpan JudgmentTimeout { get; init; } = E2EDefaults.JudgmentTimeout;
+
+    /// <summary>The default agent's provider options, keyed by provider. See <see cref="ModelRequest.ProviderOptions"/>.</summary>
+    public IReadOnlyDictionary<string, JsonElement>? ProviderOptions { get; init; }
+
+    /// <summary>
+    /// Named agents besides the default one, picked per call with the <c>Agent</c> option.
+    /// Each starts from the built-in defaults, not from the default agent.
+    /// </summary>
+    public IReadOnlyDictionary<string, AgentOptions>? Agents { get; init; }
 
     public string? BaseUrl { get; init; }
 
@@ -295,14 +358,16 @@ public sealed class E2ESessionOptions
 
     public TimeSpan AssertionTimeout { get; init; } = E2EDefaults.AssertionTimeout;
 
+    /// <summary>How long one <c>ActAsync</c> may run unless <see cref="ActOptions.Timeout"/> says otherwise. Judgments use <see cref="JudgmentTimeout"/>.</summary>
     public TimeSpan StepTimeout { get; init; } = E2EDefaults.StepTimeout;
 
     /// <summary>How long a replay waits for each recorded target and for the recorded end state.</summary>
     public TimeSpan ReplayTimeout { get; init; } = E2EDefaults.ReplayTimeout;
 
+    /// <summary>The default agent's model calls per agent call, 1 through 100.</summary>
     public int MaxModelCalls { get; init; } = E2EDefaults.MaxModelCalls;
 
-    /// <summary>Actions one <c>ActAsync</c> may take. <see cref="ActOptions.MaxSteps"/> can only lower it.</summary>
+    /// <summary>Actions one <c>ActAsync</c> may take, 1 through 100. <see cref="ActOptions.MaxSteps"/> can only lower it.</summary>
     public int MaxSteps { get; init; } = E2EDefaults.MaxSteps;
 
     /// <summary>

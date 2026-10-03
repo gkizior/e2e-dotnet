@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using E2E.Engine;
 
 namespace E2E;
@@ -145,11 +146,21 @@ internal static class AgentTools
         Tool("done", "End the judgment. Use ASSERTION_FAILED or ASSERTION_INCONCLUSIVE when status is failed.", JudgeDone),
     ];
 
-    public static IReadOnlyList<ModelTool> Extract { get; } =
-    [
-        Tool("extract", "Return the data read from the screen.", Parse("""{ "type": "object", "properties": { "data": { "type": "object" } }, "required": ["data"] }""")),
-        Tool("done", "Use this only when the data is not on screen.", JudgeDone),
-    ];
+    /// <summary>The extract tools, with <c>data</c> described by the JSON schema of the requested type.</summary>
+    public static IReadOnlyList<ModelTool> ExtractFor(JsonNode schema)
+    {
+        var parameters = new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject { ["data"] = schema.DeepClone() },
+            ["required"] = new JsonArray("data"),
+        };
+        return
+        [
+            Tool("extract", "Return the data read from the screen.", JsonSerializer.SerializeToElement(parameters)),
+            Tool("done", "Use this only when the data is not on screen.", JudgeDone),
+        ];
+    }
 
     private static ModelTool Tool(string name, string description, JsonElement parameters)
     {
