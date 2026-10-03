@@ -19,7 +19,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - NUnit `[Test]`, `[SetUp]`, `[TearDown]`, `[OneTimeSetUp]`, and `[OneTimeTearDown]`
 - `Assert.Ignore`, `[Retry]`, `[Timeout]`, and `[Category]`
 - Screen queries: role, text, label, test id, placeholder, `filter`, `first`, `nth`
-- Actions: tap, fill, press, check, uncheck, clear
+- Actions: tap, fill, press, check, uncheck, clear. They wait up to the action timeout for exactly one enabled match
 - Locator expectations: visible, hidden, text, count, enabled, disabled, checked, value. They poll until the assertion timeout
 - `agent.act`, `agent.assert`, `agent.waitFor`, `agent.extract`
 - Replay cache for a verified `act`: role, name, test id, and path. Modes are `self-finalized`, `agent-concluded`, and `missed`

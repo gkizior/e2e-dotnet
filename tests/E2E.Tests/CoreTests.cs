@@ -57,6 +57,103 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public async Task Tap_waits_for_a_button_that_appears_later()
+    {
+        DocumentElement? save = null;
+        var tapped = false;
+        var world = new DocumentWorld().Map("/later", page =>
+        {
+            save = page.Button("Save", () => tapped = true);
+            save.Hidden = true;
+        });
+        var result = await RunAsync(async ctx =>
+        {
+            await ctx.App.OpenAsync("/later");
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(80);
+                save!.Hidden = false;
+            });
+            await ctx.Screen.GetByRole("button", "Save").TapAsync();
+        }, world, actionTimeout: TimeSpan.FromSeconds(2));
+
+        Assert.Null(result.Error);
+        Assert.True(tapped);
+    }
+
+    [Fact]
+    public async Task Tap_waits_for_a_disabled_button_to_become_enabled()
+    {
+        DocumentElement? save = null;
+        var tapped = false;
+        var world = new DocumentWorld().Map("/later", page =>
+        {
+            save = page.Button("Save", () => tapped = true);
+            save.Disabled = true;
+        });
+        var result = await RunAsync(async ctx =>
+        {
+            await ctx.App.OpenAsync("/later");
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(80);
+                save!.Disabled = false;
+            });
+            await ctx.Screen.GetByRole("button", "Save").TapAsync();
+        }, world, actionTimeout: TimeSpan.FromSeconds(2));
+
+        Assert.Null(result.Error);
+        Assert.True(tapped);
+    }
+
+    [Fact]
+    public async Task Tap_fails_after_the_action_timeout_when_nothing_matches()
+    {
+        var waited = TimeSpan.Zero;
+        var result = await RunAsync(async ctx =>
+        {
+            await ctx.App.OpenAsync("/settings/billing");
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                await ctx.Screen.GetByRole("button", "Missing").TapAsync();
+            }
+            finally
+            {
+                waited = watch.Elapsed;
+            }
+        });
+
+        var error = Assert.IsType<TestException>(result.Error);
+        Assert.Equal("NOT_FOUND", error.Code);
+        Assert.True(waited >= TimeSpan.FromMilliseconds(300));
+    }
+
+    [Fact]
+    public async Task Tap_fails_after_the_action_timeout_when_the_button_stays_disabled()
+    {
+        var world = new DocumentWorld().Map("/disabled", page => page.Button("Save").Disabled = true);
+        var waited = TimeSpan.Zero;
+        var result = await RunAsync(async ctx =>
+        {
+            await ctx.App.OpenAsync("/disabled");
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                await ctx.Screen.GetByRole("button", "Save").TapAsync();
+            }
+            finally
+            {
+                waited = watch.Elapsed;
+            }
+        }, world);
+
+        var error = Assert.IsType<TestException>(result.Error);
+        Assert.Equal("NOT_ACTIONABLE", error.Code);
+        Assert.True(waited >= TimeSpan.FromMilliseconds(300));
+    }
+
+    [Fact]
     public async Task Hidden_status_is_not_visible_until_it_appears()
     {
         DocumentElement? status = null;
@@ -355,7 +452,8 @@ public sealed class CoreTests
         DocumentWorld? world = null,
         IAgentModel? model = null,
         string? cacheDirectory = null,
-        TimeSpan? assertionTimeout = null)
+        TimeSpan? assertionTimeout = null,
+        TimeSpan? actionTimeout = null)
     {
         await using var session = await E2ESession.StartAsync(new E2ESessionOptions
         {
@@ -366,7 +464,7 @@ public sealed class CoreTests
             CacheEnabled = cacheDirectory is not null,
             TestTitle = "billing > case",
             AssertionTimeout = assertionTimeout ?? TimeSpan.FromSeconds(2),
-            ActionTimeout = TimeSpan.FromMilliseconds(300),
+            ActionTimeout = actionTimeout ?? TimeSpan.FromMilliseconds(300),
             TestTimeout = TimeSpan.FromSeconds(10),
             StepTimeout = TimeSpan.FromSeconds(5),
         });

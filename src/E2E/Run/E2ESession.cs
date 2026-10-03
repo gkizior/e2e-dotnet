@@ -97,6 +97,7 @@ public sealed class E2ESession : IAsyncDisposable
             (node, action, token) => engine.PerformAsync(node, action, token),
             () => timeout.Token,
             scope.MarkVerified,
+            options.ActionTimeout,
             options.AssertionTimeout);
         var context = new TestContext
         {

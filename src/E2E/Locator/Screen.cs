@@ -24,14 +24,18 @@ public sealed class Screen
         Func<SemanticNode, LocatorAction, CancellationToken, Task> perform,
         Func<CancellationToken> cancellation,
         Action verified,
+        TimeSpan actionTimeout,
         TimeSpan assertionTimeout)
     {
         _observe = observe;
         _perform = perform;
         _cancellation = cancellation;
         _verified = verified;
+        ActionTimeout = actionTimeout;
         AssertionTimeout = assertionTimeout;
     }
+
+    internal TimeSpan ActionTimeout { get; }
 
     internal TimeSpan AssertionTimeout { get; }
 
@@ -185,33 +189,53 @@ public sealed class Locator
 
     internal Screen Screen => _screen;
 
+    /// <summary>
+    /// Waits up to the action timeout for exactly one enabled match, then acts on it.
+    /// More than one match fails at once.
+    /// </summary>
     private async Task ActAsync(LocatorAction action, CancellationToken cancellationToken)
     {
-        var node = await ResolveStrictAsync(cancellationToken).ConfigureAwait(false);
-        if (node.States.Disabled)
+        var token = _screen.Token(cancellationToken);
+        var deadline = DateTime.UtcNow + _screen.ActionTimeout;
+        while (true)
         {
-            throw new TestException("NOT_ACTIONABLE", Query.Describe() + " is disabled.");
-        }
+            var node = await ResolveSingleAsync(token).ConfigureAwait(false);
+            if (node is { States.Disabled: false })
+            {
+                await _screen.PerformAsync(node, action, token).ConfigureAwait(false);
+                return;
+            }
 
-        await _screen.PerformAsync(node, action, cancellationToken).ConfigureAwait(false);
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw node is null
+                    ? NotFound()
+                    : new TestException("NOT_ACTIONABLE", Query.Describe() + " is disabled.");
+            }
+
+            await Task.Delay(_screen.PollInterval, token).ConfigureAwait(false);
+        }
     }
 
     private async Task<SemanticNode> ResolveStrictAsync(CancellationToken cancellationToken)
     {
-        var token = _screen.Token(cancellationToken);
-        var matches = await ResolveAsync(token).ConfigureAwait(false);
-        if (matches.Count == 0)
-        {
-            throw new TestException("NOT_FOUND", Query.Describe() + " matched 0 nodes.");
-        }
+        var node = await ResolveSingleAsync(_screen.Token(cancellationToken)).ConfigureAwait(false);
+        return node ?? throw NotFound();
+    }
 
+    /// <summary>Returns the one match, or null when nothing matches. More than one match fails.</summary>
+    private async Task<SemanticNode?> ResolveSingleAsync(CancellationToken token)
+    {
+        var matches = await ResolveAsync(token).ConfigureAwait(false);
         if (matches.Count > 1)
         {
             throw new TestException("STRICT_MODE", Query.Describe() + " matched " + matches.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " nodes.");
         }
 
-        return matches[0];
+        return matches.Count == 1 ? matches[0] : null;
     }
+
+    private TestException NotFound() => new("NOT_FOUND", Query.Describe() + " matched 0 nodes.");
 }
 
 internal sealed class LocatorQuery
