@@ -251,6 +251,55 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public async Task Replay_waits_for_an_end_state_that_shows_up_late()
+    {
+        var directory = TempCache();
+        var delay = TimeSpan.Zero;
+        var world = new DocumentWorld().Map("/settings/billing", page =>
+        {
+            page.Heading("Billing");
+            var status = page.Status("Pro", hidden: true);
+            page.Button("Upgrade to Pro", () =>
+            {
+                if (delay == TimeSpan.Zero)
+                {
+                    status.Hidden = false;
+                    return;
+                }
+
+                _ = Task.Delay(delay).ContinueWith(_ => status.Hidden = false, TaskScheduler.Default);
+            });
+        });
+
+        var modelCalls = 0;
+        var model = new ScriptedModel(request =>
+        {
+            modelCalls++;
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            return text.Contains("tapped", StringComparison.Ordinal)
+                ? ModelResponses.Done("passed", "Upgraded to Pro.")
+                : ModelResponses.Tap("button", "Upgrade to Pro");
+        });
+
+        async Task Body(TestContext ctx)
+        {
+            await ctx.App.OpenAsync("/settings/billing");
+            await ctx.Agent.ActAsync("upgrade");
+            await Expect.That(ctx.Screen.GetByRole("status", "Pro")).ToBeVisibleAsync();
+        }
+
+        var first = await RunAsync(Body, world, model, directory);
+        Assert.Null(first.Error);
+        modelCalls = 0;
+
+        delay = TimeSpan.FromMilliseconds(50);
+        var second = await RunAsync(Body, world, model, directory);
+        Assert.Null(second.Error);
+        Assert.Equal(0, modelCalls);
+        Assert.Equal(1, second.Replayed);
+    }
+
+    [Fact]
     public async Task A_missing_control_misses_the_cache_and_runs_live()
     {
         var directory = TempCache();

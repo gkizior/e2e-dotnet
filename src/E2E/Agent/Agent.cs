@@ -397,25 +397,36 @@ public sealed class Agent
             }
         }
 
-        var end = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-        if (!string.Equals(entry.EndRoute, end.Route, StringComparison.Ordinal))
+        if (!await WaitForEndAsync(entry, token).ConfigureAwait(false))
         {
             _scope.HandedOff++;
             return ReplayAttempt.Hand("end-mismatch");
         }
 
-        foreach (var appeared in entry.Appeared)
-        {
-            var matches = Find(end, appeared.Role, appeared.Name, appeared.TestId, null);
-            if (matches.Count != 1)
-            {
-                _scope.HandedOff++;
-                return ReplayAttempt.Hand("end-mismatch");
-            }
-        }
-
         _scope.Replayed++;
         return ReplayAttempt.Done();
+    }
+
+    // The last action may start a navigation or a slow render, so the end route and anchors get the action timeout to show up.
+    private async Task<bool> WaitForEndAsync(CacheEntry entry, CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow + _scope.ActionTimeout;
+        while (true)
+        {
+            var end = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
+            if (string.Equals(entry.EndRoute, end.Route, StringComparison.Ordinal)
+                && entry.Appeared.All(appeared => Find(end, appeared.Role, appeared.Name, appeared.TestId, null).Count == 1))
+            {
+                return true;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20), token).ConfigureAwait(false);
+        }
     }
 
     private async Task<(SemanticNode? Node, string? Reason)> WaitForTargetAsync(RecordedAction action, CancellationToken token)
