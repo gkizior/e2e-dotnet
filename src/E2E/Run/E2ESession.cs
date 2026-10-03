@@ -2,7 +2,9 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Text.Json;
 using E2E.Engine;
+using E2E.Internal;
 
 namespace E2E;
 
@@ -19,18 +21,21 @@ public sealed class E2ESession : IAsyncDisposable
     private int _state;
     private int _disposed;
 
-    private E2ESession(AttemptScope scope, CancellationTokenSource timeout, IEngineSession engine, App app, Agent agent, Screen screen, TestContext context)
+    private E2ESession(AttemptScope scope, CancellationTokenSource timeout, IEngineSession engine, App app, Browser browser, Agent agent, Screen screen, TestContext context)
     {
         _scope = scope;
         _timeout = timeout;
         _engine = engine;
         App = app;
+        Browser = browser;
         Agent = agent;
         Screen = screen;
         Context = context;
     }
 
     public App App { get; }
+
+    public Browser Browser { get; }
 
     public Agent Agent { get; }
 
@@ -63,34 +68,62 @@ public sealed class E2ESession : IAsyncDisposable
         }
 
         IEngineSession engine;
+        var launch = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
         try
         {
+            if (Bounded(options.LaunchTimeout))
+            {
+                launch.CancelAfter(options.LaunchTimeout);
+            }
+
             engine = await options.Engine.StartAsync(
                 new EngineStartOptions { BaseUrl = options.BaseUrl, ActionTimeout = options.ActionTimeout },
-                timeout.Token).ConfigureAwait(false);
+                launch.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (launch.IsCancellationRequested && !timeout.IsCancellationRequested)
+        {
+            timeout.Dispose();
+            throw new EngineException(
+                "ENVIRONMENT_UNAVAILABLE",
+                "The engine did not start within the launch timeout (" + options.LaunchTimeout.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms).",
+                ex);
         }
         catch
         {
             timeout.Dispose();
             throw;
         }
+        finally
+        {
+            launch.Dispose();
+        }
 
+        // A later attempt never replays but still records, so the attempt number does not turn the cache off.
+        var cacheOn = options.CacheEnabled && options.CacheMode != CacheMode.Off && options.Cache is not null;
         var scope = new AttemptScope
         {
             Session = engine,
             Model = options.Model,
             Cache = options.Cache,
-            CacheEnabled = options.CacheEnabled && options.Attempt <= 1,
+            CacheEnabled = cacheOn,
+            CacheWrite = cacheOn && options.CacheMode == CacheMode.ReadWrite,
+            CacheStrict = options.CacheStrict,
+            CleanupTimeout = options.CleanupTimeout,
             TestTitle = options.TestTitle,
             EnginePlatform = options.Engine.Platform,
             EngineVersion = options.Engine.Version,
+            EngineCapabilities = options.Engine.Capabilities,
             Attempt = options.Attempt,
             ActionTimeout = options.ActionTimeout,
+            ReplayTimeout = options.ReplayTimeout,
             StepTimeout = options.StepTimeout,
             MaxModelCalls = options.MaxModelCalls,
+            MaxSteps = options.MaxSteps,
             Token = () => timeout.Token,
+            TestFailed = options.TestFailed ?? (static () => false),
         };
         var app = new App(engine, options.BaseUrl, () => timeout.Token);
+        var browser = new Browser(engine, options.Engine.Platform, options.BaseUrl, options.AssertionTimeout, () => timeout.Token);
         var agent = new Agent(scope);
         var screen = new Screen(
             token => engine.ObserveAsync(token),
@@ -98,20 +131,34 @@ public sealed class E2ESession : IAsyncDisposable
             () => timeout.Token,
             scope.MarkVerified,
             options.ActionTimeout,
-            options.AssertionTimeout);
+            options.AssertionTimeout,
+            new SoftFailures(options.OnSoftFailure));
         var context = new TestContext
         {
             App = app,
+            Browser = browser,
+            Platform = options.Engine.Platform,
             Agent = agent,
             Screen = screen,
             CancellationToken = timeout.Token,
         };
-        return new E2ESession(scope, timeout, engine, app, agent, screen, context);
+        return new E2ESession(scope, timeout, engine, app, browser, agent, screen, context);
     }
 
     /// <summary>
-    /// Writes verified acts and deletes unverified ones. A <see cref="SkipException"/>,
-    /// or a model outage, leaves existing entries in place. A cancelled
+    /// Ends <c>expect.soft</c> collection and returns one <c>ASSERTION_FAILED</c>
+    /// for every failure kept since the session started, or null. Call it when
+    /// the test body settles and fail the test with the result. Later soft
+    /// matchers throw as hard ones would.
+    /// </summary>
+    public TestException? CloseSoftFailures() => Screen.SoftFailures.Close();
+
+    /// <summary>
+    /// Writes verified acts and evicts the unverified ones this attempt recorded or
+    /// replayed. A passed or skipped attempt confirms only what a later check verified.
+    /// An act that missed the cache and never passed leaves its key alone. An entry a
+    /// verified replay finished, or one that already holds the same flow, is not
+    /// rewritten. A model outage leaves existing entries in place. A cancelled
     /// <paramref name="cancellationToken"/> writes nothing.
     /// </summary>
     public void Complete(Exception? error = null, CancellationToken cancellationToken = default)
@@ -150,33 +197,72 @@ public sealed class E2ESession : IAsyncDisposable
             return;
         }
 
-        await _engine.DisposeAsync().ConfigureAwait(false);
-        _timeout.Dispose();
+        try
+        {
+            var cleanup = _engine.DisposeAsync().AsTask();
+            if (Bounded(_scope.CleanupTimeout))
+            {
+                await cleanup.WaitAsync(_scope.CleanupTimeout).ConfigureAwait(false);
+            }
+            else
+            {
+                await cleanup.ConfigureAwait(false);
+            }
+        }
+        catch (TimeoutException ex)
+        {
+            throw new EngineException(
+                "ENVIRONMENT_UNAVAILABLE",
+                "The engine did not shut down within the cleanup timeout (" + _scope.CleanupTimeout.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms).",
+                ex);
+        }
+        finally
+        {
+            _timeout.Dispose();
+        }
     }
+
+    private static bool Bounded(TimeSpan timeout) => timeout > TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan;
 
     private void Commit(Exception? error, CancellationToken cancellationToken)
     {
-        if (!_scope.CacheEnabled || _scope.Cache is null || cancellationToken.IsCancellationRequested)
+        if (!_scope.CacheWrite || _scope.Cache is null || cancellationToken.IsCancellationRequested)
         {
             return;
         }
 
-        var preserve = error is SkipException || error is AgentException { Code: "MODEL_UNAVAILABLE" or "MODEL_PROVIDER_FAILED" };
+        // A stale recording under strict mode stays in place, so the next strict run fails the same way until someone re-records it.
+        var preserve = error is AgentException { Code: "MODEL_UNAVAILABLE" or "MODEL_PROVIDER_FAILED" or "REPLAY_STALE" };
         foreach (var act in _scope.Acts)
         {
-            if (act.Verified && act.Entry is { Actions.Count: > 0 } && !act.ParamCollision)
+            var recorded = act.Completed && act.Entry is { Actions.Count: > 0 } && !act.ParamCollision;
+            if (act.Verified && recorded)
             {
-                _scope.Cache.Write(act.Key, act.Entry);
+                if (!act.ReplayedWhole && !HoldsSameFlow(_scope.Cache, act.Key, act.Entry!))
+                {
+                    _scope.Cache.Write(act.Key, act.Entry!);
+                }
             }
-            else if (!preserve)
+            else if (!preserve && (recorded || act.ConsumedReplay))
             {
                 _scope.Cache.Delete(act.Key);
             }
         }
     }
+
+    // Rewriting an identical flow would only churn a committed cache directory.
+    private static bool HoldsSameFlow(IStepCache cache, string key, CacheEntry entry)
+    {
+        var existing = cache.Read(key).Entry;
+        return existing is not null
+            && string.Equals(
+                JsonSerializer.Serialize(existing, JsonDefaults.Options),
+                JsonSerializer.Serialize(entry, JsonDefaults.Options),
+                StringComparison.Ordinal);
+    }
 }
 
-/// <summary>How to open one <see cref="E2ESession"/>. Retries set <see cref="Attempt"/> above 1 so the cache stays off.</summary>
+/// <summary>How to open one <see cref="E2ESession"/>. Retries set <see cref="Attempt"/> above 1 so the cache records but does not replay.</summary>
 public sealed class E2ESessionOptions
 {
     public required IEngine Engine { get; init; }
@@ -189,18 +275,48 @@ public sealed class E2ESessionOptions
 
     public bool CacheEnabled { get; init; } = true;
 
+    /// <summary><see cref="CacheMode.ReadOnly"/> replays but never writes or deletes recordings.</summary>
+    public CacheMode CacheMode { get; init; } = CacheMode.ReadWrite;
+
+    /// <summary>When true, a recording that no longer matches fails the act with <c>REPLAY_STALE</c>.</summary>
+    public bool CacheStrict { get; init; }
+
+    /// <summary>How long the engine may take to start. Upstream <c>launchTimeout</c>.</summary>
+    public TimeSpan LaunchTimeout { get; init; } = E2EDefaults.LaunchTimeout;
+
+    /// <summary>How long the engine may take to shut down on dispose. Upstream <c>cleanupTimeout</c>.</summary>
+    public TimeSpan CleanupTimeout { get; init; } = E2EDefaults.CleanupTimeout;
+
     public required string TestTitle { get; init; }
 
-    public TimeSpan TestTimeout { get; init; } = TimeSpan.FromSeconds(60);
+    public TimeSpan TestTimeout { get; init; } = E2EDefaults.TestTimeout;
 
-    public TimeSpan ActionTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan ActionTimeout { get; init; } = E2EDefaults.ActionTimeout;
 
-    public TimeSpan AssertionTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan AssertionTimeout { get; init; } = E2EDefaults.AssertionTimeout;
 
-    public TimeSpan StepTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan StepTimeout { get; init; } = E2EDefaults.StepTimeout;
 
-    public int MaxModelCalls { get; init; } = 12;
+    /// <summary>How long a replay waits for each recorded target and for the recorded end state.</summary>
+    public TimeSpan ReplayTimeout { get; init; } = E2EDefaults.ReplayTimeout;
 
-    /// <summary>1 is the first try. Later attempts do not read or write the replay cache.</summary>
+    public int MaxModelCalls { get; init; } = E2EDefaults.MaxModelCalls;
+
+    /// <summary>Actions one <c>ActAsync</c> may take. <see cref="ActOptions.MaxSteps"/> can only lower it.</summary>
+    public int MaxSteps { get; init; } = E2EDefaults.MaxSteps;
+
+    /// <summary>
+    /// Receives each <c>expect.soft</c> failure as it happens. Null keeps them
+    /// on the session until <see cref="E2ESession.CloseSoftFailures"/>.
+    /// </summary>
+    public Action<TestException>? OnSoftFailure { get; init; }
+
+    /// <summary>
+    /// Reports whether the test has already failed. Once it returns true, a passing check no longer
+    /// verifies acts, so a teardown assertion after a failure does not record them.
+    /// </summary>
+    public Func<bool>? TestFailed { get; init; }
+
+    /// <summary>1 is the first try. Later attempts do not replay, and still record verified acts.</summary>
     public int Attempt { get; init; } = 1;
 }

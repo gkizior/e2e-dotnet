@@ -1,0 +1,5 @@
+{
+  "targets": [{ "platform": "web", "app": { "url": "https://billing.test" } }],
+  "actionTimeout": 5000,
+  "cache": { "mode": "read-write" }
+}

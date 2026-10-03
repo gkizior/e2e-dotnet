@@ -34,14 +34,22 @@ internal static class TextRules
         return left.Contains(right, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static bool Contains(string? actual, string expected)
+    /// <summary>
+    /// The text matcher rule. A pattern is tested anywhere in the subject in both modes. A string
+    /// equals, or is contained by, the subject, folding case when <paramref name="ignoreCase"/> is true.
+    /// <paramref name="normalize"/> collapses whitespace on both sides first.
+    /// </summary>
+    public static bool Compare(string actual, TextMatch expected, bool contains, bool normalize, bool? ignoreCase)
     {
-        if (actual is null)
+        var subject = normalize ? Normalize(actual) : actual;
+        if (expected.Pattern is not null)
         {
-            return false;
+            return expected.Pattern.IsMatch(subject);
         }
 
-        return Normalize(actual).Contains(Normalize(expected), StringComparison.Ordinal);
+        var text = normalize ? Normalize(expected.Text ?? "") : expected.Text ?? "";
+        var comparison = ignoreCase == true ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return contains ? subject.Contains(text, comparison) : string.Equals(subject, text, comparison);
     }
 
     public static string Truncate(string value, int limit)

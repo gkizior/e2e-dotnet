@@ -423,6 +423,46 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public async Task Secret_value_in_a_statement_never_reaches_the_model()
+    {
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            return text.Contains("Instruction:", StringComparison.Ordinal)
+                ? ModelResponses.Call("extract", new { data = "ok" })
+                : ModelResponses.Done("passed", "ok");
+        });
+        var world = new DocumentWorld().Map("/login", page =>
+        {
+            page.Textbox("Password", secure: true);
+            page.Paragraph("hint S3CRET-VALUE");
+        });
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/login");
+                await ctx.Agent.ActAsync("sign in", new ActOptions
+                {
+                    Params = new Dictionary<string, object?>
+                    {
+                        ["password"] = Secret.Create("password", "s3cret-value", "member password"),
+                    },
+                });
+                await ctx.Agent.AssertAsync("the hint says S3cret-Value");
+                await ctx.Agent.WaitForAsync("the hint says s3cret%2Dvalue");
+                await ctx.Agent.ExtractAsync<string>("read s3cret-value from the hint");
+            },
+            world,
+            model: model);
+
+        Assert.Null(result.Error);
+        var prompt = string.Join('\n', model.Requests.SelectMany(request => request.Messages.Select(message => message.Content)));
+        Assert.DoesNotContain("s3cret", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Statement: the hint says <secret:password>", prompt, StringComparison.Ordinal);
+        Assert.Contains("Instruction: read <secret:password> from the hint", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Unique_values_replay_with_the_new_value()
     {
         var directory = TempCache();
@@ -628,9 +668,9 @@ public sealed class CoreTests
         Assert.NotEqual(Key(new[] { "apple" }), Key(new[] { "pear" }));
         Assert.Equal(Key(new[] { Values.Unique("a@example.test") }), Key(new[] { Values.Unique("b@example.test") }));
         Assert.Equal(
-            Key(new { password = Secret.Create("password", "one") }),
-            Key(new { password = Secret.Create("password", "two") }));
-        Assert.Equal("{\"password\":\"<secret:password>\"}", CacheKeys.Canonical(new { password = Secret.Create("password", "one") }));
+            Key(new { password = Secret.Create("password", "one-value") }),
+            Key(new { password = Secret.Create("password", "two-value") }));
+        Assert.Equal("{\"password\":\"<secret:password>\"}", CacheKeys.Canonical(new { password = Secret.Create("password", "one-value") }));
 
         var cycle = new List<object>();
         cycle.Add(cycle);
@@ -707,6 +747,149 @@ public sealed class CoreTests
         ];
     }
 
+    [Fact]
+    public async Task Act_reports_its_model_calls_and_actions()
+    {
+        ActResult? live = null;
+        ActResult? replayed = null;
+        var directory = TempCache();
+        var first = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                live = await ctx.Agent.ActAsync("upgrade the workspace to the Pro plan");
+                await ctx.Agent.AssertAsync("the invoice preview shows a prorated amount");
+            },
+            model: Script(),
+            cacheDirectory: directory);
+        var second = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                replayed = await ctx.Agent.ActAsync("upgrade the workspace to the Pro plan");
+            },
+            model: Script(),
+            cacheDirectory: directory);
+
+        Assert.Null(first.Error);
+        Assert.Null(second.Error);
+        Assert.Equal(2, live!.ModelCalls);
+        Assert.Equal(1, live.Actions);
+        Assert.Equal(0, replayed!.ModelCalls);
+        Assert.Equal(1, replayed.Actions);
+    }
+
+    [Theory]
+    [InlineData("passed")]
+    [InlineData("failed")]
+    public async Task Act_past_its_action_budget_is_blocked(string status)
+    {
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            return text.Contains("exhausted its action budget of 2", StringComparison.Ordinal)
+                ? ModelResponses.Done(status, "Gave up.")
+                : ModelResponses.Tap("button", "Upgrade to Pro");
+        });
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.ActAsync("upgrade", new ActOptions { MaxSteps = 2 });
+            },
+            model: model);
+
+        var error = Assert.IsType<AgentException>(result.Error);
+        Assert.Equal("STEP_BUDGET_EXHAUSTED", error.Code);
+        Assert.True(error.Blocked);
+        Assert.Equal(error.Message, error.Explanation);
+        Assert.Equal(4, model.CallCount);
+    }
+
+    [Fact]
+    public async Task A_model_failure_code_outranks_an_exhausted_action_budget()
+    {
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            return text.Contains("exhausted its action budget", StringComparison.Ordinal)
+                ? ModelResponses.Done("failed", "The button does nothing.", "ACTION_FAILED")
+                : ModelResponses.Tap("button", "Upgrade to Pro");
+        });
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.ActAsync("upgrade", new ActOptions { MaxSteps = 1 });
+            },
+            model: model);
+
+        var error = Assert.IsType<AgentException>(result.Error);
+        Assert.Equal("ACTION_FAILED", error.Code);
+        Assert.False(error.Blocked);
+    }
+
+    [Fact]
+    public async Task A_blocked_act_is_marked_blocked()
+    {
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.ActAsync("upgrade");
+            },
+            model: new ScriptedModel(_ => ModelResponses.Done("blocked", "No network.", "ENVIRONMENT_UNAVAILABLE")));
+
+        var error = Assert.IsType<AgentException>(result.Error);
+        Assert.True(error.Blocked);
+        Assert.Equal("No network.", error.Explanation);
+    }
+
+    public static TheoryData<string> RaisedBudgets => new() { "act-steps", "act-steps-zero", "act-calls", "wait-calls", "wait-calls-negative" };
+
+    [Theory]
+    [MemberData(nameof(RaisedBudgets))]
+    public async Task A_per_call_budget_can_only_lower_the_configured_one(string which)
+    {
+        var model = new ScriptedModel(_ => ModelResponses.Done("passed", "ok"));
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await (which switch
+                {
+                    "act-steps" => ctx.Agent.ActAsync("upgrade", new ActOptions { MaxSteps = E2EDefaults.MaxSteps + 1 }),
+                    "act-steps-zero" => ctx.Agent.ActAsync("upgrade", new ActOptions { MaxSteps = 0 }),
+                    "act-calls" => ctx.Agent.ActAsync("upgrade", new ActOptions { MaxModelCalls = E2EDefaults.MaxModelCalls + 1 }),
+                    "wait-calls" => ctx.Agent.WaitForAsync("the plan is Pro", new WaitForOptions { MaxModelCalls = E2EDefaults.MaxModelCalls + 1 }),
+                    _ => ctx.Agent.WaitForAsync("the plan is Pro", new WaitForOptions { MaxModelCalls = -1 }),
+                });
+            },
+            model: model);
+
+        Assert.Equal("INVALID_ARGUMENT", Assert.IsType<TestException>(result.Error).Code);
+        Assert.Equal(0, model.CallCount);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("a\u0001b")]
+    public void Unique_rejects_empty_and_marker_values(string value)
+    {
+        Assert.Equal("INVALID_ARGUMENT", Assert.Throws<TestException>(() => Values.Unique(value)).Code);
+    }
+
+    [Fact]
+    public void Secret_values_are_at_least_six_code_points()
+    {
+        Assert.Equal("INVALID_ARGUMENT", Assert.Throws<TestException>(() => Secret.Create("pin", "12345")).Code);
+        Assert.Equal("INVALID_ARGUMENT", Assert.Throws<TestException>(() => Secret.Create("pin", "")).Code);
+        Assert.Equal("INVALID_ARGUMENT", Assert.Throws<TestException>(() => Secret.Create("pin", "ab\U0001F600cd")).Code);
+        Assert.Equal("pin", Secret.Create("pin", "ab\U0001F600cde").Name);
+        Assert.Equal("pin", Secret.Create("pin", "123456").Name);
+    }
+
     private static ScriptedModel Script()
     {
         return new ScriptedModel(request =>
@@ -753,6 +936,7 @@ public sealed class CoreTests
             TestTitle = "billing > case",
             AssertionTimeout = assertionTimeout ?? TimeSpan.FromSeconds(2),
             ActionTimeout = actionTimeout ?? TimeSpan.FromMilliseconds(300),
+            ReplayTimeout = actionTimeout ?? TimeSpan.FromMilliseconds(300),
             TestTimeout = TimeSpan.FromSeconds(10),
             StepTimeout = TimeSpan.FromSeconds(5),
         });

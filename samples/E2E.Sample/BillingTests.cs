@@ -17,8 +17,6 @@ public sealed class BillingTests : E2ETest
 
     protected override IAgentModel? CreateModel() => new BillingModel();
 
-    protected override string? BaseUrl => "https://billing.test";
-
     protected override string CacheDirectory => CacheDir;
 
     protected override string CacheTitle(global::NUnit.Framework.TestContext.TestAdapter test) => "billing > a member upgrades to Pro";

@@ -13,9 +13,10 @@ using E2E.Internal;
 namespace E2E;
 
 /// <summary>
-/// A recording of one verified <c>act</c>. The key is the test, the instruction,
-/// the params, the engine's major.minor version, and which repeat of that same
-/// instruction and params in the attempt it is. The model id is not part of the key.
+/// A recording of one verified <c>act</c>. The key is the cache schema, the replay
+/// policy version, the test, the instruction, the params, the engine's major.minor
+/// version, and which repeat of that same instruction and params in the attempt it
+/// is. The model id is not part of the key.
 /// </summary>
 public sealed class CacheEntry
 {
@@ -49,6 +50,15 @@ public sealed class RecordedAction
     public string? Key { get; set; }
 
     public string? Url { get; set; }
+
+    /// <summary><c>up</c>, <c>down</c>, <c>left</c>, or <c>right</c> for <c>scroll</c> and <c>scrollUntil</c>.</summary>
+    public string? Direction { get; set; }
+
+    /// <summary>Consecutive identical scrolls folded into one action. Null means one.</summary>
+    public int? Times { get; set; }
+
+    /// <summary>The text a <c>scrollUntil</c> paged toward.</summary>
+    public string? Text { get; set; }
 }
 
 public sealed class RecordedTarget
@@ -156,6 +166,12 @@ public sealed class FileStepCache : IStepCache
 
 internal static class CacheKeys
 {
+    /// <summary>
+    /// Version of the rules that decide whether a recording replays. Bump it when those
+    /// rules change, so old entries become misses instead of wrong replays.
+    /// </summary>
+    public const string ReplayPolicyVersion = "1";
+
     private static readonly JsonSerializerOptions KeyJson = Json(new LeafConverter<Secret>(Canonical), new LeafConverter<UniqueValue>(Canonical));
 
     private static readonly JsonSerializerOptions DisplayJson = Json(new LeafConverter<Secret>(Display), new LeafConverter<UniqueValue>(Display));
@@ -168,6 +184,8 @@ internal static class CacheKeys
         IReadOnlyDictionary<string, object?>? parameters)
     {
         var builder = new StringBuilder();
+        builder.Append("schema=").Append(FileStepCache.SchemaVersion.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        builder.Append("policy=").Append(ReplayPolicyVersion).Append('\n');
         builder.Append(engine).Append('\n').Append(MajorMinor(version)).Append('\n');
         builder.Append(test).Append('\n').Append(instruction.Trim()).Append('\n');
         if (parameters is not null)

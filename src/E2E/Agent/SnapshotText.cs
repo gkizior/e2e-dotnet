@@ -15,9 +15,10 @@ internal static class SnapshotText
         var builder = new StringBuilder();
         builder.Append("Screen (").Append(observation.Route).Append("):");
         var any = false;
+        var redactor = Redactor.For(secrets);
         foreach (var root in observation.Roots)
         {
-            any |= Write(builder, root, 0, secrets);
+            any |= Write(builder, root, 0, redactor);
         }
 
         if (!any)
@@ -26,26 +27,22 @@ internal static class SnapshotText
             builder.Append("(empty)");
         }
 
+        if (observation.Truncated)
+        {
+            builder.AppendLine();
+            builder.Append("(More of the page is off screen. Scroll to reach it.)");
+        }
+
         return builder.ToString();
     }
 
+    /// <summary>Replaces each secret value, in any case or encoding, with its marker.</summary>
     public static string Redact(string value, IReadOnlyList<Secret> secrets)
     {
-        var text = value;
-        foreach (var secret in secrets.OrderByDescending(item => item.Value.Length))
-        {
-            if (secret.Value.Length == 0)
-            {
-                continue;
-            }
-
-            text = text.Replace(secret.Value, "<secret:" + secret.Name + ">", StringComparison.Ordinal);
-        }
-
-        return text;
+        return secrets.Count == 0 ? value : Redactor.For(secrets).Redact(value);
     }
 
-    private static bool Write(StringBuilder builder, SemanticNode node, int depth, IReadOnlyList<Secret> secrets)
+    private static bool Write(StringBuilder builder, SemanticNode node, int depth, Redactor redactor)
     {
         var wrote = false;
         if (!node.States.Hidden)
@@ -54,7 +51,7 @@ internal static class SnapshotText
             builder.Append(' ', depth * 2);
             builder.Append("- ");
             builder.Append(node.Role ?? "text");
-            var name = Redact(node.Name ?? node.Text ?? "", secrets);
+            var name = redactor.Redact(node.Name ?? node.Text ?? "");
             if (name.Length > 0)
             {
                 builder.Append(" \"").Append(TextRules.Normalize(name)).Append('"');
@@ -63,7 +60,7 @@ internal static class SnapshotText
             builder.Append(" [ref=").Append(node.Ref).Append(']');
             if (!node.States.Secure && !string.IsNullOrEmpty(node.Value))
             {
-                builder.Append(" value=\"").Append(Redact(node.Value, secrets)).Append('"');
+                builder.Append(" value=\"").Append(redactor.Redact(node.Value)).Append('"');
             }
 
             if (node.States.Secure)
@@ -81,12 +78,32 @@ internal static class SnapshotText
                 builder.Append(" [disabled]");
             }
 
+            if (node.States.Expanded)
+            {
+                builder.Append(" [expanded]");
+            }
+
+            if (node.States.Selected)
+            {
+                builder.Append(" [selected]");
+            }
+
+            if (node.States.Pressed)
+            {
+                builder.Append(" [pressed]");
+            }
+
+            if (node.States.Focused)
+            {
+                builder.Append(" [focused]");
+            }
+
             wrote = true;
         }
 
         foreach (var child in node.Children)
         {
-            wrote |= Write(builder, child, node.States.Hidden ? depth : depth + 1, secrets);
+            wrote |= Write(builder, child, node.States.Hidden ? depth : depth + 1, redactor);
         }
 
         return wrote;

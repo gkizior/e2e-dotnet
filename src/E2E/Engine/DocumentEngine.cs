@@ -10,6 +10,9 @@ namespace E2E.Engine;
 /// In-memory page engine for samples and tests that do not need a browser.
 /// Each open builds a fresh page from the route mapped on
 /// <see cref="DocumentWorld"/>. Actions mutate that page until the next open.
+/// <c>app.back</c> rebuilds the previous route, and <c>app.restart</c> and
+/// <c>app.clearState</c> leave a blank page with no history. The document engine
+/// has no browser, so the <see cref="Browser"/> fixture is unsupported.
 /// </summary>
 public sealed class DocumentEngine : IEngine
 {
@@ -31,7 +34,9 @@ public sealed class DocumentEngine : IEngine
         EngineCapabilities.Observation
         | EngineCapabilities.Actions
         | EngineCapabilities.Location
-        | EngineCapabilities.Keyboard;
+        | EngineCapabilities.Keyboard
+        | EngineCapabilities.Scroll
+        | EngineCapabilities.History;
 
     public Task<IEngineSession> StartAsync(EngineStartOptions options, CancellationToken cancellationToken)
     {
@@ -46,6 +51,7 @@ public sealed class DocumentEngine : IEngine
         private DocumentPage? _page;
         private DocumentElement? _focused;
         private Dictionary<string, DocumentElement> _refs = new(StringComparer.Ordinal);
+        private readonly List<string> _history = [];
 
         public DocumentSession(DocumentWorld world)
         {
@@ -57,12 +63,38 @@ public sealed class DocumentEngine : IEngine
         public Task OpenAsync(string url, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var path = Routes.PathOf(url);
-            _page = _world.Create(path);
-            _focused = null;
-            _refs = new Dictionary<string, DocumentElement>(StringComparer.Ordinal);
+            Navigate(Routes.PathOf(url));
             return Task.CompletedTask;
         }
+
+        public Task SwipeAsync(ScrollDirection direction, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            RequirePage().OnScroll?.Invoke(direction);
+            return Task.CompletedTask;
+        }
+
+        public Task BackAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_history.Count > 1)
+            {
+                _history.RemoveAt(_history.Count - 1);
+                Show(_world.Create(_history[^1]));
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task RestartAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _history.Clear();
+            Show(null);
+            return Task.CompletedTask;
+        }
+
+        public Task ClearStateAsync(CancellationToken cancellationToken) => RestartAsync(cancellationToken);
 
         public Task<Observation> ObserveAsync(CancellationToken cancellationToken)
         {
@@ -98,29 +130,20 @@ public sealed class DocumentEngine : IEngine
             switch (action)
             {
                 case LocatorAction.Tap:
-                    if (element.Role == "checkbox" && element.OnTap is null)
-                    {
-                        element.Checked = !element.Checked;
-                    }
-
-                    element.OnTap?.Invoke();
-                    if (element.Role == "textbox")
-                    {
-                        _focused = element;
-                    }
-
+                    Tap(element);
+                    return element.NavigateTo is null ? Task.CompletedTask : OpenAsync(element.NavigateTo, cancellationToken);
+                case LocatorAction.DoubleTap:
+                    // A browser fires two clicks before dblclick. A link navigates on the first.
+                    Tap(element);
                     if (element.NavigateTo is not null)
                     {
-                        return OpenAsync(element.NavigateTo, cancellationToken);
+                        Navigate(Routes.PathOf(element.NavigateTo));
                     }
 
+                    Tap(element);
                     break;
                 case LocatorAction.Fill fill:
-                    if (element.Role != "textbox" && element.Role != "combobox" && element.Role != "searchbox")
-                    {
-                        throw new EngineException("NOT_ACTIONABLE", $"{Describe(element)} does not accept text.");
-                    }
-
+                    RequireText(element);
                     element.Value = fill.Value;
                     element.OnFill?.Invoke(fill.Value);
                     _focused = element;
@@ -128,6 +151,16 @@ public sealed class DocumentEngine : IEngine
                 case LocatorAction.Press press:
                     _focused = element;
                     Activate(element, press.Key);
+                    break;
+                case LocatorAction.PressSequentially typed:
+                    RequireText(element);
+                    _focused = element;
+                    foreach (var character in typed.Text)
+                    {
+                        element.Value = (element.Value ?? "") + character;
+                        element.OnFill?.Invoke(element.Value);
+                    }
+
                     break;
                 case LocatorAction.Select select:
                     element.Value = select.Value;
@@ -142,6 +175,15 @@ public sealed class DocumentEngine : IEngine
                 case LocatorAction.Clear:
                     element.Value = "";
                     _focused = element;
+                    break;
+                case LocatorAction.Focus:
+                    _focused = element;
+                    break;
+                case LocatorAction.ScrollIntoView:
+                    // The document engine has no viewport; every node is already in view.
+                    break;
+                case LocatorAction.Swipe swipe:
+                    element.OnScroll?.Invoke(swipe.Direction);
                     break;
                 default:
                     throw new EngineException("UNSUPPORTED_CAPABILITY", $"Document engine cannot perform {action.GetType().Name}.");
@@ -164,6 +206,28 @@ public sealed class DocumentEngine : IEngine
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+        private static void RequireText(DocumentElement element)
+        {
+            if (element.Role != "textbox" && element.Role != "combobox" && element.Role != "searchbox")
+            {
+                throw new EngineException("NOT_ACTIONABLE", $"{Describe(element)} does not accept text.");
+            }
+        }
+
+        private void Tap(DocumentElement element)
+        {
+            if (element.Role == "checkbox" && element.OnTap is null)
+            {
+                element.Checked = !element.Checked;
+            }
+
+            element.OnTap?.Invoke();
+            if (element.Role == "textbox")
+            {
+                _focused = element;
+            }
+        }
+
         private void Activate(DocumentElement element, string key)
         {
             if (string.Equals(key, "Enter", StringComparison.Ordinal) && element.Role == "button")
@@ -171,10 +235,23 @@ public sealed class DocumentEngine : IEngine
                 element.OnTap?.Invoke();
                 if (element.NavigateTo is not null)
                 {
-                    _page = _world.Create(Routes.PathOf(element.NavigateTo));
-                    _focused = null;
+                    Navigate(Routes.PathOf(element.NavigateTo));
                 }
             }
+        }
+
+        private void Navigate(string path)
+        {
+            var page = _world.Create(path);
+            _history.Add(path);
+            Show(page);
+        }
+
+        private void Show(DocumentPage? page)
+        {
+            _page = page;
+            _focused = null;
+            _refs = new Dictionary<string, DocumentElement>(StringComparer.Ordinal);
         }
 
         private DocumentPage RequirePage()
@@ -218,11 +295,27 @@ public sealed class DocumentEngine : IEngine
                     Checked = element.Checked,
                     Disabled = element.Disabled,
                     Hidden = element.Hidden,
+                    Selected = element.Selected,
+                    Expanded = element.Expanded,
+                    Pressed = element.Pressed,
                     Secure = secure,
-                    Focused = false,
+                    Focused = element.Focused,
                 },
+                Attributes = AttributesOf(element, secure),
+                Rect = element.Rect,
                 Children = children,
             };
+        }
+
+        private static Dictionary<string, string> AttributesOf(DocumentElement element, bool secure)
+        {
+            var attributes = new Dictionary<string, string>(element.Attributes, StringComparer.Ordinal);
+            if (secure)
+            {
+                attributes.Remove("value");
+            }
+
+            return attributes;
         }
 
         private static string? Cut(string? value, int limit)
@@ -282,6 +375,9 @@ public sealed class DocumentPage
     }
 
     public string Path { get; }
+
+    /// <summary>Runs when the viewport scrolls, for a page that loads more as it is scrolled. The page has no viewport of its own.</summary>
+    public Action<ScrollDirection>? OnScroll { get; set; }
 
     internal List<DocumentElement> Roots { get; } = [];
 
@@ -364,13 +460,30 @@ public sealed class DocumentElement
 
     public bool Hidden { get; set; }
 
+    public bool Selected { get; set; }
+
+    public bool Expanded { get; set; }
+
+    public bool Pressed { get; set; }
+
     public bool Secure { get; set; }
 
+    public bool Focused { get; set; }
+
     public string? NavigateTo { get; init; }
+
+    /// <summary>Attributes <c>getAttribute</c> and <c>toHaveAttribute</c> read, such as <c>href</c> or <c>aria-label</c>.</summary>
+    public Dictionary<string, string> Attributes { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>The box <c>boundingBox</c> reports. Null when the page does not lay it out.</summary>
+    public BoundingBox? Rect { get; set; }
 
     public Action? OnTap { get; init; }
 
     public Action<string>? OnFill { get; init; }
+
+    /// <summary>Runs when this element is scrolled with <see cref="LocatorAction.Swipe"/>.</summary>
+    public Action<ScrollDirection>? OnScroll { get; set; }
 
     public List<DocumentElement> Children { get; } = [];
 }

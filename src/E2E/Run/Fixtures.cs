@@ -7,7 +7,10 @@ using E2E.Internal;
 
 namespace E2E;
 
-/// <summary>Opens the app under test. A relative URL is resolved against the target base URL; no URL opens the base URL.</summary>
+/// <summary>
+/// Opens and resets the app under test. A relative URL is resolved against
+/// <see cref="BaseUrl"/>; no URL opens the base URL.
+/// </summary>
 public sealed class App
 {
     private readonly IEngineSession _session;
@@ -21,17 +24,46 @@ public sealed class App
         _token = token;
     }
 
+    /// <summary>The target base URL relative URLs resolve against, or null when the test declares none.</summary>
+    public string? BaseUrl => _baseUrl;
+
     public Task OpenAsync(string? url = null, CancellationToken cancellationToken = default)
     {
-        var token = cancellationToken == default ? _token() : cancellationToken;
-        return _session.OpenAsync(Routes.Resolve(_baseUrl, url), token);
+        return _session.OpenAsync(Routes.Resolve(_baseUrl, url), Token(cancellationToken));
     }
+
+    /// <summary>Goes back one entry in the history. With no earlier entry it does nothing.</summary>
+    public Task BackAsync(CancellationToken cancellationToken = default)
+    {
+        return _session.BackAsync(Token(cancellationToken));
+    }
+
+    /// <summary>Closes the current document and opens a blank one. Cookies and storage are kept. Call <see cref="OpenAsync"/> next.</summary>
+    public Task RestartAsync(CancellationToken cancellationToken = default)
+    {
+        return _session.RestartAsync(Token(cancellationToken));
+    }
+
+    /// <summary>Discards cookies, storage, and history, and opens a blank document. Call <see cref="OpenAsync"/> next.</summary>
+    public Task ClearStateAsync(CancellationToken cancellationToken = default)
+    {
+        return _session.ClearStateAsync(Token(cancellationToken));
+    }
+
+    private CancellationToken Token(CancellationToken cancellationToken) =>
+        cancellationToken == default ? _token() : cancellationToken;
 }
 
 /// <summary>The fixtures for one test. Call <see cref="Skip"/> before the first step when a precondition is missing.</summary>
 public sealed class TestContext
 {
     public required App App { get; init; }
+
+    /// <summary>The browser fixture. Its members fail with <c>UNSUPPORTED_CAPABILITY</c> on an engine without a browser.</summary>
+    public required Browser Browser { get; init; }
+
+    /// <summary>The engine platform, such as <c>web</c> or <c>document</c>.</summary>
+    public required string Platform { get; init; }
 
     public required Agent Agent { get; init; }
 

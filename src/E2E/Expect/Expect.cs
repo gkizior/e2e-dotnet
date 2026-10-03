@@ -4,169 +4,527 @@
 
 using System.Globalization;
 using E2E.Engine;
+using E2E.Internal;
 
 namespace E2E;
 
-/// <summary>Polling assertions for a <see cref="Locator"/>. A passing locator assertion verifies the previous <c>agent.act</c>.</summary>
+/// <summary>
+/// Polling assertions for a <see cref="Locator"/>, <c>expect.soft</c>, and
+/// <c>expect.poll</c>. A passing locator assertion verifies the previous
+/// <c>agent.act</c>. Plain value matchers are not ported: use NUnit
+/// <c>Assert.That</c>, and <c>Assert.EnterMultipleScope</c> for soft value checks.
+/// </summary>
 public static class Expect
 {
     public static LocatorExpect That(Locator locator)
     {
         ArgumentNullException.ThrowIfNull(locator);
-        return new LocatorExpect(locator);
+        return new LocatorExpect(locator, negated: false);
+    }
+
+    /// <summary>
+    /// The locator matchers, but a failure is kept on the session instead of
+    /// thrown and the body runs on. The test fails at the end with every kept
+    /// failure. <c>E2ETest</c> records each one as an NUnit assertion failure.
+    /// </summary>
+    public static SoftLocatorExpect Soft(Locator locator)
+    {
+        ArgumentNullException.ThrowIfNull(locator);
+        return new SoftLocatorExpect(new LocatorExpect(locator, negated: false), locator.Screen.SoftFailures);
+    }
+
+    /// <summary>Re-reads <paramref name="read"/> until the chosen matcher holds or the timeout passes.</summary>
+    public static PollExpectation<T> Poll<T>(Func<CancellationToken, Task<T>> read, PollOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        options ??= new PollOptions();
+        PollExpectation<T>.Validate(options);
+        return new PollExpectation<T>(read, options, negated: false);
+    }
+
+    /// <inheritdoc cref="Poll{T}(Func{CancellationToken, Task{T}}, PollOptions?)"/>
+    public static PollExpectation<T> Poll<T>(Func<Task<T>> read, PollOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        return Poll(_ => read(), options);
+    }
+
+    /// <inheritdoc cref="Poll{T}(Func{CancellationToken, Task{T}}, PollOptions?)"/>
+    public static PollExpectation<T> Poll<T>(Func<T> read, PollOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        return Poll(_ => Task.FromResult(read()), options);
     }
 }
 
-/// <summary>Matchers that retry until they pass or the assertion timeout elapses.</summary>
+/// <summary>
+/// Matchers that retry until they pass or the assertion timeout elapses. Each takes an optional
+/// <c>timeout</c> that replaces the assertion timeout for that call.
+/// </summary>
 public sealed class LocatorExpect
 {
-    private readonly Locator _locator;
+    /// <summary>How long a negated matcher's condition must stay false before it passes, as upstream.</summary>
+    internal static readonly TimeSpan NegationGrace = TimeSpan.FromMilliseconds(1000);
 
-    internal LocatorExpect(Locator locator)
+    private readonly Locator _locator;
+    private readonly bool _negated;
+
+    internal LocatorExpect(Locator locator, bool negated)
     {
         _locator = locator;
+        _negated = negated;
     }
 
-    public Task ToBeVisibleAsync(CancellationToken cancellationToken = default)
+    /// <summary>Inverts the matcher. A negated matcher passes after its condition has been false for 1000 ms in a row.</summary>
+    public LocatorExpect Not => new(_locator, !_negated);
+
+    /// <summary>Waits for one visible match. <paramref name="visible"/> false waits for hidden or absent, as <see cref="ToBeHiddenAsync"/>.</summary>
+    public Task ToBeVisibleAsync(bool visible = true, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return VisibilityAsync("toBeVisible", visible, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for hidden or absent state.</summary>
+    public Task ToBeHiddenAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return VisibilityAsync("toBeHidden", visible: false, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for one match to exist, visible or not. <paramref name="attached"/> false waits for none.</summary>
+    public Task ToBeAttachedAsync(bool attached = true, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
         return PollAsync(
-            "toBeVisible",
-            matches => matches.Count == 1 ? null : "matched " + matches.Count.ToString(CultureInfo.InvariantCulture) + " nodes",
-            strict: true,
+            "toBeAttached",
+            attached ? "attached" : "detached",
+            timeout,
+            includeHidden: true,
+            matches => matches.Count > 1
+                ? Verdict.Strict(matches.Count)
+                : new Verdict((matches.Count == 1) == attached, matches.Count == 1 ? "attached" : "no node"),
             cancellationToken);
     }
 
-    public Task ToBeHiddenAsync(CancellationToken cancellationToken = default)
+    /// <summary>Waits for enabled state. <paramref name="enabled"/> false waits for disabled state.</summary>
+    public Task ToBeEnabledAsync(bool enabled = true, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
-        return PollAsync(
-            "toBeHidden",
-            matches => matches.Count == 0 ? null : "matched " + matches.Count.ToString(CultureInfo.InvariantCulture) + " nodes",
-            strict: false,
-            cancellationToken);
+        return StateAsync("toBeEnabled", node => !node.States.Disabled, enabled, enabled ? "enabled" : "disabled", timeout, cancellationToken);
     }
 
-    public Task ToHaveTextAsync(string expected, bool exact = true, CancellationToken cancellationToken = default)
+    /// <summary>Waits for disabled state.</summary>
+    public Task ToBeDisabledAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(expected);
-        return PollSingleAsync(
-            "toHaveText",
-            node => TextEquals(ShownText(node), expected, exact) ? null : "had text " + Quote(ShownText(node)),
-            cancellationToken);
+        return StateAsync("toBeDisabled", node => node.States.Disabled, true, "disabled", timeout, cancellationToken);
     }
 
-    public Task ToContainTextAsync(string expected, CancellationToken cancellationToken = default)
+    /// <summary>Waits for checked state. <paramref name="isChecked"/> false waits for unchecked state.</summary>
+    public Task ToBeCheckedAsync(bool isChecked = true, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(expected);
-        return PollSingleAsync(
-            "toContainText",
-            node => Internal.TextRules.Contains(ShownText(node), expected) ? null : "had text " + Quote(ShownText(node)),
-            cancellationToken);
+        return StateAsync("toBeChecked", node => node.States.Checked, isChecked, isChecked ? "checked" : "unchecked", timeout, cancellationToken);
     }
 
-    public Task ToHaveCountAsync(int count, CancellationToken cancellationToken = default)
+    /// <summary>Waits for selected state.</summary>
+    public Task ToBeSelectedAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return StateAsync("toBeSelected", node => node.States.Selected, true, "selected", timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for expanded state.</summary>
+    public Task ToBeExpandedAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return StateAsync("toBeExpanded", node => node.States.Expanded, true, "expanded", timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for focused state.</summary>
+    public Task ToBeFocusedAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return StateAsync("toBeFocused", node => node.States.Focused, true, "focused", timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for exact normalized text. <paramref name="ignoreCase"/> folds a string's case, and adds or removes a pattern's.</summary>
+    public Task ToHaveTextAsync(TextMatch expected, bool? ignoreCase = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return TextAsync(Field.HasText, expected, ignoreCase, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for exactly as many matches as entries, each with its entry's text, in order.</summary>
+    public Task ToHaveTextAsync(IReadOnlyList<TextMatch> expected, bool? ignoreCase = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return TextListAsync(Field.HasText, expected, ignoreCase, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for contained normalized text.</summary>
+    public Task ToContainTextAsync(TextMatch expected, bool? ignoreCase = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return TextAsync(Field.ContainsText, expected, ignoreCase, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for each entry to be contained by a distinct match, in order. Extra matches are allowed.</summary>
+    public Task ToContainTextAsync(IReadOnlyList<TextMatch> expected, bool? ignoreCase = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return TextListAsync(Field.ContainsText, expected, ignoreCase, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for a form control's value, compared as it is.</summary>
+    public Task ToHaveValueAsync(TextMatch expected, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return TextAsync(Field.Value, expected, null, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for an accessible name.</summary>
+    public Task ToHaveAccessibleNameAsync(TextMatch expected, bool? ignoreCase = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        return TextAsync(Field.Name, expected, ignoreCase, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for the attribute to be present.</summary>
+    public Task ToHaveAttributeAsync(string name, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return AttributeAsync(name, null, null, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for the attribute to be present and its normalized value to match.</summary>
+    public Task ToHaveAttributeAsync(string name, TextMatch value, bool? ignoreCase = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(value);
+        return AttributeAsync(name, value, ignoreCase, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for an exact match count.</summary>
+    public Task ToHaveCountAsync(int count, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         return PollAsync(
             "toHaveCount",
-            matches => matches.Count == count ? null : "matched " + matches.Count.ToString(CultureInfo.InvariantCulture) + " nodes",
-            strict: false,
+            "count " + Number(count),
+            timeout,
+            includeHidden: false,
+            matches => new Verdict(matches.Count == count, "count " + Number(matches.Count)),
             cancellationToken);
     }
 
-    public Task ToBeEnabledAsync(CancellationToken cancellationToken = default)
+    private Task VisibilityAsync(string matcher, bool visible, TimeSpan? timeout, CancellationToken cancellationToken)
     {
-        return PollSingleAsync("toBeEnabled", node => node.States.Disabled ? "was disabled" : null, cancellationToken);
+        // Text queries keep hidden matches, so a match can be hidden. Visible is
+        // one match that is not hidden; hidden is no match or one hidden match.
+        return PollAsync(
+            matcher,
+            visible ? "visible" : "hidden or absent",
+            timeout,
+            includeHidden: false,
+            matches =>
+            {
+                if (visible && matches.Count > 1)
+                {
+                    return Verdict.Strict(matches.Count);
+                }
+
+                var shown = matches.Count == 1 && !matches[0].States.Hidden;
+                var observed = matches.Count switch
+                {
+                    0 => "absent",
+                    1 => shown ? "visible" : "hidden",
+                    _ => matches.Count.ToString(CultureInfo.InvariantCulture) + " nodes",
+                };
+                var hidden = matches.Count == 0 || (matches.Count == 1 && !shown);
+                return new Verdict(visible ? shown : hidden, observed);
+            },
+            cancellationToken);
     }
 
-    public Task ToBeDisabledAsync(CancellationToken cancellationToken = default)
+    private Task StateAsync(string matcher, Func<SemanticNode, bool> state, bool expected, string describeExpected, TimeSpan? timeout, CancellationToken cancellationToken)
     {
-        return PollSingleAsync("toBeDisabled", node => node.States.Disabled ? null : "was enabled", cancellationToken);
+        return PollSingleAsync(
+            matcher,
+            describeExpected,
+            timeout,
+            node => new Verdict(state(node) == expected, ObservedStates(node)),
+            cancellationToken);
     }
 
-    public Task ToBeCheckedAsync(CancellationToken cancellationToken = default)
-    {
-        return PollSingleAsync("toBeChecked", node => node.States.Checked ? null : "was not checked", cancellationToken);
-    }
-
-    public Task ToHaveValueAsync(string expected, CancellationToken cancellationToken = default)
+    private Task TextAsync(Field field, TextMatch expected, bool? ignoreCase, TimeSpan? timeout, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(expected);
+        var pattern = expected.WithIgnoreCase(ignoreCase);
         return PollSingleAsync(
-            "toHaveValue",
-            node => string.Equals(node.Value ?? "", expected, StringComparison.Ordinal) ? null : "had value " + Quote(node.Value),
+            field.Matcher,
+            field.DescribeExpected(pattern.Describe(ignoreCase)),
+            timeout,
+            node =>
+            {
+                if (field.ReadsWithheld)
+                {
+                    DenySecure([node]);
+                }
+
+                var actual = field.Read(node);
+                return new Verdict(field.Compare(actual, pattern, ignoreCase), field.Label + " " + field.Print(actual));
+            },
             cancellationToken);
     }
 
-    private Task PollSingleAsync(string matcher, Func<SemanticNode, string?> check, CancellationToken cancellationToken)
+    private Task TextListAsync(Field field, IReadOnlyList<TextMatch> expected, bool? ignoreCase, TimeSpan? timeout, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var patterns = expected.Select(entry =>
+        {
+            ArgumentNullException.ThrowIfNull(entry, nameof(expected));
+            return entry.WithIgnoreCase(ignoreCase);
+        }).ToList();
+        bool Satisfies(SemanticNode node, TextMatch pattern) => field.Compare(field.Read(node), pattern, ignoreCase);
+        return PollAsync(
+            field.Matcher,
+            field.DescribeExpected("[" + string.Join(", ", patterns.Select(pattern => pattern.Describe(ignoreCase))) + "]"),
+            timeout,
+            includeHidden: false,
+            matches =>
+            {
+                DenySecure(matches);
+                var holds = field.Contains ? MatchesSubsequence(matches, patterns, Satisfies) : MatchesPositionally(matches, patterns, Satisfies);
+                return new Verdict(holds, field.Label + " [" + string.Join(", ", matches.Select(node => field.Print(field.Read(node)))) + "]");
+            },
+            cancellationToken);
+    }
+
+    private Task AttributeAsync(string name, TextMatch? value, bool? ignoreCase, TimeSpan? timeout, CancellationToken cancellationToken)
+    {
+        var pattern = value?.WithIgnoreCase(ignoreCase);
+        return PollSingleAsync(
+            "toHaveAttribute",
+            pattern is null ? "attribute \"" + name + "\"" : "attribute \"" + name + "\" " + pattern.Describe(ignoreCase),
+            timeout,
+            node =>
+            {
+                DenySecure([node]);
+                if (!node.Attributes.TryGetValue(name, out var attribute))
+                {
+                    return new Verdict(false, "attribute \"" + name + "\" absent");
+                }
+
+                var holds = pattern is null || TextRules.Compare(attribute, pattern, contains: false, normalize: true, ignoreCase);
+                return new Verdict(holds, "attribute \"" + name + "\" " + Quote(attribute));
+            },
+            cancellationToken);
+    }
+
+    /// <summary>A matcher that needs exactly one match before its condition means anything.</summary>
+    private Task PollSingleAsync(string matcher, string describeExpected, TimeSpan? timeout, Func<SemanticNode, Verdict> check, CancellationToken cancellationToken)
     {
         return PollAsync(
             matcher,
-            matches =>
+            describeExpected,
+            timeout,
+            includeHidden: false,
+            matches => matches.Count switch
             {
-                if (matches.Count != 1)
-                {
-                    return "matched " + matches.Count.ToString(CultureInfo.InvariantCulture) + " nodes";
-                }
-
-                return check(matches[0]);
+                0 => new Verdict(null, "no node"),
+                1 => check(matches[0]),
+                _ => Verdict.Strict(matches.Count),
             },
-            strict: true,
             cancellationToken);
     }
 
-    private async Task PollAsync(string matcher, Func<IReadOnlyList<SemanticNode>, string?> check, bool strict, CancellationToken cancellationToken)
+    /// <summary>
+    /// Polls until the condition holds, or, negated, until it has been false for <see cref="NegationGrace"/>
+    /// in a row (or for the whole budget when that is shorter). A sample that cannot answer resets the
+    /// negation clock: <c>not.toBeChecked</c> on no node is not a pass.
+    /// </summary>
+    private async Task PollAsync(
+        string matcher,
+        string describeExpected,
+        TimeSpan? timeout,
+        bool includeHidden,
+        Func<IReadOnlyList<SemanticNode>, Verdict> evaluate,
+        CancellationToken cancellationToken)
     {
+        if (timeout is { } budget)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(budget, TimeSpan.Zero, nameof(timeout));
+        }
+
         var token = _locator.Screen.Token(cancellationToken);
-        var timeout = _locator.Screen.AssertionTimeout;
-        var deadline = DateTime.UtcNow + timeout;
-        string? failure = null;
+        var start = DateTime.UtcNow;
+        var deadline = start + (timeout ?? _locator.Screen.AssertionTimeout);
+        var grace = deadline - start < NegationGrace ? deadline - start : NegationGrace;
+        DateTime? falseSince = null;
         while (true)
         {
             token.ThrowIfCancellationRequested();
-            var matches = await _locator.ResolveAsync(token).ConfigureAwait(false);
-            failure = check(matches);
-            if (failure is null)
+            var matches = await _locator.ResolveAsync(token, includeHidden).ConfigureAwait(false);
+            var verdict = evaluate(matches);
+            var now = DateTime.UtcNow;
+            if (!_negated && verdict.Holds == true)
             {
                 _locator.Screen.NotifyVerified();
                 return;
             }
 
-            if (DateTime.UtcNow >= deadline)
+            if (_negated && verdict.Holds == false)
             {
-                var code = strict && IsStrict(failure) ? "STRICT_MODE" : "ASSERTION_FAILED";
+                falseSince ??= now;
+                if (now - falseSince >= grace)
+                {
+                    _locator.Screen.NotifyVerified();
+                    return;
+                }
+            }
+            else
+            {
+                falseSince = null;
+            }
+
+            if (now >= deadline)
+            {
+                var name = (_negated ? "not." : "") + matcher;
+                var code = verdict.StrictCount > 1 ? "STRICT_MODE" : "ASSERTION_FAILED";
                 throw new TestException(
                     code,
-                    "expect(" + _locator.Query.Describe() + ")." + matcher + " failed: " + failure);
+                    "expect(" + _locator.Query.Describe() + ")." + name + " failed: expected " + (_negated ? "not " : "") + describeExpected
+                    + "; observed " + verdict.Observed + " (match count " + Number(matches.Count) + ")");
             }
 
             await Task.Delay(_locator.Screen.PollInterval, token).ConfigureAwait(false);
         }
     }
 
-    private static string? ShownText(SemanticNode node) => node.Text ?? node.Name;
-
-    private static bool TextEquals(string? actual, string expected, bool exact)
+    /// <summary>A secure field's text, value, and attributes are withheld, so reading them is denied rather than read as empty.</summary>
+    private void DenySecure(IReadOnlyList<SemanticNode> nodes)
     {
-        return Internal.TextRules.Matches(actual, expected, exact);
+        if (nodes.Any(node => node.States.Secure))
+        {
+            throw new TestException("POLICY_DENIED", "reading values from a secure field is denied: " + _locator.Query.Describe());
+        }
     }
+
+    private static bool MatchesPositionally(IReadOnlyList<SemanticNode> nodes, List<TextMatch> patterns, Func<SemanticNode, TextMatch, bool> satisfies)
+    {
+        if (nodes.Count != patterns.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < nodes.Count; i++)
+        {
+            if (!satisfies(nodes[i], patterns[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Whether every pattern is satisfied by a distinct node, in order. Greedy, which finds a subsequence whenever one exists.</summary>
+    private static bool MatchesSubsequence(IReadOnlyList<SemanticNode> nodes, List<TextMatch> patterns, Func<SemanticNode, TextMatch, bool> satisfies)
+    {
+        var next = 0;
+        foreach (var node in nodes)
+        {
+            if (next == patterns.Count)
+            {
+                break;
+            }
+
+            if (satisfies(node, patterns[next]))
+            {
+                next++;
+            }
+        }
+
+        return next == patterns.Count;
+    }
+
+    private static string ObservedStates(SemanticNode node)
+    {
+        var states = node.States;
+        var active = new List<string>();
+        void Add(bool on, string name)
+        {
+            if (on)
+            {
+                active.Add(name);
+            }
+        }
+
+        Add(states.Checked, "checked");
+        Add(states.Disabled, "disabled");
+        Add(states.Expanded, "expanded");
+        Add(states.Focused, "focused");
+        Add(states.Hidden, "hidden");
+        Add(states.Secure, "secure");
+        Add(states.Selected, "selected");
+        Add(states.Pressed, "pressed");
+        return active.Count == 0 ? "default states" : "states: " + string.Join(", ", active);
+    }
+
+    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
 
     private static string Quote(string? value) => "\"" + (value ?? "") + "\"";
 
-    private static bool IsStrict(string failure)
+    /// <summary>One sample's answer: <see cref="Holds"/> is null when the sample cannot answer, such as no node or several.</summary>
+    private readonly record struct Verdict(bool? Holds, string Observed, int StrictCount = 0)
     {
-        const string prefix = "matched ";
-        if (!failure.StartsWith(prefix, StringComparison.Ordinal))
+        public static Verdict Strict(int count) => new(null, "matched " + Number(count) + " nodes", count);
+    }
+
+    /// <summary>The node field a text matcher reads, and how it compares.</summary>
+    private sealed class Field
+    {
+        public static readonly Field HasText = new("toHaveText", "text", contains: false, normalize: true, readsWithheld: true, pattern => "text " + pattern);
+
+        public static readonly Field ContainsText = new("toContainText", "text", contains: true, normalize: true, readsWithheld: true, pattern => "text containing " + pattern);
+
+        public static readonly Field Value = new("toHaveValue", "value", contains: false, normalize: false, readsWithheld: true, pattern => "value " + pattern);
+
+        public static readonly Field Name = new("toHaveAccessibleName", "accessible name", contains: false, normalize: true, readsWithheld: false, pattern => "accessible name " + pattern);
+
+        private readonly bool _normalize;
+
+        private Field(string matcher, string label, bool contains, bool normalize, bool readsWithheld, Func<string, string> describeExpected)
         {
-            return false;
+            Matcher = matcher;
+            Label = label;
+            Contains = contains;
+            _normalize = normalize;
+            ReadsWithheld = readsWithheld;
+            DescribeExpected = describeExpected;
         }
 
-        var rest = failure[prefix.Length..];
-        var space = rest.IndexOf(' ');
-        if (space <= 0)
+        public string Matcher { get; }
+
+        public string Label { get; }
+
+        public bool Contains { get; }
+
+        public bool ReadsWithheld { get; }
+
+        public Func<string, string> DescribeExpected { get; }
+
+        /// <summary>
+        /// The field as the matcher reads it, the empty string when absent. Text falls back to the name,
+        /// since this port reports a control's label as its name and leaves its text empty.
+        /// </summary>
+        public string Read(SemanticNode node)
         {
-            return false;
+            if (ReferenceEquals(this, Value))
+            {
+                return node.Value ?? "";
+            }
+
+            if (ReferenceEquals(this, Name))
+            {
+                return node.Name ?? "";
+            }
+
+            return node.Text ?? node.Name ?? "";
         }
 
-        return int.TryParse(rest[..space], NumberStyles.None, CultureInfo.InvariantCulture, out var count) && count > 1;
+        public bool Compare(string actual, TextMatch pattern, bool? ignoreCase)
+        {
+            return TextRules.Compare(actual, pattern, Contains, _normalize, ignoreCase);
+        }
+
+        public string Print(string actual) => Quote(_normalize ? TextRules.Normalize(actual) : actual);
     }
 }

@@ -21,7 +21,7 @@ dotnet build
 dotnet test
 ```
 
-The Playwright test is skipped in-process when Chromium is missing. Install it with the `playwright.ps1` script in the `E2E` build output.
+The Chromium tests in `tests/E2E.Tests` install the Chromium build that Playwright expects once per run, through `BrowserFixture`. They need network access the first time, and fail if the install fails.
 
 Style is enforced at build time through `.editorconfig` and `Directory.Build.props` (`EnforceCodeStyleInBuild`, `TreatWarningsAsErrors`). C# files use the Apache file header.
 
