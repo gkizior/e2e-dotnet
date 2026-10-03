@@ -17,6 +17,7 @@ public sealed class Agent
         "You are an e2e test agent. Act only by calling tools. Finish with done. " +
         "Target a control by its role and name from the screen snapshot. " +
         "done status is passed, failed, or blocked. " +
+        "blocked means credentials, the environment, or test setup prevented a verdict, and requires a code. " +
         "Never type a secret value. Call fill_secret with the secret name. " +
         "A secret looks like <secret:name>.";
 
@@ -128,10 +129,10 @@ public sealed class Agent
 
                 if (string.Equals(outcome.Status, "blocked", StringComparison.Ordinal))
                 {
-                    throw new AgentException(code ?? "AUTOMATION_UNSUPPORTED", summary.Length == 0 ? "The step is blocked." : summary);
+                    throw new AgentException(code!, summary.Length == 0 ? "The step is blocked." : summary);
                 }
 
-                throw new AgentException(code ?? "ASSERTION_FAILED", summary.Length == 0 ? "The step failed." : summary);
+                throw new AgentException(code ?? "ACTION_FAILED", summary.Length == 0 ? "The step failed." : summary);
             }
 
             if (failures >= 3 && failures < 5)
@@ -140,7 +141,7 @@ public sealed class Agent
             }
         }
 
-        throw new AgentException("STEP_BUDGET_EXHAUSTED", "The step used its model-call budget.");
+        throw new AgentException("STEP_NO_CONCLUSION", "The step used " + maxCalls.ToString(CultureInfo.InvariantCulture) + " model call(s) without a verdict.");
     }
 
     public Task AssertAsync(string statement, AssertOptions? options = null, CancellationToken cancellationToken = default)
@@ -178,12 +179,6 @@ public sealed class Agent
                 {
                     _scope.MarkVerified();
                     return;
-                }
-
-                if (string.Equals(verdict.Status, "blocked", StringComparison.Ordinal)
-                    && verdict.Code is not ("ASSERTION_FAILED" or "ASSERTION_INCONCLUSIVE"))
-                {
-                    throw new AgentException(verdict.Code ?? "AUTOMATION_UNSUPPORTED", verdict.Summary ?? "waitFor is blocked.");
                 }
             }
 
@@ -227,7 +222,7 @@ public sealed class Agent
             var done = response.ToolCalls.FirstOrDefault(item => string.Equals(item.Name, "done", StringComparison.Ordinal));
             if (done is not null)
             {
-                throw new AgentException(Args.String(done.Arguments, "code") ?? "ASSERTION_INCONCLUSIVE", Args.String(done.Arguments, "summary") ?? "The screen did not contain the data.");
+                throw new AgentException("ASSERTION_INCONCLUSIVE", Args.String(done.Arguments, "summary") ?? "The screen did not contain the data.");
             }
 
             throw new AgentException("MODEL_OUTPUT_INVALID", "extract did not return data.");
@@ -270,18 +265,7 @@ public sealed class Agent
             return;
         }
 
-        var code = verdict.Code;
-        if (string.Equals(verdict.Status, "failed", StringComparison.Ordinal) && string.IsNullOrEmpty(code))
-        {
-            code = "ASSERTION_FAILED";
-        }
-
-        if (string.Equals(verdict.Status, "blocked", StringComparison.Ordinal) && string.IsNullOrEmpty(code))
-        {
-            code = "AUTOMATION_UNSUPPORTED";
-        }
-
-        throw new AgentException(code ?? "ASSERTION_FAILED", verdict.Summary ?? "The statement did not hold.");
+        throw new AgentException(verdict.Code!, verdict.Summary ?? "The statement did not hold.");
     }
 
     private async Task<Verdict> JudgeOnceAsync(string statement, string snapshot, CancellationToken token)
@@ -298,7 +282,7 @@ public sealed class Agent
         }
 
         messages.Add(new ModelMessage { Role = "assistant", Content = response.Content, ToolCalls = response.ToolCalls });
-        messages.Add(new ModelMessage { Role = "user", Content = "Call done with status passed, failed, or blocked." });
+        messages.Add(new ModelMessage { Role = "user", Content = "Call done with status passed or failed." });
         response = await CallModelAsync(JudgeSystem, messages, AgentTools.Judge, token).ConfigureAwait(false);
         verdict = ReadVerdict(response);
         if (verdict is null)
@@ -323,10 +307,11 @@ public sealed class Agent
             return null;
         }
 
-        var code = Args.String(done.Arguments, "code");
-        if (string.Equals(status, "passed", StringComparison.Ordinal))
+        // A judge answers holds, fails, or inconclusive. A judge that cannot decide is inconclusive.
+        string? code = null;
+        if (!string.Equals(status, "passed", StringComparison.Ordinal))
         {
-            code = null;
+            code = status == "blocked" || Args.String(done.Arguments, "code") == "ASSERTION_INCONCLUSIVE" ? "ASSERTION_INCONCLUSIVE" : "ASSERTION_FAILED";
         }
 
         return new Verdict(status, Args.String(done.Arguments, "summary"), code);
@@ -486,10 +471,18 @@ public sealed class Agent
                 return ToolOutcome.Fail("done status must be passed, failed, or blocked.");
             }
 
+            // The model picks only from a closed set of codes. The runtime assigns the rest.
             var code = Args.String(call.Arguments, "code");
-            if (string.Equals(status, "passed", StringComparison.Ordinal))
+            if (string.Equals(status, "passed", StringComparison.Ordinal) || !AgentTools.ModelErrorCodes.Contains(code))
             {
                 code = null;
+            }
+
+            if (string.Equals(status, "blocked", StringComparison.Ordinal) && !AgentTools.BlockableCodes.Contains(code))
+            {
+                return ToolOutcome.Fail(
+                    "a blocked verdict requires a code naming what blocked you (one of " + string.Join(", ", AgentTools.BlockableCodes) + "). " +
+                    "If the application itself misbehaved, use status failed instead.");
             }
 
             return ToolOutcome.Finish(status, Args.String(call.Arguments, "summary"), code);

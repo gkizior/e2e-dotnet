@@ -423,6 +423,118 @@ public sealed class CoreTests
         Assert.Equal(1, second.Replayed);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("STEP_TIMEOUT")]
+    [InlineData("MADE_UP")]
+    public async Task A_failed_act_without_a_model_code_is_an_action_failure(string? code)
+    {
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.ActAsync("upgrade");
+            },
+            model: new ScriptedModel(_ => ModelResponses.Done("failed", "No upgrade button.", code)));
+
+        var error = Assert.IsType<AgentException>(result.Error);
+        Assert.Equal("ACTION_FAILED", error.Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("ASSERTION_FAILED")]
+    [InlineData("STEP_TIMEOUT")]
+    public async Task A_blocked_act_needs_a_blockable_code(string? code)
+    {
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            return text.Contains("failed: ", StringComparison.Ordinal)
+                ? ModelResponses.Done("blocked", "No network.", "ENVIRONMENT_UNAVAILABLE")
+                : ModelResponses.Done("blocked", "Cannot upgrade.", code);
+        });
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.ActAsync("upgrade");
+            },
+            model: model);
+
+        var error = Assert.IsType<AgentException>(result.Error);
+        Assert.Equal("ENVIRONMENT_UNAVAILABLE", error.Code);
+        Assert.Equal(2, model.CallCount);
+    }
+
+    [Fact]
+    public async Task Act_without_a_verdict_has_no_conclusion()
+    {
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.ActAsync("upgrade", new ActOptions { MaxModelCalls = 2 });
+            },
+            model: new ScriptedModel(_ => new ModelResponse { Content = "thinking" }));
+
+        var error = Assert.IsType<AgentException>(result.Error);
+        Assert.Equal("STEP_NO_CONCLUSION", error.Code);
+    }
+
+    [Theory]
+    [InlineData("ASSERTION_INCONCLUSIVE", "ASSERTION_INCONCLUSIVE")]
+    [InlineData("AUTOMATION_UNSUPPORTED", "ASSERTION_FAILED")]
+    [InlineData(null, "ASSERTION_FAILED")]
+    public async Task Assert_fails_only_with_judge_codes(string? code, string expected)
+    {
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.AssertAsync("the plan is Pro");
+            },
+            model: new ScriptedModel(_ => ModelResponses.Done("failed", "Not Pro.", code)));
+
+        var error = Assert.IsType<AgentException>(result.Error);
+        Assert.Equal(expected, error.Code);
+    }
+
+    [Fact]
+    public async Task WaitFor_keeps_waiting_after_a_blocked_judgment()
+    {
+        DocumentElement? status = null;
+        var world = new DocumentWorld().Map("/wait", page =>
+        {
+            status = page.Status("Ready", hidden: true);
+        });
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            if (text.Contains("Ready", StringComparison.Ordinal))
+            {
+                return ModelResponses.Done("passed", "Ready.");
+            }
+
+            return ModelResponses.Done("blocked", "Not ready yet.", "AUTOMATION_UNSUPPORTED");
+        });
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/wait");
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(80);
+                    status!.Hidden = false;
+                });
+                await ctx.Agent.WaitForAsync("the status is shown");
+            },
+            world,
+            model);
+
+        Assert.Null(result.Error);
+    }
+
     [Fact]
     public async Task Identical_acts_in_one_test_replay_their_own_recordings()
     {
