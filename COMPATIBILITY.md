@@ -43,6 +43,6 @@ A passing locator expectation or `agent.assert` after `act` writes the recording
 
 ## Web engine
 
-`WebEngine` launches Chromium through Playwright and builds a semantic tree in the page: explicit roles, common implicit roles, accessible name, text, `data-testid`, disabled, checked, and hidden. Actions go through Playwright's `GetByRole` / `GetByTestId`. Firefox and WebKit launch options are not exposed yet; the package reference can drive them later.
+`WebEngine` launches Chromium through Playwright and builds a semantic tree in the page: explicit roles, common implicit roles, accessible name, text, `data-testid`, disabled, checked, and hidden. Each observed element keeps a stable ref for the life of the document, and actions run on the element that ref names. Firefox and WebKit launch options are not exposed yet; the package reference can drive them later.
 
 Password fields are marked secure and their values are omitted from the snapshot.

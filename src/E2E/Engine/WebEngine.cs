@@ -73,6 +73,7 @@ public sealed class WebEngine : IEngine
         private readonly IBrowser _browser;
         private readonly IPage _page;
         private readonly TimeSpan _actionTimeout;
+        private int _nextRef = 1;
 
         public WebSession(IPlaywright playwright, IBrowser browser, IPage page, TimeSpan actionTimeout)
         {
@@ -97,10 +98,10 @@ public sealed class WebEngine : IEngine
         public async Task<Observation> ObserveAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var json = await _page.EvaluateAsync<string>(PageScript.Collect).ConfigureAwait(false);
-            var dtos = System.Text.Json.JsonSerializer.Deserialize<List<WebNode>>(json, JsonDefaults.Options) ?? [];
-            var next = 1;
-            var roots = dtos.Select(dto => ToNode(dto, ref next)).ToList();
+            var json = await _page.EvaluateAsync<string>(PageScript.Collect, _nextRef).ConfigureAwait(false);
+            var dto = System.Text.Json.JsonSerializer.Deserialize<WebObservation>(json, JsonDefaults.Options);
+            _nextRef = dto?.Next ?? _nextRef;
+            var roots = (dto?.Roots ?? []).Select(ToNode).ToList();
             return new Observation { Route = Route, Roots = roots };
         }
 
@@ -109,33 +110,48 @@ public sealed class WebEngine : IEngine
             cancellationToken.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(node);
             ArgumentNullException.ThrowIfNull(action);
-            var locator = LocatorFor(node);
-            var timeout = (float)_actionTimeout.TotalMilliseconds;
-            switch (action)
+            var handle = await _page.EvaluateHandleAsync(PageScript.Find, node.Ref).ConfigureAwait(false);
+            var element = handle.AsElement();
+            if (element is null)
             {
-                case LocatorAction.Tap:
-                    await locator.ClickAsync(new LocatorClickOptions { Timeout = timeout }).ConfigureAwait(false);
-                    break;
-                case LocatorAction.Fill fill:
-                    await locator.FillAsync(fill.Value, new LocatorFillOptions { Timeout = timeout }).ConfigureAwait(false);
-                    break;
-                case LocatorAction.Press press:
-                    await locator.PressAsync(press.Key, new LocatorPressOptions { Timeout = timeout }).ConfigureAwait(false);
-                    break;
-                case LocatorAction.Select select:
-                    await locator.SelectOptionAsync(select.Value, new LocatorSelectOptionOptions { Timeout = timeout }).ConfigureAwait(false);
-                    break;
-                case LocatorAction.Check:
-                    await locator.CheckAsync(new LocatorCheckOptions { Timeout = timeout }).ConfigureAwait(false);
-                    break;
-                case LocatorAction.Uncheck:
-                    await locator.UncheckAsync(new LocatorUncheckOptions { Timeout = timeout }).ConfigureAwait(false);
-                    break;
-                case LocatorAction.Clear:
-                    await locator.FillAsync("", new LocatorFillOptions { Timeout = timeout }).ConfigureAwait(false);
-                    break;
-                default:
-                    throw new EngineException("UNSUPPORTED_CAPABILITY", "Web engine cannot perform " + action.GetType().Name + ".");
+                await handle.DisposeAsync().ConfigureAwait(false);
+                throw new EngineException("NOT_FOUND", $"Node {node.Ref} is not on the page.");
+            }
+
+            await using var disposeElement = element.ConfigureAwait(false);
+            var timeout = (float)_actionTimeout.TotalMilliseconds;
+            try
+            {
+                switch (action)
+                {
+                    case LocatorAction.Tap:
+                        await element.ClickAsync(new ElementHandleClickOptions { Timeout = timeout }).ConfigureAwait(false);
+                        break;
+                    case LocatorAction.Fill fill:
+                        await element.FillAsync(fill.Value, new ElementHandleFillOptions { Timeout = timeout }).ConfigureAwait(false);
+                        break;
+                    case LocatorAction.Press press:
+                        await element.PressAsync(press.Key, new ElementHandlePressOptions { Timeout = timeout }).ConfigureAwait(false);
+                        break;
+                    case LocatorAction.Select select:
+                        await element.SelectOptionAsync(select.Value, new ElementHandleSelectOptionOptions { Timeout = timeout }).ConfigureAwait(false);
+                        break;
+                    case LocatorAction.Check:
+                        await element.CheckAsync(new ElementHandleCheckOptions { Timeout = timeout }).ConfigureAwait(false);
+                        break;
+                    case LocatorAction.Uncheck:
+                        await element.UncheckAsync(new ElementHandleUncheckOptions { Timeout = timeout }).ConfigureAwait(false);
+                        break;
+                    case LocatorAction.Clear:
+                        await element.FillAsync("", new ElementHandleFillOptions { Timeout = timeout }).ConfigureAwait(false);
+                        break;
+                    default:
+                        throw new EngineException("UNSUPPORTED_CAPABILITY", "Web engine cannot perform " + action.GetType().Name + ".");
+                }
+            }
+            catch (PlaywrightException ex) when (ex.Message.Contains("not attached", StringComparison.Ordinal))
+            {
+                throw new EngineException("NOT_FOUND", $"Node {node.Ref} left the page before the action.", ex);
             }
         }
 
@@ -151,99 +167,11 @@ public sealed class WebEngine : IEngine
             _playwright.Dispose();
         }
 
-        private ILocator LocatorFor(SemanticNode node)
+        private static SemanticNode ToNode(WebNode dto)
         {
-            if (!string.IsNullOrEmpty(node.TestId))
-            {
-                return _page.GetByTestId(node.TestId);
-            }
-
-            if (node.Role is not null && TryRole(node.Role, out var role))
-            {
-                if (string.IsNullOrEmpty(node.Name))
-                {
-                    return _page.GetByRole(role);
-                }
-
-                return _page.GetByRole(role, new PageGetByRoleOptions { Name = node.Name, Exact = true });
-            }
-
-            if (!string.IsNullOrEmpty(node.Name))
-            {
-                return _page.GetByText(node.Name, new PageGetByTextOptions { Exact = true });
-            }
-
-            if (!string.IsNullOrEmpty(node.Text))
-            {
-                return _page.GetByText(node.Text, new PageGetByTextOptions { Exact = true });
-            }
-
-            throw new EngineException("NOT_FOUND", "Node " + node.Ref + " has no role, name, or test id.");
-        }
-
-        private static bool TryRole(string role, out AriaRole aria)
-        {
-            switch (role.ToLowerInvariant())
-            {
-                case "button":
-                    aria = AriaRole.Button;
-                    return true;
-                case "link":
-                    aria = AriaRole.Link;
-                    return true;
-                case "textbox":
-                case "searchbox":
-                    aria = AriaRole.Textbox;
-                    return true;
-                case "checkbox":
-                    aria = AriaRole.Checkbox;
-                    return true;
-                case "radio":
-                    aria = AriaRole.Radio;
-                    return true;
-                case "heading":
-                    aria = AriaRole.Heading;
-                    return true;
-                case "status":
-                    aria = AriaRole.Status;
-                    return true;
-                case "combobox":
-                    aria = AriaRole.Combobox;
-                    return true;
-                case "listitem":
-                    aria = AriaRole.Listitem;
-                    return true;
-                case "tab":
-                    aria = AriaRole.Tab;
-                    return true;
-                case "image":
-                    aria = AriaRole.Img;
-                    return true;
-                case "navigation":
-                    aria = AriaRole.Navigation;
-                    return true;
-                default:
-                    aria = default;
-                    return false;
-            }
-        }
-
-        private static SemanticNode ToNode(WebNode dto, ref int next)
-        {
-            var id = "e" + next.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            next++;
-            var children = new List<SemanticNode>();
-            if (dto.Children is not null)
-            {
-                foreach (var child in dto.Children)
-                {
-                    children.Add(ToNode(child, ref next));
-                }
-            }
-
             return new SemanticNode
             {
-                Ref = id,
+                Ref = dto.Ref,
                 Role = dto.Role,
                 Name = dto.Name,
                 Text = dto.Text,
@@ -259,13 +187,22 @@ public sealed class WebEngine : IEngine
                     Hidden = dto.Hidden,
                     Secure = dto.Secure,
                 },
-                Children = children,
+                Children = dto.Children?.Select(ToNode).ToList() ?? [],
             };
         }
     }
 
+    private sealed class WebObservation
+    {
+        public int Next { get; set; }
+
+        public List<WebNode>? Roots { get; set; }
+    }
+
     private sealed class WebNode
     {
+        public string Ref { get; set; } = "";
+
         public string? Role { get; set; }
 
         public string? Name { get; set; }
