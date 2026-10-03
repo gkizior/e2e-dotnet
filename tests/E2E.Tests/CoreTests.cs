@@ -57,6 +57,40 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public async Task Text_query_matches_the_innermost_node_only()
+    {
+        var world = new DocumentWorld().Map("/total", page =>
+        {
+            page.Paragraph("Total: 42").Children.Add(new DocumentElement { Text = "Total: 42" });
+        });
+        var result = await RunAsync(async ctx =>
+        {
+            await ctx.App.OpenAsync("/total");
+            await Expect.That(ctx.Screen.GetByText("Total: 42")).ToHaveCountAsync(1);
+            Assert.Equal("Total: 42", await ctx.Screen.GetByText("Total: 42").TextContentAsync());
+        }, world);
+
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
+    public async Task Filter_has_text_ignores_case()
+    {
+        var world = new DocumentWorld().Map("/buttons", page =>
+        {
+            page.Button("Save draft");
+            page.Button("Cancel");
+        });
+        var result = await RunAsync(async ctx =>
+        {
+            await ctx.App.OpenAsync("/buttons");
+            await ctx.Screen.GetByRole("button").Filter("SAVE").TapAsync();
+        }, world);
+
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
     public async Task Tap_waits_for_a_button_that_appears_later()
     {
         DocumentElement? save = null;

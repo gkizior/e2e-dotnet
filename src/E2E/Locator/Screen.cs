@@ -331,6 +331,11 @@ internal static class LocatorResolver
             }
         }
 
+        if (query.Kind is "text" or "label")
+        {
+            matches = InnermostOnly(matches);
+        }
+
         if (query.HasText is not null)
         {
             matches = matches.Where(node => ContainsText(node, query.HasText)).ToList();
@@ -387,6 +392,17 @@ internal static class LocatorResolver
         };
     }
 
+    /// <summary>
+    /// Drops every match that contains another match. A container that repeats
+    /// its child's text is not a second match, as upstream answers text and
+    /// label queries with the innermost node.
+    /// </summary>
+    private static List<SemanticNode> InnermostOnly(List<SemanticNode> matches)
+    {
+        var set = new HashSet<SemanticNode>(matches);
+        return matches.Where(node => !Walk(node.Children).Any(set.Contains)).ToList();
+    }
+
     private static bool RoleIs(SemanticNode node, string? role)
     {
         return node.Role is not null && role is not null && string.Equals(node.Role, role, StringComparison.OrdinalIgnoreCase);
@@ -394,7 +410,7 @@ internal static class LocatorResolver
 
     private static bool ContainsText(SemanticNode node, string expected)
     {
-        if (TextRules.Contains(node.Name, expected) || TextRules.Contains(node.Text, expected) || TextRules.Contains(node.Value, expected))
+        if (TextRules.Matches(node.Name, expected, exact: false) || TextRules.Matches(node.Text, expected, exact: false) || TextRules.Matches(node.Value, expected, exact: false))
         {
             return true;
         }
