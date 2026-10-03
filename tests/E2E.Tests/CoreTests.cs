@@ -424,6 +424,99 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public async Task Identical_acts_in_one_test_replay_their_own_recordings()
+    {
+        var directory = TempCache();
+        var world = new DocumentWorld().Map("/wizard", page =>
+        {
+            var done = page.Status("Done", hidden: true);
+            DocumentElement? next = null;
+            DocumentElement? finish = null;
+            next = page.Button("Next", () =>
+            {
+                next!.Hidden = true;
+                finish!.Hidden = false;
+            });
+            finish = page.Button("Finish", () => done.Hidden = false);
+            finish.Hidden = true;
+        });
+        var actCalls = 0;
+        var model = new ScriptedModel(request =>
+        {
+            actCalls++;
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            if (text.Contains("tapped", StringComparison.Ordinal))
+            {
+                return ModelResponses.Done("passed", "advanced");
+            }
+
+            return text.Contains("button \"Next\"", StringComparison.Ordinal)
+                ? ModelResponses.Tap("button", "Next")
+                : ModelResponses.Tap("button", "Finish");
+        });
+
+        async Task Body(TestContext ctx)
+        {
+            await ctx.App.OpenAsync("/wizard");
+            await ctx.Agent.ActAsync("go to the next step");
+            await ctx.Agent.ActAsync("go to the next step");
+            await Expect.That(ctx.Screen.GetByRole("status", "Done")).ToBeVisibleAsync();
+        }
+
+        var first = await RunAsync(Body, world, model, directory);
+        Assert.Null(first.Error);
+        actCalls = 0;
+
+        var second = await RunAsync(Body, world, model, directory);
+        Assert.Null(second.Error);
+        Assert.Equal(0, actCalls);
+        Assert.Equal(2, second.Replayed);
+        Assert.Equal(0, second.Missed);
+    }
+
+    [Fact]
+    public void Nested_params_key_by_their_content()
+    {
+        string Key(object? value) => CacheKeys.Create("document", "1.0.0", "test", "add items", new Dictionary<string, object?> { ["items"] = value });
+
+        Assert.NotEqual(Key(new[] { "apple" }), Key(new[] { "pear" }));
+        Assert.Equal(Key(new[] { Values.Unique("a@example.test") }), Key(new[] { Values.Unique("b@example.test") }));
+        Assert.Equal(
+            Key(new { password = Secret.Create("password", "one") }),
+            Key(new { password = Secret.Create("password", "two") }));
+        Assert.Equal("{\"password\":\"<secret:password>\"}", CacheKeys.Canonical(new { password = Secret.Create("password", "one") }));
+
+        var cycle = new List<object>();
+        cycle.Add(cycle);
+        Assert.Equal("INVALID_ARGUMENT", Assert.Throws<TestException>(() => Key(cycle)).Code);
+    }
+
+    [Fact]
+    public async Task Nested_params_reach_the_model_as_json()
+    {
+        var model = new ScriptedModel(_ => ModelResponses.Done("passed", "added"));
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.ActAsync("add {items} to the cart", new ActOptions
+                {
+                    Params = new Dictionary<string, object?>
+                    {
+                        ["items"] = new object[] { "apple", Values.Unique("pear-1"), Secret.Create("coupon", "s3cret") },
+                    },
+                });
+            },
+            model: model);
+
+        Assert.Null(result.Error);
+        var prompt = string.Join('\n', model.Requests.SelectMany(request => request.Messages.Select(message => message.Content)));
+        Assert.Contains("Goal: add [\"apple\",\"pear-1\",\"<secret:coupon>\"] to the cart", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("s3cret", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("System.Object[]", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task OpenAi_compatible_model_parses_tool_calls()
     {
         var handler = new StubHandler("""

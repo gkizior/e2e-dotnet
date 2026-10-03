@@ -40,7 +40,8 @@ public sealed class Agent
         using var linked = Link(cancellationToken, options?.Timeout ?? _scope.StepTimeout);
         var token = linked.Token;
         _scope.Remember(options?.Params);
-        var key = CacheKeys.Create(_scope.EnginePlatform, _scope.EngineVersion, _scope.TestTitle, instruction, options?.Params);
+        var signature = CacheKeys.Create(_scope.EnginePlatform, _scope.EngineVersion, _scope.TestTitle, instruction, options?.Params);
+        var key = CacheKeys.ForCall(signature, _scope.NextCallIndex(signature));
         var pending = new PendingAct { Key = key, ParamCollision = CacheKeys.Collides(options?.Params) };
         if (_scope.CacheEnabled)
         {
@@ -977,6 +978,8 @@ public sealed class CacheInfo
 
 internal sealed class AttemptScope
 {
+    private readonly Dictionary<string, int> _callIndexes = new(StringComparer.Ordinal);
+
     public required IEngineSession Session { get; init; }
 
     public required IAgentModel? Model { get; init; }
@@ -1018,6 +1021,17 @@ internal sealed class AttemptScope
     public int HandedOff { get; set; }
 
     public int Missed { get; set; }
+
+    /// <summary>
+    /// The zero-based repeat of this signature in the attempt. Only an identical act counts,
+    /// so an optional step does not renumber the acts after it.
+    /// </summary>
+    public int NextCallIndex(string signature)
+    {
+        var index = _callIndexes.GetValueOrDefault(signature);
+        _callIndexes[signature] = index + 1;
+        return index;
+    }
 
     public void Remember(IReadOnlyDictionary<string, object?>? parameters)
     {

@@ -5,14 +5,17 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using E2E.Internal;
 
 namespace E2E;
 
 /// <summary>
 /// A recording of one verified <c>act</c>. The key is the test, the instruction,
-/// the params, and the engine's major.minor version. The model id is not part of the key.
+/// the params, the engine's major.minor version, and which repeat of that same
+/// instruction and params in the attempt it is. The model id is not part of the key.
 /// </summary>
 public sealed class CacheEntry
 {
@@ -153,6 +156,10 @@ public sealed class FileStepCache : IStepCache
 
 internal static class CacheKeys
 {
+    private static readonly JsonSerializerOptions KeyJson = Json(new LeafConverter<Secret>(Canonical), new LeafConverter<UniqueValue>(Canonical));
+
+    private static readonly JsonSerializerOptions DisplayJson = Json(new LeafConverter<Secret>(Display), new LeafConverter<UniqueValue>(Display));
+
     public static string Create(
         string engine,
         string version,
@@ -171,8 +178,16 @@ internal static class CacheKeys
             }
         }
 
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()));
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        return Hash(builder.ToString());
+    }
+
+    /// <summary>
+    /// The key of one repeat of a signature from <see cref="Create"/>. The first call
+    /// uses the signature itself, and each later identical call gets its own key.
+    /// </summary>
+    public static string ForCall(string signature, int callIndex)
+    {
+        return callIndex == 0 ? signature : Hash(signature + "\n" + callIndex.ToString(CultureInfo.InvariantCulture));
     }
 
     public static string Canonical(object? value)
@@ -182,8 +197,9 @@ internal static class CacheKeys
             null => "",
             UniqueValue => "<unique>",
             Secret secret => "<secret:" + secret.Name + ">",
+            string text => text,
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? "",
-            _ => value.ToString() ?? "",
+            _ => Json(value),
         };
     }
 
@@ -195,8 +211,9 @@ internal static class CacheKeys
             Secret secret when secret.Purpose is null => secret.ToString(),
             Secret secret => secret + " (" + secret.Purpose + ")",
             UniqueValue unique => unique.Value,
+            string text => text,
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? "",
-            _ => value.ToString() ?? "",
+            _ => JsonSerializer.Serialize(value, DisplayJson),
         };
     }
 
@@ -266,6 +283,34 @@ internal static class CacheKeys
         return false;
     }
 
+    private static string Hash(string text)
+    {
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+    }
+
+    private static string Json(object value)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(value, KeyJson);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            throw new TestException("INVALID_ARGUMENT", "Act params must serialize as JSON: " + ex.Message, ex);
+        }
+    }
+
+    private static JsonSerializerOptions Json(params JsonConverter[] converters)
+    {
+        var options = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        foreach (var converter in converters)
+        {
+            options.Converters.Add(converter);
+        }
+
+        return options;
+    }
+
     private static string MajorMinor(string version)
     {
         var parts = version.Split('.');
@@ -275,5 +320,19 @@ internal static class CacheKeys
         }
 
         return parts.Length == 1 ? parts[0] : parts[0] + "." + parts[1];
+    }
+}
+
+/// <summary>Writes a nested <see cref="Secret"/> or <see cref="UniqueValue"/> param as one string.</summary>
+internal sealed class LeafConverter<T>(Func<T, string> write) : JsonConverter<T>
+{
+    public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        throw new NotSupportedException();
+    }
+
+    public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(write(value));
     }
 }
