@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using E2E.Internal;
 
 namespace E2E;
 
@@ -13,6 +13,7 @@ namespace E2E;
 /// Chat-completions client for OpenAI and any server that speaks the same tool-call JSON.
 /// Set <see cref="OpenAiCompatibleModelOptions.BaseUrl"/> to a local server such as
 /// <c>http://127.0.0.1:11434/v1</c>. The API key is optional for servers that do not check one.
+/// <see cref="ModelProviders"/> has presets for OpenRouter, the Vercel AI Gateway, SpaceXAI, and Ollama.
 /// </summary>
 public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
 {
@@ -27,7 +28,7 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
         _options = options;
         if (httpClient is null)
         {
-            _http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
+            _http = new HttpClient { Timeout = ModelHttp.Timeout };
             _ownsClient = true;
         }
         else
@@ -42,51 +43,12 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
     public async Task<ModelResponse> CompleteAsync(ModelRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var apiKey = _options.ResolveApiKey();
-        var endpoint = _options.BaseUrl.TrimEnd('/') + "/chat/completions";
-        using var message = new HttpRequestMessage(HttpMethod.Post, endpoint);
-        if (!string.IsNullOrWhiteSpace(apiKey))
-        {
-            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        }
-
-        message.Headers.TryAddWithoutValidation("User-Agent", "e2e-dotnet");
-        message.Content = new StringContent(BuildBody(request), Encoding.UTF8, "application/json");
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await _http.SendAsync(message, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new AgentException("MODEL_PROVIDER_FAILED", "The model request got no response within 120 seconds.");
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new AgentException("MODEL_PROVIDER_FAILED", "The model provider could not be reached.", ex);
-        }
-
-        using (response)
-        {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                var detail = body.Length > 400 ? body[..400] : body;
-                throw new AgentException(
-                    "MODEL_PROVIDER_FAILED",
-                    "The model provider returned " + ((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture) + ". " + detail);
-            }
-
-            try
-            {
-                return Parse(body);
-            }
-            catch (JsonException ex)
-            {
-                throw new AgentException("MODEL_OUTPUT_INVALID", "The model provider returned JSON that could not be read.", ex);
-            }
-        }
+        using var message = new HttpRequestMessage(HttpMethod.Post, ModelEndpoint.Build(_options.BaseUrl, "/chat/completions", _options.QueryParameters));
+        ModelEndpoint.Authorize(message, _options.ResolveApiKey(), _options.ApiKeyHeader);
+        ModelEndpoint.AddHeaders(message, _options.Headers);
+        message.Content = ModelHttp.Json(BuildBody(request));
+        var body = await ModelHttp.SendAsync(_http, message, cancellationToken).ConfigureAwait(false);
+        return ModelHttp.Parse(body, Parse);
     }
 
     public void Dispose()
@@ -97,92 +59,90 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
         }
     }
 
-    private string BuildBody(ModelRequest request)
+    internal JsonObject BuildBody(ModelRequest request)
     {
-        var messages = new List<object>
+        var messages = new JsonArray
         {
-            new { role = "system", content = request.System },
+            new JsonObject { ["role"] = "system", ["content"] = request.System },
         };
         foreach (var message in request.Messages)
         {
             if (message.ToolCalls is { Count: > 0 })
             {
-                messages.Add(new
+                var calls = new JsonArray();
+                foreach (var call in message.ToolCalls)
                 {
-                    role = "assistant",
-                    content = message.Content ?? "",
-                    tool_calls = message.ToolCalls.Select(call => new
+                    calls.Add(new JsonObject
                     {
-                        id = call.Id,
-                        type = "function",
-                        function = new
+                        ["id"] = call.Id,
+                        ["type"] = "function",
+                        ["function"] = new JsonObject
                         {
-                            name = call.Name,
-                            arguments = call.Arguments.GetRawText(),
+                            ["name"] = call.Name,
+                            ["arguments"] = call.Arguments.GetRawText(),
                         },
-                    }).ToArray(),
+                    });
+                }
+
+                messages.Add(new JsonObject
+                {
+                    ["role"] = "assistant",
+                    ["content"] = message.Content ?? "",
+                    ["tool_calls"] = calls,
                 });
             }
             else if (string.Equals(message.Role, "tool", StringComparison.Ordinal))
             {
-                messages.Add(new
+                messages.Add(new JsonObject
                 {
-                    role = "tool",
-                    tool_call_id = message.ToolCallId,
-                    content = message.Content ?? "",
+                    ["role"] = "tool",
+                    ["tool_call_id"] = message.ToolCallId,
+                    ["content"] = message.Content ?? "",
                 });
             }
             else
             {
-                messages.Add(new { role = message.Role, content = message.Content ?? "" });
+                messages.Add(new JsonObject { ["role"] = message.Role, ["content"] = message.Content ?? "" });
             }
         }
 
-        var tools = request.Tools.Select(tool => new
+        var tools = new JsonArray();
+        foreach (var tool in request.Tools)
         {
-            type = "function",
-            function = new
+            tools.Add(new JsonObject
             {
-                name = tool.Name,
-                description = tool.Description,
-                parameters = tool.Parameters,
-            },
-        }).ToArray();
+                ["type"] = "function",
+                ["function"] = new JsonObject
+                {
+                    ["name"] = tool.Name,
+                    ["description"] = tool.Description,
+                    ["parameters"] = JsonNode.Parse(tool.Parameters.GetRawText()),
+                },
+            });
+        }
 
         var payload = new JsonObject
         {
             ["model"] = _options.Model,
-            ["messages"] = JsonSerializer.SerializeToNode(messages),
-            ["tools"] = JsonSerializer.SerializeToNode(tools),
+            ["messages"] = messages,
+            ["tools"] = tools,
             ["tool_choice"] = "auto",
         };
 
-        // Provider options ride the request body as given, so a field such as reasoning_effort reaches the server.
-        if (request.ProviderOptions is not null && request.ProviderOptions.TryGetValue(_options.Provider, out var extra))
+        // OpenAI caches prompt prefixes on its own and takes a routing key, one per system prompt. Nothing is stored.
+        if (_options.PromptCacheHints ?? ModelEndpoint.IsOpenAi(_options.BaseUrl))
         {
-            if (extra.ValueKind != JsonValueKind.Object)
-            {
-                throw new ConfigurationException("INVALID_CONFIG", "providerOptions." + _options.Provider + " must be an object of provider options");
-            }
-
-            foreach (var field in extra.EnumerateObject())
-            {
-                if (field.Name is "model" or "messages" or "tools")
-                {
-                    throw new ConfigurationException("INVALID_CONFIG", "providerOptions." + _options.Provider + "." + field.Name + " cannot replace a field the client sets");
-                }
-
-                payload[field.Name] = JsonNode.Parse(field.Value.GetRawText());
-            }
+            payload["prompt_cache_key"] = ModelHttp.PromptCacheKey(request.System);
+            payload["store"] = false;
         }
 
-        return payload.ToJsonString();
+        // Provider options ride the request body as given, so a field such as reasoning_effort reaches the server.
+        ModelHttp.MergeProviderOptions(payload, request, _options.Provider, "model", "messages", "tools");
+        return payload;
     }
 
-    private static ModelResponse Parse(string body)
+    private static ModelResponse Parse(JsonElement root)
     {
-        using var document = JsonDocument.Parse(body);
-        var root = document.RootElement;
         var choice = root.GetProperty("choices")[0];
         var message = choice.GetProperty("message");
         string? content = null;
@@ -197,18 +157,12 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
             foreach (var call in toolCalls.EnumerateArray())
             {
                 var function = call.GetProperty("function");
-                var arguments = function.GetProperty("arguments").GetString();
-                if (string.IsNullOrWhiteSpace(arguments))
-                {
-                    arguments = "{}";
-                }
-
-                using var parsed = JsonDocument.Parse(arguments);
+                var arguments = function.GetProperty("arguments");
                 calls.Add(new ModelToolCall
                 {
-                    Id = call.GetProperty("id").GetString() ?? "call",
+                    Id = call.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() ?? "call" : "call_" + calls.Count,
                     Name = function.GetProperty("name").GetString() ?? "",
-                    Arguments = parsed.RootElement.Clone(),
+                    Arguments = arguments.ValueKind == JsonValueKind.Object ? arguments.Clone() : ModelHttp.Arguments(arguments.GetString()),
                 });
             }
         }
@@ -218,8 +172,8 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
         {
             usage = new ModelUsage
             {
-                InputTokens = usageElement.TryGetProperty("prompt_tokens", out var input) ? input.GetInt32() : 0,
-                OutputTokens = usageElement.TryGetProperty("completion_tokens", out var output) ? output.GetInt32() : 0,
+                InputTokens = ModelHttp.Int(usageElement, "prompt_tokens"),
+                OutputTokens = ModelHttp.Int(usageElement, "completion_tokens"),
             };
         }
 
@@ -244,6 +198,27 @@ public sealed class OpenAiCompatibleModelOptions
     /// <summary>Environment variable read when <see cref="ApiKey"/> is empty. Defaults to <c>OPENAI_API_KEY</c>.</summary>
     public string ApiKeyEnv { get; init; } = "OPENAI_API_KEY";
 
+    /// <summary>A second environment variable read when the first is unset, such as the Vercel OIDC token.</summary>
+    public string? ApiKeyFallbackEnv { get; init; }
+
+    /// <summary>
+    /// The header that carries the key. Null (the default) sends <c>Authorization: Bearer</c>; Azure OpenAI
+    /// takes <c>api-key</c>.
+    /// </summary>
+    public string? ApiKeyHeader { get; init; }
+
+    /// <summary>Headers added to every request, such as OpenRouter's app attribution.</summary>
+    public IReadOnlyDictionary<string, string>? Headers { get; init; }
+
+    /// <summary>Query parameters added to every request URL, such as Azure's <c>api-version</c>.</summary>
+    public IReadOnlyDictionary<string, string>? QueryParameters { get; init; }
+
+    /// <summary>
+    /// Whether requests carry a prompt-cache key and <c>store: false</c>, as upstream sends OpenAI. Null (the
+    /// default) sends them only to <c>api.openai.com</c>. Provider options win over both.
+    /// </summary>
+    public bool? PromptCacheHints { get; init; }
+
     public string? ResolveApiKey()
     {
         if (!string.IsNullOrWhiteSpace(ApiKey))
@@ -251,7 +226,53 @@ public sealed class OpenAiCompatibleModelOptions
             return ApiKey;
         }
 
-        var fromEnv = Environment.GetEnvironmentVariable(ApiKeyEnv);
-        return string.IsNullOrWhiteSpace(fromEnv) ? null : fromEnv;
+        return ModelHttp.Environment(ApiKeyEnv) ?? ModelHttp.Environment(ApiKeyFallbackEnv);
+    }
+}
+
+/// <summary>URL and header plumbing the HTTP model clients share.</summary>
+internal static class ModelEndpoint
+{
+    public static Uri Build(string baseUrl, string path, IReadOnlyDictionary<string, string>? query)
+    {
+        var url = baseUrl.TrimEnd('/') + path;
+        if (query is { Count: > 0 })
+        {
+            url += (url.Contains('?', StringComparison.Ordinal) ? "&" : "?")
+                + string.Join('&', query.Select(pair => Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value)));
+        }
+
+        return new Uri(url);
+    }
+
+    public static void Authorize(HttpRequestMessage message, string? apiKey, string? header)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return;
+        }
+
+        if (header is null || string.Equals(header, "Authorization", StringComparison.OrdinalIgnoreCase))
+        {
+            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        }
+        else
+        {
+            message.Headers.TryAddWithoutValidation(header, apiKey);
+        }
+    }
+
+    public static void AddHeaders(HttpRequestMessage message, IReadOnlyDictionary<string, string>? headers)
+    {
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>())
+        {
+            message.Headers.Remove(name);
+            message.Headers.TryAddWithoutValidation(name, value);
+        }
+    }
+
+    public static bool IsOpenAi(string baseUrl)
+    {
+        return Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) && string.Equals(uri.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase);
     }
 }

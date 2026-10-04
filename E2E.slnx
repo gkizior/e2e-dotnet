@@ -3,6 +3,7 @@
     <Project Path="samples/E2E.Sample/E2E.Sample.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/E2E.Cli/E2E.Cli.csproj" />
     <Project Path="src/E2E.NUnit/E2E.NUnit.csproj" />
     <Project Path="src/E2E/E2E.csproj" />
   </Folder>

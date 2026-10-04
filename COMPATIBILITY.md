@@ -11,7 +11,9 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 | `e2e` and `@e2e-dev/web` | `E2E` (`WebEngine` is Playwright, in the same package) |
 | NUnit `[Test]` | `E2E.NUnit.E2ETest`. The fixture commits the replay cache from the NUnit result |
 | `e2e.config.ts` | `e2e.config.json`, the same keys as JSON. `E2ETest` finds and applies it; fixture properties override it |
-| Vercel AI SDK model | `OpenAiCompatibleModel` (chat completions and tool calls) |
+| Vercel AI SDK model | `OpenAiCompatibleModel`, `OpenAiResponsesModel`, `AnthropicModel`, `GoogleModel`, and `BedrockModel`, built from `provider` in JSON or `ModelProviders` in code. See [Models](#models) |
+| `e2e/oauth/chatgpt`, `copilot`, `grok`, `opencode-console` | `E2E.OAuth.Subscriptions` |
+| `e2e login`, `e2e logout`, `e2e models` | `E2E.Cli`, a .NET tool whose command is `e2e` |
 | — | `DocumentEngine`, an in-memory page for hosts that do not want a browser |
 
 ## Ported
@@ -79,9 +81,9 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 
 ## Not ported
 
-- The `e2e` command-line tool, the custom runner, `[E2ETest]` discovery, `--grep`, `test.only`, and the JSON report
+- The `e2e` command-line tool apart from `login`, `logout`, and `models`: the custom runner, `[E2ETest]` discovery, `--grep`, `test.only`, and the JSON report
 - `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
-- MCP server, `e2e init`, `e2e login`, OAuth subscriptions (ChatGPT, Copilot, Grok)
+- MCP server and `e2e init`
 - Vision, screenshots, traces, and video
 - Parallel workers and serial suites
 - The full locator action set (`dragTo`, `swipe`, `hover`, `setInputFiles`, `secondaryTap`, `longPress`, pointer points). `secondaryTap` and `longPress` have no counterpart in the document engine
@@ -104,7 +106,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - `context` (at most 16384 UTF-8 bytes) is told to every model call: after the act rules as `Project context:`, and to judges inside `<project-context>`
 - `maxSteps` and `maxModelCalls` are 1 through 100, 25 by default
 - `judgmentTimeout` (30 s) bounds `assert`, `waitFor`, and `extract` unless the call sets `Timeout`. A per-call timeout must be positive; a `waitFor` interval is 100 ms through 60 s
-- `providerOptions` is a dictionary of JSON objects by provider. It rides every `ModelRequest`, and `OpenAiCompatibleModel` adds the fields under its `Provider` key (`openai` by default) to the chat-completions body as given, so write the wire names (`reasoning_effort`, not `reasoningEffort`). It cannot replace `model`, `messages`, or `tools`. Upstream also sends `store: false` and a prompt cache key to OpenAI by default; this port does not
+- `providerOptions` is a dictionary of JSON objects by provider. It rides every `ModelRequest`, and `OpenAiCompatibleModel` adds the fields under its `Provider` key (`openai` by default) to the chat-completions body as given, so write the wire names (`reasoning_effort`, not `reasoningEffort`). It cannot replace `model`, `messages`, or `tools`. Every other client does the same with its own key (`anthropic`, `google`, `bedrock`, `azure`, `xai`, `openrouter`, `gateway`) and refuses its own core fields. As upstream, requests to OpenAI (and Azure over Responses) carry `store: false` and a prompt cache key per system prompt, and Anthropic requests carry cache breakpoints on the system prompt and the newest message; provider options win over both
 - `assert` and `extract` make one model call and one repair round. `waitFor` judges at once, then again only after `Interval` and on a changed screen, and every call, repairs included, counts against `MaxModelCalls`. It ends `STEP_TIMEOUT` (`waitFor timed out; last judgment: ...`) or `STEP_BUDGET_EXHAUSTED` (`waitFor exhausted its model-call budget; last judgment: ...`)
 - `ExtractAsync<T>`: the type argument is the schema, in place of a Standard Schema. The judge gets the JSON schema of `T` (`JsonSchemaExporter`), and the answer must deserialize into `T` with required members and nullable annotations respected. A failure gets one repair round with the validation error, then `MODEL_OUTPUT_INVALID` (`extracted data failed schema validation: ...`). A judge that says the data is not shown ends `ASSERTION_INCONCLUSIVE` (`nothing to extract: ...`)
 - `act` params are checked as upstream: JSON-safe values, at most 32 levels deep, no cycle, and at most 64 KiB once a `Secret` is projected to its name and purpose and a `Values.Unique` to its value. The instruction is at most 8192 UTF-8 bytes. Each limit throws `INVALID_ARGUMENT` with the upstream message before any model call. A value reached twice through different paths is not a cycle
@@ -122,7 +124,7 @@ Not ported:
 
 Differences:
 
-- JSON has no engine handles or model instances. The fixture's `CreateEngine` chooses the engine, `platform` must be `web`, and `targets` holds one entry. `agents.<name>.model` and `judge` are OpenAI-compatible model ids, with the .NET-only `baseUrl` and `apiKeyEnv` beside them. `E2ETest` passes `agents.default` as the session's own agent settings and every other entry through `CreateAgents`
+- JSON has no engine handles or model instances. The fixture's `CreateEngine` chooses the engine, `platform` must be `web`, and `targets` holds one entry. `agents.<name>.model` and `judge` are model ids for the .NET-only `provider` (see [Models](#models)), with the .NET-only `baseUrl` and `apiKeyEnv` beside them. A subscription provider refuses `baseUrl` and `apiKeyEnv`. `E2ETest` passes `agents.default` as the session's own agent settings and every other entry through `CreateAgents`
 - A secret set to `null` reads only `E2E_SECRET_<NAME>`. Provider functions do not exist in JSON. A test reads secrets with `Secrets.Get(name)`
 - `retries` is validated and resolved (1 in CI, 0 elsewhere) but NUnit retries still come from `[Retry]`
 - `cache.strict` treats any replay that finds a recording but does not finish it as stale, and leaves that recording in place
@@ -165,3 +167,36 @@ Differences from upstream:
 - Fixture calls are not recorded as harness steps.
 
 `DocumentEngine` supports `app.back` (it rebuilds the previous route), `app.restart`, and `app.clearState` (both leave a blank page and no history). It has no viewport: `DocumentPage.OnScroll` and `DocumentElement.OnScroll` let a page load more rows when it is scrolled. It has no browser, so every `Browser` member fails with `UNSUPPORTED_CAPABILITY`. A custom engine opts in by implementing `IBrowserSession`, and by overriding the default `BackAsync`, `RestartAsync`, and `ClearStateAsync` on `IEngineSession`, which otherwise fail with `UNSUPPORTED_CAPABILITY`.
+
+## Models
+
+Upstream takes any AI SDK model instance. JSON cannot hold one, so `agents.<name>.provider` names the client, and code builds one with `ModelProviders`, `Subscriptions`, or a client's options. Each client speaks its vendor's wire protocol directly:
+
+| Upstream | `provider` | .NET |
+| --- | --- | --- |
+| `@ai-sdk/openai` chat, `@ai-sdk/openai-compatible`, Ollama | `openai`, `openai-compatible` | `OpenAiCompatibleModel` |
+| `@ai-sdk/openai` Responses, `@ai-sdk/azure` | `openai-responses`, `azure` | `OpenAiResponsesModel` (`ModelProviders.AzureOpenAi`) |
+| `@ai-sdk/anthropic` | `anthropic` | `AnthropicModel` |
+| `@ai-sdk/google` | `google` | `GoogleModel` |
+| `@ai-sdk/amazon-bedrock` | `bedrock` | `BedrockModel`, signed with SigV4 or a Bedrock API key |
+| `@ai-sdk/xai` | `xai` | `OpenAiCompatibleModel` at `api.x.ai` |
+| `@openrouter/ai-sdk-provider` | `openrouter` | `OpenAiCompatibleModel` at `openrouter.ai` |
+| `gateway()` from `ai` | `gateway` | `OpenAiCompatibleModel` at `ai-gateway.vercel.sh` |
+| `chatgpt()` | `chatgpt` | `Subscriptions.ChatGpt` |
+| `copilot()` | `copilot` | `Subscriptions.Copilot` (`CopilotModel`) |
+| `grok()` | `grok` | `Subscriptions.Grok` |
+| `opencodeConsole()` | `opencode-console` | `Subscriptions.OpenCodeConsole` (`OpenCodeConsoleModel`) |
+
+Keys come from the environment variable the AI SDK reads (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `AZURE_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `AI_GATEWAY_API_KEY`, `AWS_*`), or the one `apiKeyEnv` names.
+
+Subscriptions follow upstream: the same four logins (`openai` PKCE on port 1455 or `--device`, `github-copilot` from `gh` or an OAuth App's device flow with enterprise hosts, `opencode-console` and `spacexai` device flows), the same credentials file (`$XDG_CONFIG_HOME/e2e/oauth.json`, mode 0600, locked and replaced atomically, unknown entries kept), `E2E_OAUTH_CREDENTIALS`, refresh two minutes ahead of expiry with one refresh shared per file, a retry after a 401, Copilot's chat-or-Responses choice from the plan's listing, OpenCode Console's per-model protocol from the workspace config, and `OPENCODE_API_KEY`. A missing or rejected login fails the step with `MODEL_PROVIDER_FAILED`, blocked, naming the `OAuthException` code (`NOT_LOGGED_IN`, `LOGIN_REQUIRED`).
+
+Differences:
+
+- Requests are not streamed. The Codex backend only streams, so its event stream is folded back into the final response, as upstream folds it
+- The Vercel AI Gateway and OpenRouter are reached over their OpenAI-compatible chat API, so a gateway model gets no Anthropic cache breakpoints or OpenAI cache key. The gateway reads `VERCEL_OIDC_TOKEN` from the environment but does not run `vercel env pull` itself
+- Gemini tool schemas go as `parametersJsonSchema`, unconverted. Gemini 3 thought signatures are kept per model instance and sent back with their function calls
+- `azure` uses the Responses API at `/openai/v1` with `api-version=v1`, as the AI SDK's `azure()` does. Bedrock reads static credentials from the environment only; there is no AWS profile, SSO, or instance-role chain
+- Requests identify as `e2e-dotnet`; OpenRouter and the gateway get `X-Title: e2e-dotnet` and this repository as the referer. Logins still name the `e2e` originator and referrer that upstream registered
+- `e2e login` with no provider shows a numbered list instead of upstream's picker. `e2e models` prints the same columns
+- Not ported: images in model requests (there is no vision), and `e2e init` writing the model config

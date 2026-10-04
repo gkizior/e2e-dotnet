@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>E2E.Cli</RootNamespace>
+    <AssemblyName>E2E.Cli</AssemblyName>
+    <PackageId>E2E.Cli</PackageId>
+    <Description>The e2e command for the E2E .NET port: sign in to a model subscription (ChatGPT, GitHub Copilot, OpenCode Console, SuperGrok), sign out, and list the models a login serves.</Description>
+    <PackageTags>e2e;testing;agent;llm;oauth;cli</PackageTags>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>e2e</ToolCommandName>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- The tool signs in and lists models; it never drives a browser, so it ships no Playwright driver. -->
+    <PlaywrightPlatform>none</PlaywrightPlatform>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\E2E\E2E.csproj" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <Target Name="DropPlaywrightScript" AfterTargets="CopyPlaywrightFilesToOutput">
+    <ItemGroup>
+      <Content Remove="@(Content)" Condition="'%(Content.NuGetPackageId)' == 'Microsoft.Playwright'" />
+    </ItemGroup>
+  </Target>
+</Project>

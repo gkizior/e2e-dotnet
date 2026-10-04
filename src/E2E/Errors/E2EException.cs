@@ -56,6 +56,12 @@ public sealed class AgentException : E2EException
         Blocked = blocked;
     }
 
+    public AgentException(string code, string message, bool blocked, Exception inner)
+        : base(code, message, inner)
+    {
+        Blocked = blocked;
+    }
+
     /// <summary>The step's account of what happened. The same text as <see cref="Exception.Message"/>.</summary>
     public string Explanation => Message;
 

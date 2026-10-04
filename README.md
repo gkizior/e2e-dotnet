@@ -70,6 +70,36 @@ public sealed class BillingTests : E2ETest
 
 There is no default model and no shared API key. `baseUrl` can point at any OpenAI-compatible server, including a local one. Tests without agent steps ignore it.
 
+`provider` picks who serves `model` and `judge`. Unset, it is `openai` (chat completions). `baseUrl` and `apiKeyEnv` default to the provider's own:
+
+| `provider` | Key | Notes |
+| --- | --- | --- |
+| `openai` | `OPENAI_API_KEY` | Chat completions |
+| `openai-responses` | `OPENAI_API_KEY` | The Responses API, as the AI SDK's `openai(id)` |
+| `azure` | `AZURE_API_KEY` | Responses API at `https://$AZURE_RESOURCE_NAME.openai.azure.com/openai/v1`, or `baseUrl`. `model` is the deployment |
+| `anthropic` | `ANTHROPIC_API_KEY` | Messages API, with prompt-cache breakpoints |
+| `google` | `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini API |
+| `bedrock` | AWS credentials, or `AWS_BEARER_TOKEN_BEDROCK` | Converse API in `AWS_REGION` |
+| `xai` | `XAI_API_KEY` | SpaceXAI API |
+| `openrouter` | `OPENROUTER_API_KEY` | Model ids such as `openai/gpt-6-luna-fast` |
+| `gateway` | `AI_GATEWAY_API_KEY`, else `VERCEL_OIDC_TOKEN` | Vercel AI Gateway |
+| `openai-compatible` | `LLM_API_KEY`, optional | Any `/v1/chat/completions` server; `baseUrl` is required |
+| `chatgpt`, `copilot`, `grok`, `opencode-console` | The stored login | Subscriptions, below |
+
+In code, `ModelProviders` builds the same clients (`ModelProviders.Anthropic("claude-sonnet-5")`), and `AnthropicModel`, `GoogleModel`, `BedrockModel`, `OpenAiResponsesModel`, and `OpenAiCompatibleModel` take full options.
+
+### Subscriptions
+
+A ChatGPT Plus/Pro, GitHub Copilot, OpenCode Console (Zen and Go), or SuperGrok/X Premium+ plan can serve the agent instead of an API key. Sign in once with the `e2e` tool:
+
+```bash
+dotnet tool install --global E2E.Cli
+e2e login openai            # or github-copilot, opencode-console, spacexai
+e2e models openai           # the model ids the plan serves
+```
+
+Then set `"provider": "chatgpt"` (or `copilot`, `opencode-console`, `grok`) with one of those ids, or use `Subscriptions.ChatGpt("gpt-6-luna")` in code. `e2e login openai --device` works without a browser, and `e2e login github-copilot` reuses `gh auth token` (or takes `--client-id` of your own OAuth App, and `--enterprise-url` for GitHub Enterprise). The login is stored in `~/.config/e2e/oauth.json`, the file upstream's `npx e2e login` writes, so a login made with either tool serves both. `E2E_OAUTH_CREDENTIALS` holding that JSON stands in for the file, and `OPENCODE_API_KEY` replaces an OpenCode Console login. Use API keys in CI.
+
 An agent entry also takes `judge` (the model id for `assert`, `waitFor`, and `extract`), `system`, `context`, `maxSteps`, `maxModelCalls`, `judgmentTimeout`, and `providerOptions`. `agents` can name more agents than `default`; a call picks one with its `Agent` option, such as `new ActOptions { Agent = "careful" }`.
 
 `cache.mode` is `off`, `read-only`, or `read-write`. Unset, it is `read-write` locally and `read-only` when `CI` is set. `cache.strict` fails a recording that no longer matches with `REPLAY_STALE` instead of running the step live. `cache.dir` resolves against the config file's directory.
@@ -100,5 +130,6 @@ Most unit tests use `DocumentEngine` and a scripted model. No test needs an API 
 | --- | --- |
 | `e2e` test, expect, agent, cache, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
 | NUnit | `E2E.NUnit` (`E2ETest`) |
+| `e2e login`, `e2e logout`, `e2e models` | `E2E.Cli` (the `e2e` .NET tool) |
 
 `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, and `@e2e-dev/eas` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).

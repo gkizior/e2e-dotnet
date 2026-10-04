@@ -50,7 +50,7 @@ public sealed class E2EConfig
         ["bundleId", "appPath", "identity", "environment", "launchArguments", "permissions", "command", "readyUrl"];
 
     private static readonly string[] AgentKeys =
-        ["model", "judge", "system", "context", "baseUrl", "apiKeyEnv", "maxSteps", "maxModelCalls", "judgmentTimeout", "providerOptions"];
+        ["model", "judge", "provider", "system", "context", "baseUrl", "apiKeyEnv", "maxSteps", "maxModelCalls", "judgmentTimeout", "providerOptions"];
 
     private static readonly string[] UnsupportedAgentKeys = ["tools", "executor", "maxObservationBytes", "maxInputTokens"];
 
@@ -300,14 +300,33 @@ public sealed class E2EConfig
                 CheckKeys(value, label, AgentKeys, UnsupportedAgentKeys, null);
                 var context = AnyString(value, "context", label + ".context");
                 ResolvedAgent.CheckContext(context, label + ".context");
+                var provider = OptionalString(value, "provider", label + ".provider") ?? AgentConfig.DefaultProvider;
+                if (!AgentConfig.Providers.Contains(provider, StringComparer.Ordinal))
+                {
+                    throw Invalid(label + ".provider must be one of " + string.Join(", ", AgentConfig.Providers.Select(name => "\"" + name + "\"")));
+                }
+
+                var baseUrl = OptionalString(value, "baseUrl", label + ".baseUrl");
+                var apiKeyEnv = OptionalString(value, "apiKeyEnv", label + ".apiKeyEnv");
+                if (AgentConfig.IsSubscription(provider) && (baseUrl is not null || apiKeyEnv is not null))
+                {
+                    throw Invalid(label + ": the " + provider + " subscription reads its stored login, so baseUrl and apiKeyEnv do not apply");
+                }
+
+                if (provider == "openai-compatible" && baseUrl is null)
+                {
+                    throw Invalid(label + ".baseUrl is required for provider \"openai-compatible\"");
+                }
+
                 agents[property.Name] = new AgentConfig
                 {
                     Model = OptionalString(value, "model", label + ".model"),
                     Judge = OptionalString(value, "judge", label + ".judge"),
+                    Provider = provider,
                     System = AnyString(value, "system", label + ".system"),
                     Context = context,
-                    BaseUrl = OptionalString(value, "baseUrl", label + ".baseUrl"),
-                    ApiKeyEnv = OptionalString(value, "apiKeyEnv", label + ".apiKeyEnv") ?? "OPENAI_API_KEY",
+                    BaseUrl = baseUrl,
+                    ApiKeyEnv = apiKeyEnv,
                     MaxSteps = Property(value, "maxSteps") is { } steps ? Integer(steps, label + ".maxSteps", 1, ResolvedAgent.MaxBudget) : E2EDefaults.MaxSteps,
                     MaxModelCalls = Property(value, "maxModelCalls") is { } calls ? Integer(calls, label + ".maxModelCalls", 1, ResolvedAgent.MaxBudget) : E2EDefaults.MaxModelCalls,
                     JudgmentTimeout = Property(value, "judgmentTimeout") is { } judgment
@@ -612,16 +631,32 @@ public sealed class AppConfig
 }
 
 /// <summary>
-/// One entry of <c>agents</c>. Upstream <c>model</c> and <c>judge</c> are AI SDK instances; here they
-/// are OpenAI-compatible model ids that share <see cref="BaseUrl"/> and <see cref="ApiKeyEnv"/>.
+/// One entry of <c>agents</c>. Upstream <c>model</c> and <c>judge</c> are AI SDK instances; here they are model ids
+/// for <see cref="Provider"/>, which share <see cref="BaseUrl"/> and <see cref="ApiKeyEnv"/>.
 /// Each entry starts from the defaults; none inherits another's values.
 /// </summary>
 public sealed class AgentConfig
 {
+    public const string DefaultProvider = "openai";
+
+    /// <summary>
+    /// The <c>provider</c> values: API keys (<c>openai</c>, <c>openai-responses</c>, <c>azure</c>, <c>anthropic</c>,
+    /// <c>google</c>, <c>bedrock</c>, <c>xai</c>, <c>openrouter</c>, <c>gateway</c>, <c>openai-compatible</c>) and
+    /// subscription logins (<c>chatgpt</c>, <c>copilot</c>, <c>grok</c>, <c>opencode-console</c>).
+    /// </summary>
+    public static IReadOnlyList<string> Providers { get; } =
+    [
+        "openai", "openai-responses", "azure", "anthropic", "google", "bedrock", "xai", "openrouter", "gateway", "openai-compatible",
+        "chatgpt", "copilot", "grok", "opencode-console",
+    ];
+
     public string? Model { get; init; }
 
     /// <summary>The model id that judges <c>assert</c>, <c>waitFor</c>, and <c>extract</c>. Unset, the judge is <see cref="Model"/>.</summary>
     public string? Judge { get; init; }
+
+    /// <summary>Who serves <see cref="Model"/> and <see cref="Judge"/>. One of <see cref="Providers"/>; <c>openai</c> by default.</summary>
+    public string Provider { get; init; } = DefaultProvider;
 
     /// <summary>Text appended to the act rules. Judges never see it.</summary>
     public string? System { get; init; }
@@ -629,9 +664,11 @@ public sealed class AgentConfig
     /// <summary>Project context told to every model call, at most 16384 UTF-8 bytes.</summary>
     public string? Context { get; init; }
 
+    /// <summary>The API root. Unset, the provider's own; for <c>azure</c> it is built from <c>AZURE_RESOURCE_NAME</c>.</summary>
     public string? BaseUrl { get; init; }
 
-    public string ApiKeyEnv { get; init; } = "OPENAI_API_KEY";
+    /// <summary>The environment variable holding the key. Unset, the one the provider reads, such as <c>ANTHROPIC_API_KEY</c>.</summary>
+    public string? ApiKeyEnv { get; init; }
 
     /// <summary>1 through 100.</summary>
     public int MaxSteps { get; init; } = E2EDefaults.MaxSteps;
@@ -641,13 +678,13 @@ public sealed class AgentConfig
 
     public TimeSpan JudgmentTimeout { get; init; } = E2EDefaults.JudgmentTimeout;
 
-    /// <summary>Provider options by provider. <see cref="OpenAiCompatibleModel"/> adds the <c>openai</c> entry to its request body.</summary>
+    /// <summary>Provider options by provider. Each client adds the entry under its own key to its request body.</summary>
     public IReadOnlyDictionary<string, JsonElement>? ProviderOptions { get; init; }
 
-    /// <summary>An <see cref="OpenAiCompatibleModel"/> for <see cref="Model"/>, or null when no model is set.</summary>
+    /// <summary>The model for <see cref="Model"/>, or null when no model is set.</summary>
     public IAgentModel? CreateModel() => Create(Model);
 
-    /// <summary>An <see cref="OpenAiCompatibleModel"/> for <see cref="Judge"/>, or null when no judge is set.</summary>
+    /// <summary>The model for <see cref="Judge"/>, or null when no judge is set.</summary>
     public IAgentModel? CreateJudge() => Create(Judge);
 
     /// <summary>The <see cref="AgentOptions"/> this entry describes, with its models created.</summary>
@@ -666,6 +703,8 @@ public sealed class AgentConfig
         };
     }
 
+    internal static bool IsSubscription(string provider) => provider is "chatgpt" or "copilot" or "grok" or "opencode-console";
+
     private IAgentModel? Create(string? model)
     {
         if (model is null)
@@ -673,9 +712,72 @@ public sealed class AgentConfig
             return null;
         }
 
-        return BaseUrl is null
-            ? new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = model, ApiKeyEnv = ApiKeyEnv })
-            : new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = model, BaseUrl = BaseUrl, ApiKeyEnv = ApiKeyEnv });
+        return Provider switch
+        {
+            "openai-responses" => new OpenAiResponsesModel(new OpenAiResponsesModelOptions
+            {
+                Model = model,
+                BaseUrl = BaseUrl ?? "https://api.openai.com/v1",
+                ApiKeyEnv = ApiKeyEnv ?? "OPENAI_API_KEY",
+            }),
+            "azure" => new OpenAiResponsesModel(new OpenAiResponsesModelOptions
+            {
+                Model = model,
+                BaseUrl = BaseUrl ?? AzureBaseUrl(),
+                Provider = "azure",
+                ApiKeyEnv = ApiKeyEnv ?? "AZURE_API_KEY",
+                ApiKeyHeader = "api-key",
+                QueryParameters = new Dictionary<string, string>(StringComparer.Ordinal) { ["api-version"] = "v1" },
+            }),
+            "anthropic" => new AnthropicModel(new AnthropicModelOptions
+            {
+                Model = model,
+                BaseUrl = BaseUrl ?? "https://api.anthropic.com/v1",
+                ApiKeyEnv = ApiKeyEnv ?? "ANTHROPIC_API_KEY",
+            }),
+            "google" => new GoogleModel(new GoogleModelOptions
+            {
+                Model = model,
+                BaseUrl = BaseUrl ?? "https://generativelanguage.googleapis.com/v1beta",
+                ApiKeyEnv = ApiKeyEnv ?? "GOOGLE_GENERATIVE_AI_API_KEY",
+            }),
+            "bedrock" => new BedrockModel(new BedrockModelOptions
+            {
+                Model = model,
+                BaseUrl = BaseUrl,
+                ApiKeyEnv = ApiKeyEnv ?? "AWS_BEARER_TOKEN_BEDROCK",
+            }),
+            "xai" => Compatible(model, "https://api.x.ai/v1", "xai", "XAI_API_KEY", null, null),
+            "openrouter" => Compatible(model, "https://openrouter.ai/api/v1", "openrouter", "OPENROUTER_API_KEY", null, ModelProviders.AttributionHeaders),
+            "gateway" => Compatible(model, "https://ai-gateway.vercel.sh/v1", "gateway", "AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", ModelProviders.AttributionHeaders),
+            "openai-compatible" => Compatible(model, "http://127.0.0.1:11434/v1", "openai-compatible", "LLM_API_KEY", null, null),
+            "chatgpt" => OAuth.Subscriptions.ChatGpt(model),
+            "copilot" => OAuth.Subscriptions.Copilot(model),
+            "grok" => OAuth.Subscriptions.Grok(model),
+            "opencode-console" => OAuth.Subscriptions.OpenCodeConsole(model),
+            _ => Compatible(model, "https://api.openai.com/v1", "openai", "OPENAI_API_KEY", null, null),
+        };
+    }
+
+    private OpenAiCompatibleModel Compatible(string model, string baseUrl, string provider, string apiKeyEnv, string? fallbackEnv, IReadOnlyDictionary<string, string>? headers)
+    {
+        return new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions
+        {
+            Model = model,
+            BaseUrl = BaseUrl ?? baseUrl,
+            Provider = provider,
+            ApiKeyEnv = ApiKeyEnv ?? apiKeyEnv,
+            ApiKeyFallbackEnv = ApiKeyEnv is null ? fallbackEnv : null,
+            Headers = headers,
+        });
+    }
+
+    private static string AzureBaseUrl()
+    {
+        var resource = Environment.GetEnvironmentVariable("AZURE_RESOURCE_NAME");
+        return string.IsNullOrWhiteSpace(resource)
+            ? throw new ConfigurationException("INVALID_CONFIG", "provider \"azure\" needs baseUrl or AZURE_RESOURCE_NAME")
+            : "https://" + resource.Trim() + ".openai.azure.com/openai/v1";
     }
 }
 
