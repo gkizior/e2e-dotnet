@@ -110,10 +110,13 @@ A fixture overrides any value with the matching property, such as `BaseUrl`, `Ca
 
 ## Sample
 
-The sample is that billing test as an NUnit project. It uses the document engine and a scripted model, so it needs no browser and no API key. The second test replays the tap and does not ask the model to act.
+The sample is a real end-to-end test of [Dariten](https://dariten.vercel.app), a public personal finance demo. It drives Chromium through `WebEngine` and installs the browser on its first run. The demo data is shared and anyone can edit it, so the tests only read the app and never check specific balances.
+
+- `The_dashboard_links_to_the_transaction_register` uses locators only. It needs no model.
+- `An_agent_filters_the_register_by_category` asks the agent to filter the register, then judges the result. It reads the key from `OPENAI_API_KEY` and is in the `RealModel` category, which CI skips. A second passing run replays the filter without asking the model to act.
 
 ```bash
-dotnet test --project samples/E2E.Sample
+OPENAI_API_KEY=sk-... dotnet test --project samples/E2E.Sample
 ```
 
 ## Tests

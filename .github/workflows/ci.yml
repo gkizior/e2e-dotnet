@@ -29,7 +29,7 @@ jobs:
         run: dotnet build E2E.slnx --no-restore -c Release
 
       - name: Test
-        run: dotnet test E2E.slnx --no-build -c Release --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test E2E.slnx --no-build -c Release --filter "TestCategory!=RealModel" --logger "trx;LogFileName=test-results.trx"
 
       - name: Pack
         run: |

@@ -149,6 +149,30 @@ public sealed class WebEngineTests
         }
     }
 
+    [Fact]
+    public async Task Chromium_reads_text_and_names_as_written_when_css_transforms_the_case()
+    {
+        const string page = """
+            <!DOCTYPE html>
+            <html><body style="text-transform: uppercase">
+            <p data-testid="label">Net worth</p>
+            <button type="button" data-testid="save">Save draft</button>
+            </body></html>
+            """;
+        using var site = await TinySite.StartAsync(page);
+        var session = await new WebEngine(headless: true).StartAsync(new EngineStartOptions { BaseUrl = site.Url }, CancellationToken.None);
+
+        await using (session)
+        {
+            await session.OpenAsync(site.Url, CancellationToken.None);
+            var observation = await session.ObserveAsync(CancellationToken.None);
+            var nodes = Flatten(observation.Roots).Where(node => node.TestId is not null).ToDictionary(node => node.TestId!);
+
+            Assert.Equal("Net worth", nodes["label"].Text);
+            Assert.Equal("Save draft", nodes["save"].Name);
+        }
+    }
+
     private static IEnumerable<SemanticNode> Flatten(IEnumerable<SemanticNode> nodes)
     {
         foreach (var node in nodes)

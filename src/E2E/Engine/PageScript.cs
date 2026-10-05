@@ -280,10 +280,22 @@ internal static class PageScript
             const shadow = shadowOf(el);
             if (shadow) for (const child of shadow.children) walk(child, into, parentHidden);
           };
+          // innerText applies CSS text-transform, but locators match the DOM
+          // text, as Playwright's do. The walk runs with text-transform
+          // turned off, so an uppercase-styled "Net worth" reads as written.
           const roots = [];
-          const truncated = !!document.body && tally(document.body, false) > max;
-          if (truncated) offBudget = Math.max(0, max - tally(document.body, true));
-          if (document.body) walk(document.body, roots, false);
+          const sheets = document.adoptedStyleSheets;
+          const plain = new CSSStyleSheet();
+          plain.replaceSync("* { text-transform: none !important; }");
+          document.adoptedStyleSheets = [...sheets, plain];
+          let truncated;
+          try {
+            truncated = !!document.body && tally(document.body, false) > max;
+            if (truncated) offBudget = Math.max(0, max - tally(document.body, true));
+            if (document.body) walk(document.body, roots, false);
+          } finally {
+            document.adoptedStyleSheets = sheets;
+          }
           window[Symbol.for("e2e.observation.elements")] = elements;
           return JSON.stringify({ next, count, truncated: truncated || full, scroll, roots });
         }
