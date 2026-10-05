@@ -86,6 +86,10 @@ There is no default model and no shared API key. `baseUrl` can point at any Open
 | `openai-compatible` | `LLM_API_KEY`, optional | Any `/v1/chat/completions` server; `baseUrl` is required |
 | `chatgpt`, `copilot`, `grok`, `opencode-console` | The stored login | Subscriptions, below |
 
+An `apiKeyEnv` you set wins over the provider's default, so remove it when you switch providers. Otherwise the client reads the old variable, sends no key, and the provider answers 401.
+
+`anthropic` needs a key scoped to a workspace (`sk-ant-api03-...`). A user key (`sk-ant-usr-...`) fails with a 400 that asks for an `anthropic-workspace-id` header, and the config cannot send one.
+
 In code, `ModelProviders` builds the same clients (`ModelProviders.Anthropic("claude-sonnet-5")`), and `AnthropicModel`, `GoogleModel`, `BedrockModel`, `OpenAiResponsesModel`, and `OpenAiCompatibleModel` take full options.
 
 ### Subscriptions
@@ -100,6 +104,14 @@ e2e models openai           # the model ids the plan serves
 
 Then set `"provider": "chatgpt"` (or `copilot`, `opencode-console`, `grok`) with one of those ids, or use `Subscriptions.ChatGpt("gpt-6-luna")` in code. `e2e login openai --device` works without a browser, and `e2e login github-copilot` reuses `gh auth token` (or takes `--client-id` of your own OAuth App, and `--enterprise-url` for GitHub Enterprise). The login is stored in `~/.config/e2e/oauth.json`, the file upstream's `npx e2e login` writes, so a login made with either tool serves both. `E2E_OAUTH_CREDENTIALS` holding that JSON stands in for the file, and `OPENCODE_API_KEY` replaces an OpenCode Console login. Use API keys in CI.
 
+A Claude Pro or Max plan cannot serve the agent. Anthropic allows that login only in its own apps. To run Claude on a subscription, use GitHub Copilot. Copilot writes model ids with a dot (`claude-sonnet-5.5`), where the Anthropic API uses a dash (`claude-sonnet-5-5`), so take the id from `e2e models github-copilot`:
+
+```json
+"agents": { "default": { "provider": "copilot", "model": "claude-sonnet-5.5" } }
+```
+
+From a clone of this repo, run the tool with `dotnet run --project src/E2E.Cli -- login github-copilot`.
+
 An agent entry also takes `judge` (the model id for `assert`, `waitFor`, and `extract`), `system`, `context`, `maxSteps`, `maxModelCalls`, `judgmentTimeout`, and `providerOptions`. `agents` can name more agents than `default`; a call picks one with its `Agent` option, such as `new ActOptions { Agent = "careful" }`.
 
 `cache.mode` is `off`, `read-only`, or `read-write`. Unset, it is `read-write` locally and `read-only` when `CI` is set. `cache.strict` fails a recording that no longer matches with `REPLAY_STALE` instead of running the step live. `cache.dir` resolves against the config file's directory.
@@ -113,11 +125,16 @@ A fixture overrides any value with the matching property, such as `BaseUrl`, `Ca
 The sample is a real end-to-end test of [Dariten](https://dariten.vercel.app), a public personal finance demo. It drives Chromium through `WebEngine` and installs the browser on its first run. The demo data is shared and anyone can edit it, so the tests only read the app and never check specific balances.
 
 - `The_dashboard_links_to_the_transaction_register` uses locators only. It needs no model.
-- `An_agent_filters_the_register_by_category` asks the agent to filter the register, then judges the result. It reads the key from `OPENAI_API_KEY` and is in the `RealModel` category, which CI skips. A second passing run replays the filter without asking the model to act.
+- `An_agent_filters_the_register_by_category` asks the agent to filter the register, then judges the result. It runs `claude-sonnet-5.5` on a GitHub Copilot plan and is in the `RealModel` category, which CI skips. A second passing run replays the filter without asking the model to act.
+
+Sign in once with the GitHub CLI already logged in, then run the sample:
 
 ```bash
-OPENAI_API_KEY=sk-... dotnet test --project samples/E2E.Sample
+dotnet run --project src/E2E.Cli -- login github-copilot
+dotnet test --project samples/E2E.Sample
 ```
+
+To use an API key instead, change `agents.default` in `samples/E2E.Sample/e2e.config.json`, for example to `"provider": "openai", "model": "gpt-4.1-mini"` with `OPENAI_API_KEY` set.
 
 ## Tests
 

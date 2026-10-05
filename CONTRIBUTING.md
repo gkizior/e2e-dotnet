@@ -9,7 +9,7 @@ This repo is a community .NET port of [tester-army/e2e](https://github.com/teste
 | `src/E2E` | SDK: tests, expect, agent, cache, document engine, Playwright `WebEngine` |
 | `src/E2E.NUnit` | NUnit fixture `E2ETest` |
 | `tests/E2E.Tests` | Unit tests. No API key. The Chromium tests install the browser once per run |
-| `samples/E2E.Sample` | NUnit tests against the live Dariten demo. The agent test needs `OPENAI_API_KEY` |
+| `samples/E2E.Sample` | NUnit tests against the live Dariten demo. The agent test needs a GitHub Copilot login (`dotnet run --project src/E2E.Cli -- login github-copilot`) |
 
 ## Development
 

@@ -4,8 +4,8 @@
   "assertionTimeout": 10000,
   "agents": {
     "default": {
-      "model": "gpt-4.1-mini",
-      "apiKeyEnv": "OPENAI_API_KEY",
+      "model": "claude-sonnet-5.5",
+      "provider": "copilot",
       "context": "Dariten is a shared personal finance demo called Quicken Demo. Every visitor edits the same household, so never add, edit, or delete data."
     }
   },
