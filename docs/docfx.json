@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+  "metadata": [
+    {
+      "src": [
+        {
+          "src": "../src",
+          "files": ["E2E/E2E.csproj", "E2E.NUnit/E2E.NUnit.csproj"]
+        }
+      ],
+      "dest": "api"
+    }
+  ],
+  "build": {
+    "content": [
+      { "files": ["index.md", "toc.yml", "api/**.yml", "api/index.md"] },
+      { "src": "..", "files": ["README.md", "COMPATIBILITY.md", "CONTRIBUTING.md"] }
+    ],
+    "output": "_site",
+    "template": ["default", "modern"],
+    "globalMetadata": {
+      "_appName": "E2E for .NET",
+      "_appTitle": "E2E for .NET",
+      "_enableSearch": true,
+      "_gitContribute": { "repo": "https://github.com/hardkoded/e2e-dotnet", "branch": "main" }
+    }
+  }
+}
