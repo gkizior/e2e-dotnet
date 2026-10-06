@@ -285,6 +285,106 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public async Task A_key_press_on_the_focused_control_replays()
+    {
+        var directory = TempCache();
+        static DocumentWorld World() => new DocumentWorld().Map("/todos", page =>
+        {
+            var status = page.Status("Empty");
+            page.Roots.Add(new DocumentElement { Role = "textbox", Name = "New todo", OnFill = value => status.Name = status.Text = "Typed " + value });
+        });
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            if (text.Contains("pressed Enter", StringComparison.Ordinal))
+            {
+                return ModelResponses.Done("passed", "Added.");
+            }
+
+            return text.Contains("filled", StringComparison.Ordinal)
+                ? ModelResponses.Call("press", new { key = "Enter" })
+                : ModelResponses.Fill("textbox", "New todo", "Buy milk");
+        });
+
+        async Task Body(TestContext ctx)
+        {
+            await ctx.App.OpenAsync("/todos");
+            await ctx.Agent.ActAsync("add the todo Buy milk");
+            await Expect.That(ctx.Screen.GetByRole("status")).ToHaveTextAsync("Typed Buy milk");
+        }
+
+        var first = await RunAsync(Body, World(), model, directory);
+        Assert.Null(first.Error);
+
+        var second = await RunAsync(Body, World(), new ScriptedModel(_ => throw new InvalidOperationException("no model call expected")), directory);
+        Assert.Null(second.Error);
+        Assert.Equal(1, second.Replayed);
+        Assert.Equal(0, second.ModelCalls);
+    }
+
+    [Fact]
+    public async Task A_key_press_with_only_a_test_id_goes_to_that_control()
+    {
+        var world = new DocumentWorld().Map("/form", page =>
+        {
+            var status = page.Status("Not saved");
+            page.Roots.Add(new DocumentElement { Role = "button", Name = "Save", TestId = "save", OnTap = () => status.Name = status.Text = "Saved" });
+        });
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            return text.Contains("pressed Enter", StringComparison.Ordinal)
+                ? ModelResponses.Done("passed", "Saved.")
+                : ModelResponses.Call("press", new { key = "Enter", testId = "save" });
+        });
+
+        var result = await RunAsync(async ctx =>
+        {
+            await ctx.App.OpenAsync("/form");
+            await ctx.Agent.ActAsync("save the form");
+            await Expect.That(ctx.Screen.GetByRole("status")).ToHaveTextAsync("Saved");
+        }, world, model);
+
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
+    public async Task A_repeated_control_is_not_recorded_as_an_end_state_anchor()
+    {
+        var directory = TempCache();
+        static DocumentWorld World() => new DocumentWorld().Map("/todos", page =>
+        {
+            page.Button("Add two", () =>
+            {
+                page.Roots.Add(new DocumentElement { Role = "button", Name = "Delete" });
+                page.Roots.Add(new DocumentElement { Role = "button", Name = "Delete" });
+                page.Roots.Add(new DocumentElement { Role = "status", Name = "Added two", Text = "Added two" });
+            });
+        });
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            return text.Contains("tapped", StringComparison.Ordinal)
+                ? ModelResponses.Done("passed", "Added.")
+                : ModelResponses.Tap("button", "Add two");
+        });
+
+        async Task Body(TestContext ctx)
+        {
+            await ctx.App.OpenAsync("/todos");
+            await ctx.Agent.ActAsync("add two todos");
+            await Expect.That(ctx.Screen.GetByRole("button", "Delete")).ToHaveCountAsync(2);
+        }
+
+        var first = await RunAsync(Body, World(), model, directory);
+        Assert.Null(first.Error);
+
+        var second = await RunAsync(Body, World(), new ScriptedModel(_ => throw new InvalidOperationException("no model call expected")), directory);
+        Assert.Null(second.Error);
+        Assert.Equal(1, second.Replayed);
+    }
+
+    [Fact]
     public async Task Replay_waits_for_an_end_state_that_shows_up_late()
     {
         var directory = TempCache();

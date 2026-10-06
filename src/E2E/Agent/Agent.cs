@@ -575,7 +575,7 @@ public sealed class Agent
 
             // A replayed action draws on the step's action budget like a live one. The first always fits.
             // An action with a target reserves its slot once the target is found, so a lost target is a miss.
-            if (action.Kind is "back" or "scroll" or "scrollUntil" && !budget.TryReserve())
+            if ((action.Kind is "back" or "scroll" or "scrollUntil" || (action.Kind == "press" && !HasTarget(action))) && !budget.TryReserve())
             {
                 _scope.HandedOff++;
                 return ReplayAttempt.Hand("action-budget");
@@ -583,12 +583,15 @@ public sealed class Agent
 
             try
             {
-                // back and a viewport scroll target nothing, so they replay as given.
+                // back, a viewport scroll, and a key press on the focused control target nothing, so they replay as given.
                 // A scroll on a list re-finds the list before each repeat.
                 switch (action.Kind)
                 {
                     case "back":
                         await _scope.Session.BackAsync(token).ConfigureAwait(false);
+                        break;
+                    case "press" when !HasTarget(action):
+                        await _scope.Session.PressAsync(action.Key ?? "Enter", token).ConfigureAwait(false);
                         break;
                     case "scroll" or "scrollUntil" when !TryDirection(action.Direction, out _):
                         return Lost("invalid-entry");
@@ -796,7 +799,7 @@ public sealed class Agent
             return ToolOutcome.Ok(await DescribeAsync("navigated to " + Routes.PathOf(url), token).ConfigureAwait(false));
         }
 
-        if (string.Equals(call.Name, "press", StringComparison.Ordinal) && Args.String(call.Arguments, "role") is null && Args.String(call.Arguments, "name") is null && Args.String(call.Arguments, "ref") is null)
+        if (string.Equals(call.Name, "press", StringComparison.Ordinal) && !HasTarget(call.Arguments))
         {
             var key = Args.String(call.Arguments, "key") ?? "Enter";
             try
@@ -1369,6 +1372,12 @@ public sealed class Agent
 
             var key = (node.Role ?? "") + "\n" + node.Name + "\n" + node.TestId;
             if (!seen.Add(key))
+            {
+                continue;
+            }
+
+            // The replay needs exactly one match, so a repeated control is no anchor.
+            if (Find(after, node.Role, node.Name, node.TestId, null).Count != 1)
             {
                 continue;
             }
