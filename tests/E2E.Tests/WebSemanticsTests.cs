@@ -35,7 +35,8 @@ public sealed class WebSemanticsTests
           <button aria-expanded="true">Menu</button>
           <button aria-pressed="true">Bold</button>
           <div role="tablist"><div role="tab" aria-selected="true">General</div></div>
-          <input aria-label="Focus me" autofocus>
+          <input aria-label="Focus me">
+          <script>document.querySelector("[aria-label='Focus me']").focus();</script>
           <div data-qa="custom">Custom id</div>
         </main>
         <footer>Bottom</footer>
