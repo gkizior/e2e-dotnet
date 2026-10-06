@@ -348,6 +348,7 @@ public sealed class LocatorExpect
         var deadline = start + (timeout ?? _locator.Screen.AssertionTimeout);
         var grace = deadline - start < NegationGrace ? deadline - start : NegationGrace;
         DateTime? falseSince = null;
+        var firstSample = true;
         while (true)
         {
             token.ThrowIfCancellationRequested();
@@ -362,7 +363,8 @@ public sealed class LocatorExpect
 
             if (_negated && verdict.Holds == false)
             {
-                falseSince ??= now;
+                // False from the first sample means false for the whole budget so far, so the clock starts with the budget.
+                falseSince ??= firstSample ? start : now;
                 if (now - falseSince >= grace)
                 {
                     _locator.Screen.NotifyVerified();
@@ -384,6 +386,7 @@ public sealed class LocatorExpect
                     + "; observed " + verdict.Observed + " (match count " + Number(matches.Count) + ")");
             }
 
+            firstSample = false;
             await Task.Delay(_locator.Screen.PollInterval, token).ConfigureAwait(false);
         }
     }

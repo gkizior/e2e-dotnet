@@ -163,6 +163,19 @@ public sealed class ExpectTests
     }
 
     [Fact]
+    public async Task Negation_passes_when_false_for_a_short_budget_on_a_slow_engine()
+    {
+        var world = new DocumentWorld().Map("/states", page => page.Textbox("Name"));
+        var error = await RunAsync(
+            screen => Expect.That(screen.GetByLabel("Name")).Not.ToBeFocusedAsync(timeout: TimeSpan.FromMilliseconds(100)),
+            world,
+            "/states",
+            engine: new SlowEngine(new DocumentEngine(world), TimeSpan.FromMilliseconds(150)));
+
+        Assert.Null(error);
+    }
+
+    [Fact]
     public async Task Boolean_flags_flip_the_matcher()
     {
         var world = new DocumentWorld().Map("/flags", page =>
@@ -225,11 +238,12 @@ public sealed class ExpectTests
         Func<Screen, Task> body,
         DocumentWorld? world = null,
         string route = "/settings/billing",
-        TimeSpan? assertionTimeout = null)
+        TimeSpan? assertionTimeout = null,
+        IEngine? engine = null)
     {
         await using var session = await E2ESession.StartAsync(new E2ESessionOptions
         {
-            Engine = new DocumentEngine(world ?? BillingWorld.Create()),
+            Engine = engine ?? new DocumentEngine(world ?? BillingWorld.Create()),
             BaseUrl = "https://billing.test",
             TestTitle = "expect > case",
             AssertionTimeout = assertionTimeout ?? TimeSpan.FromSeconds(2),
@@ -250,5 +264,37 @@ public sealed class ExpectTests
 
         session.Complete(error);
         return error;
+    }
+
+    /// <summary>Slows every observation, as a loaded CI runner does.</summary>
+    private sealed class SlowEngine(IEngine inner, TimeSpan delay) : IEngine
+    {
+        public string Platform => inner.Platform;
+
+        public string Version => inner.Version;
+
+        public EngineCapabilities Capabilities => inner.Capabilities;
+
+        public async Task<IEngineSession> StartAsync(EngineStartOptions options, CancellationToken cancellationToken) =>
+            new SlowSession(await inner.StartAsync(options, cancellationToken), delay);
+    }
+
+    private sealed class SlowSession(IEngineSession inner, TimeSpan delay) : IEngineSession
+    {
+        public string Route => inner.Route;
+
+        public Task OpenAsync(string url, CancellationToken cancellationToken) => inner.OpenAsync(url, cancellationToken);
+
+        public async Task<Observation> ObserveAsync(CancellationToken cancellationToken)
+        {
+            await Task.Delay(delay, cancellationToken);
+            return await inner.ObserveAsync(cancellationToken);
+        }
+
+        public Task PerformAsync(SemanticNode node, LocatorAction action, CancellationToken cancellationToken) => inner.PerformAsync(node, action, cancellationToken);
+
+        public Task PressAsync(string key, CancellationToken cancellationToken) => inner.PressAsync(key, cancellationToken);
+
+        public ValueTask DisposeAsync() => inner.DisposeAsync();
     }
 }
