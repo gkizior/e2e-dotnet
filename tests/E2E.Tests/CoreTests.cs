@@ -385,6 +385,45 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public async Task Act_double_taps_a_control_and_replays_it()
+    {
+        var directory = TempCache();
+        static DocumentWorld World() => new DocumentWorld().Map("/todos", page =>
+        {
+            var status = page.Status("Not editing");
+            var taps = 0;
+            page.Button("Buy milk", () =>
+            {
+                taps++;
+                status.Name = status.Text = taps == 2 ? "Editing Buy milk" : "Not editing";
+            });
+        });
+        var model = new ScriptedModel(request =>
+        {
+            var text = string.Join('\n', request.Messages.Select(message => message.Content));
+            return text.Contains("double-tapped", StringComparison.Ordinal)
+                ? ModelResponses.Done("passed", "Editing.")
+                : ModelResponses.Call("double_tap", new { role = "button", name = "Buy milk" });
+        });
+
+        async Task Body(TestContext ctx)
+        {
+            await ctx.App.OpenAsync("/todos");
+            await ctx.Agent.ActAsync("start editing Buy milk");
+            await Expect.That(ctx.Screen.GetByRole("status")).ToHaveTextAsync("Editing Buy milk");
+        }
+
+        var first = await RunAsync(Body, World(), model, directory);
+        Assert.Null(first.Error);
+        Assert.Contains(model.Requests[0].Tools, tool => tool.Name == "double_tap");
+
+        var second = await RunAsync(Body, World(), new ScriptedModel(_ => throw new InvalidOperationException("no model call expected")), directory);
+        Assert.Null(second.Error);
+        Assert.Equal(1, second.Replayed);
+        Assert.Equal(0, second.ModelCalls);
+    }
+
+    [Fact]
     public async Task Replay_waits_for_an_end_state_that_shows_up_late()
     {
         var directory = TempCache();

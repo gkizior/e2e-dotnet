@@ -48,7 +48,7 @@ public sealed class Agent
     private static readonly JsonSerializerOptions ExtractJson = CreateExtractJson();
 
     private static readonly HashSet<string> ActionTools =
-        new(["navigate", "tap", "fill", "fill_secret", "press", "select", "check", "uncheck", "clear", "back", "scroll", "scroll_to"], StringComparer.Ordinal);
+        new(["navigate", "tap", "double_tap", "fill", "fill_secret", "press", "select", "check", "uncheck", "clear", "back", "scroll", "scroll_to"], StringComparer.Ordinal);
 
     private readonly AttemptScope _scope;
 
@@ -720,6 +720,7 @@ public sealed class Agent
         LocatorAction locatorAction = action.Kind switch
         {
             "tap" => new LocatorAction.Tap(),
+            "doubleTap" => new LocatorAction.DoubleTap(),
             "fill" => new LocatorAction.Fill(action.Value ?? "", false),
             "press" => new LocatorAction.Press(action.Key ?? "Enter"),
             "select" => new LocatorAction.Select(action.Value ?? ""),
@@ -833,6 +834,10 @@ public sealed class Agent
                     await _scope.Session.PerformAsync(node, new LocatorAction.Tap(), token).ConfigureAwait(false);
                     actions.Add(Record(node, "tap"));
                     return ToolOutcome.Ok(await DescribeAsync("tapped " + Label(node), token).ConfigureAwait(false));
+                case "double_tap":
+                    await _scope.Session.PerformAsync(node, new LocatorAction.DoubleTap(), token).ConfigureAwait(false);
+                    actions.Add(Record(node, "doubleTap"));
+                    return ToolOutcome.Ok(await DescribeAsync("double-tapped " + Label(node), token).ConfigureAwait(false));
                 case "fill":
                     var value = Args.String(call.Arguments, "value") ?? "";
                     await _scope.Session.PerformAsync(node, new LocatorAction.Fill(value, false), token).ConfigureAwait(false);

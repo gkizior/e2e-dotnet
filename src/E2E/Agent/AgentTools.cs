@@ -109,6 +109,7 @@ internal static class AgentTools
     private static readonly ModelTool[] Verbs =
     [
         Tool("tap", "Activate a control.", Target),
+        Tool("double_tap", "Double-click a control. Use it only when a tap does nothing, such as a label that opens an editor on a double-click.", Target),
         Tool("fill", "Replace the text in a field.", WithValue(Target, "value")),
         Tool("fill_secret", "Type a declared secret into a password or secret field. Pass the secret name, never the value.", WithValue(Target, "secret")),
         Tool("press", "Press a key such as Enter, Escape, or Tab. Omit role and name to press the focused control.", WithValue(Target, "key")),
