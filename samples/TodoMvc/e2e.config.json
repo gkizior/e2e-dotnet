@@ -1,0 +1,19 @@
+{
+  "targets": [
+    {
+      "name": "todomvc",
+      "platform": "web",
+      "app": { "url": "https://demo.playwright.dev/todomvc" }
+    }
+  ],
+  "actionTimeout": 15000,
+  "assertionTimeout": 10000,
+  "agents": {
+    "default": {
+      "model": "claude-sonnet-5.5",
+      "provider": "copilot",
+      "context": "TodoMVC is a todo list app. The list is stored in the browser and starts empty in every test."
+    }
+  },
+  "cache": { "dir": ".e2e/cache" }
+}

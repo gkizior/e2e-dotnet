@@ -138,6 +138,8 @@ dotnet test --project samples/E2E.Sample
 
 To use an API key instead, change `agents.default` in `samples/E2E.Sample/e2e.config.json`, for example to `"provider": "openai", "model": "gpt-4.1-mini"` with `OPENAI_API_KEY` set.
 
+[`samples/TodoMvc`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/TodoMvc) ports Playwright's TodoMVC example to agent steps, using the NuGet packages. Its README compares the two.
+
 ## Tests
 
 ```bash
