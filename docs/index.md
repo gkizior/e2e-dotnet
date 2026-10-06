@@ -1,5 +1,6 @@
 ---
 _layout: landing
+title: Home
 ---
 
 # E2E for .NET
