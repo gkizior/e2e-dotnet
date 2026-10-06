@@ -15,23 +15,7 @@ dotnet add MyApp.E2E package E2E
 dotnet add MyApp.E2E package E2E.NUnit
 ```
 
-Targets `net10.0`. Chromium must be installed once. Either run `pwsh bin/Debug/net10.0/playwright.ps1 install chromium`, or add this fixture so every run installs it when missing:
-
-```csharp
-[SetUpFixture]
-public sealed class BrowserSetup
-{
-    [OneTimeSetUp]
-    public void InstallChromium()
-    {
-        var exitCode = Microsoft.Playwright.Program.Main(["install", "chromium"]);
-        if (exitCode != 0)
-        {
-            throw new InvalidOperationException($"Playwright could not install Chromium (exit code {exitCode}).");
-        }
-    }
-}
-```
+Targets `net10.0`. The first browser launch in a test run installs Chromium, so the first run needs network access. On a CI image that already has the browser, or with no network, set `E2E_SKIP_BROWSER_INSTALL=1` and install it yourself with `pwsh bin/Debug/net10.0/playwright.ps1 install chromium`.
 
 ## Config
 
@@ -150,6 +134,7 @@ An `E2EException` has a `Code`. Read it first.
 | `ASSERTION_INCONCLUSIVE` | The judge could not decide | Make the statement concrete and visible on screen |
 | `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | The goal was too large or unclear | Split it into smaller `ActAsync` calls |
 | `LOCATOR_NOT_FOUND`, `STRICT_MODE` | No match, or more than one match | Use the exact accessible name, or `First()`, `Nth(i)`, `Filter(...)` |
+| `ENVIRONMENT_UNAVAILABLE` with "Chromium is not installed" or "could not install Chromium" | The browser install was skipped or failed | Allow network access for the first run, or install Chromium and set `E2E_SKIP_BROWSER_INSTALL=1` |
 | `APP_UNREACHABLE` | The agent found the app down or not loading | Start the app, or fix `targets[].app.url` |
 | `REPLAY_STALE` | `cache.strict` is on and a recording no longer matches | Re-run once without `cache.strict` to re-record |
 

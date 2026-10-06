@@ -91,6 +91,11 @@ public sealed class WebEngine : IEngine
 {
     public const string EngineVersion = "1.1.0";
 
+    private const string SkipInstallVariable = "E2E_SKIP_BROWSER_INSTALL";
+
+    // Playwright's install is a no-op when Chromium is already there; one run serves every session in the process.
+    private static readonly Lazy<Task<int>> ChromiumInstall = new(() => Task.Run(() => Microsoft.Playwright.Program.Main(["install", "chromium"])));
+
     private readonly WebEngineOptions _options;
     private readonly bool _headless;
 
@@ -133,6 +138,11 @@ public sealed class WebEngine : IEngine
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
+            if (_options.Connect is null)
+            {
+                await EnsureChromiumAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
             IBrowser browser;
             if (_options.Connect is { } connect)
@@ -153,7 +163,7 @@ public sealed class WebEngine : IEngine
         {
             throw new EngineException(
                 "ENVIRONMENT_UNAVAILABLE",
-                "Chromium is not installed for Playwright. From the build output run: playwright.ps1 install chromium",
+                "Chromium is not installed for Playwright. Unset " + SkipInstallVariable + " to install it on launch, or from the build output run: playwright.ps1 install chromium",
                 ex);
         }
         catch (Exception ex) when (WebErrors.IsPlaywright(ex))
@@ -168,6 +178,23 @@ public sealed class WebEngine : IEngine
         return Uri.TryCreate(url, UriKind.Absolute, out var target)
             && (target.Scheme == Uri.UriSchemeHttp || target.Scheme == Uri.UriSchemeHttps)
             && string.Equals(target.Host, app.Host, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task EnsureChromiumAsync(CancellationToken cancellationToken)
+    {
+        var skip = Environment.GetEnvironmentVariable(SkipInstallVariable);
+        if (string.Equals(skip, "1", StringComparison.Ordinal) || string.Equals(skip, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var exitCode = await ChromiumInstall.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (exitCode != 0)
+        {
+            throw new EngineException(
+                "ENVIRONMENT_UNAVAILABLE",
+                "Playwright could not install Chromium (exit code " + exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture) + "). Install it yourself and set " + SkipInstallVariable + "=1 to skip this step.");
+        }
     }
 
     private static void Validate(WebEngineOptions options)

@@ -15,7 +15,7 @@ dotnet add package E2E
 dotnet add package E2E.NUnit
 ```
 
-The library targets `net10.0` and includes `WebEngine`, which drives Chromium through [Microsoft.Playwright](https://playwright.dev/dotnet/). Firefox and WebKit are not exposed yet. Install a browser once, from the build output of the project that references `E2E`:
+The library targets `net10.0` and includes `WebEngine`, which drives Chromium through [Microsoft.Playwright](https://playwright.dev/dotnet/). Firefox and WebKit are not exposed yet. The first `WebEngine` launch in a process installs Chromium, so the first run needs network access. When Chromium is already installed, the step does nothing. On a machine that already has the browser, or has no network, set `E2E_SKIP_BROWSER_INSTALL=1` to skip it, and install it yourself from the build output:
 
 ```bash
 pwsh bin/Debug/net10.0/playwright.ps1 install chromium
@@ -124,7 +124,7 @@ A fixture overrides any value with the matching property, such as `BaseUrl`, `Ca
 
 ## Sample
 
-The sample is a real end-to-end test of [Dariten](https://dariten.vercel.app), a public personal finance demo. It drives Chromium through `WebEngine` and installs the browser on its first run. The demo data is shared and anyone can edit it, so the tests only read the app and never check specific balances.
+The sample is a real end-to-end test of [Dariten](https://dariten.vercel.app), a public personal finance demo. It drives Chromium through `WebEngine`, which installs the browser on its first run. The demo data is shared and anyone can edit it, so the tests only read the app and never check specific balances.
 
 - `The_dashboard_links_to_the_transaction_register` uses locators only. It needs no model.
 - `An_agent_filters_the_register_by_category` asks the agent to filter the register, then judges the result. It runs `claude-sonnet-5.5` on a GitHub Copilot plan and is in the `RealModel` category, which CI skips. A second passing run replays the filter without asking the model to act.
@@ -144,7 +144,7 @@ To use an API key instead, change `agents.default` in `samples/E2E.Sample/e2e.co
 dotnet test E2E.slnx -c Release
 ```
 
-Most unit tests use `DocumentEngine` and a scripted model. No test needs an API key. The Playwright tests install Chromium once per run, before the first of them starts, so the first run needs network access.
+Most unit tests use `DocumentEngine` and a scripted model. No test needs an API key. The Playwright tests install Chromium on the first launch, so the first run needs network access.
 
 ## What is in this port
 
