@@ -17,9 +17,10 @@
     <ProjectReference Include="..\E2E\E2E.csproj" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
-  <Target Name="DropPlaywrightScript" AfterTargets="CopyPlaywrightFilesToOutput">
+  <!-- The E2E reference still flows its Playwright driver into the publish list, which the tool package is built from. -->
+  <Target Name="DropPlaywrightDriver" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
-      <Content Remove="@(Content)" Condition="'%(Content.NuGetPackageId)' == 'Microsoft.Playwright'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="$([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('\', '/').StartsWith('.playwright/')) Or '%(ResolvedFileToPublish.RelativePath)' == 'playwright.ps1'" />
     </ItemGroup>
   </Target>
 </Project>
