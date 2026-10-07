@@ -291,7 +291,6 @@ public sealed class ModelProviderTests
                 Model = "openai/gpt-6-luna-fast",
                 BaseUrl = "https://openrouter.ai/api/v1",
                 ApiKey = "or",
-                Headers = ModelProviders.AttributionHeaders,
             },
             http);
 
@@ -433,9 +432,9 @@ internal sealed class RecordingHandler : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var header in request.Headers)
+        foreach (var header in request.Headers.NonValidated)
         {
-            headers[header.Key] = string.Join(",", header.Value);
+            headers[header.Key] = header.Value.ToString();
         }
 
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);

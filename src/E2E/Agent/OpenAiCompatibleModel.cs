@@ -207,7 +207,7 @@ public sealed class OpenAiCompatibleModelOptions
     /// </summary>
     public string? ApiKeyHeader { get; init; }
 
-    /// <summary>Headers added to every request, such as OpenRouter's app attribution.</summary>
+    /// <summary>Headers added to every request. The identity headers (<c>User-Agent</c>, <c>HTTP-Referer</c>, <c>X-Title</c>) replace the same names set here.</summary>
     public IReadOnlyDictionary<string, string>? Headers { get; init; }
 
     /// <summary>Query parameters added to every request URL, such as Azure's <c>api-version</c>.</summary>

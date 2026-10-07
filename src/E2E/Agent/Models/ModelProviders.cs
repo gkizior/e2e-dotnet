@@ -12,13 +12,6 @@ namespace E2E;
 /// </summary>
 public static class ModelProviders
 {
-    /// <summary>App attribution the Vercel AI Gateway and OpenRouter read, and others ignore.</summary>
-    internal static readonly IReadOnlyDictionary<string, string> AttributionHeaders = new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-        ["HTTP-Referer"] = "https://github.com/hardkoded/e2e-dotnet",
-        ["X-Title"] = "e2e-dotnet",
-    };
-
     /// <summary>OpenAI over chat completions, reading <c>OPENAI_API_KEY</c>.</summary>
     public static OpenAiCompatibleModel OpenAi(string model, string? apiKey = null)
     {
@@ -98,7 +91,6 @@ public static class ModelProviders
             Provider = "openrouter",
             ApiKey = apiKey,
             ApiKeyEnv = "OPENROUTER_API_KEY",
-            Headers = AttributionHeaders,
         });
     }
 
@@ -116,7 +108,6 @@ public static class ModelProviders
             ApiKey = apiKey,
             ApiKeyEnv = "AI_GATEWAY_API_KEY",
             ApiKeyFallbackEnv = "VERCEL_OIDC_TOKEN",
-            Headers = AttributionHeaders,
         });
     }
 

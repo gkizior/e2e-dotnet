@@ -747,19 +747,19 @@ public sealed class AgentConfig
                 BaseUrl = BaseUrl,
                 ApiKeyEnv = ApiKeyEnv ?? "AWS_BEARER_TOKEN_BEDROCK",
             }),
-            "xai" => Compatible(model, "https://api.x.ai/v1", "xai", "XAI_API_KEY", null, null),
-            "openrouter" => Compatible(model, "https://openrouter.ai/api/v1", "openrouter", "OPENROUTER_API_KEY", null, ModelProviders.AttributionHeaders),
-            "gateway" => Compatible(model, "https://ai-gateway.vercel.sh/v1", "gateway", "AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", ModelProviders.AttributionHeaders),
-            "openai-compatible" => Compatible(model, "http://127.0.0.1:11434/v1", "openai-compatible", "LLM_API_KEY", null, null),
+            "xai" => Compatible(model, "https://api.x.ai/v1", "xai", "XAI_API_KEY", null),
+            "openrouter" => Compatible(model, "https://openrouter.ai/api/v1", "openrouter", "OPENROUTER_API_KEY", null),
+            "gateway" => Compatible(model, "https://ai-gateway.vercel.sh/v1", "gateway", "AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"),
+            "openai-compatible" => Compatible(model, "http://127.0.0.1:11434/v1", "openai-compatible", "LLM_API_KEY", null),
             "chatgpt" => OAuth.Subscriptions.ChatGpt(model),
             "copilot" => OAuth.Subscriptions.Copilot(model),
             "grok" => OAuth.Subscriptions.Grok(model),
             "opencode-console" => OAuth.Subscriptions.OpenCodeConsole(model),
-            _ => Compatible(model, "https://api.openai.com/v1", "openai", "OPENAI_API_KEY", null, null),
+            _ => Compatible(model, "https://api.openai.com/v1", "openai", "OPENAI_API_KEY", null),
         };
     }
 
-    private OpenAiCompatibleModel Compatible(string model, string baseUrl, string provider, string apiKeyEnv, string? fallbackEnv, IReadOnlyDictionary<string, string>? headers)
+    private OpenAiCompatibleModel Compatible(string model, string baseUrl, string provider, string apiKeyEnv, string? fallbackEnv)
     {
         return new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions
         {
@@ -768,7 +768,6 @@ public sealed class AgentConfig
             Provider = provider,
             ApiKeyEnv = ApiKeyEnv ?? apiKeyEnv,
             ApiKeyFallbackEnv = ApiKeyEnv is null ? fallbackEnv : null,
-            Headers = headers,
         });
     }
 

@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Globalization;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -13,8 +15,20 @@ namespace E2E.Internal;
 /// <summary>The HTTP every model client shares: one POST, the provider's errors mapped to agent codes.</summary>
 internal static class ModelHttp
 {
-    /// <summary>What every model request identifies as. Never another client's name.</summary>
-    public const string UserAgent = "e2e-dotnet";
+    /// <summary><c>e2e-dotnet/&lt;version&gt; (&lt;platform&gt;; &lt;arch&gt;)</c>: what every vendor request identifies as. Never another client's name.</summary>
+    public static readonly string UserAgent = "e2e-dotnet/" + PackageVersion() + " (" + Platform() + "; " + Arch() + ")";
+
+    /// <summary>
+    /// Sent with every model call, whichever provider serves it, replacing the same headers set on the client.
+    /// The .NET runtime follows our user agent, as the AI SDK appends its own upstream; <c>HTTP-Referer</c> and
+    /// <c>X-Title</c> are the app attribution the Vercel AI Gateway and OpenRouter read, and others ignore.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> RequestHeaders = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["User-Agent"] = UserAgent + " runtime/dotnet/" + System.Environment.Version,
+        ["HTTP-Referer"] = "https://github.com/hardkoded/e2e-dotnet",
+        ["X-Title"] = "e2e-dotnet",
+    };
 
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
 
@@ -24,7 +38,7 @@ internal static class ModelHttp
     /// </summary>
     public static async Task<string> SendAsync(HttpClient http, HttpRequestMessage message, CancellationToken cancellationToken)
     {
-        message.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
+        ModelEndpoint.AddHeaders(message, RequestHeaders);
         HttpResponseMessage response;
         try
         {
@@ -149,6 +163,35 @@ internal static class ModelHttp
         }
 
         return names;
+    }
+
+    /// <summary>The package version MinVer stamps, without its build metadata.</summary>
+    private static string PackageVersion()
+    {
+        var version = typeof(ModelHttp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+        return version.Split('+')[0];
+    }
+
+    /// <summary>The operating system by Node's <c>process.platform</c> name, as upstream reports it.</summary>
+    private static string Platform()
+    {
+        return OperatingSystem.IsMacOS() ? "darwin"
+            : OperatingSystem.IsWindows() ? "win32"
+            : OperatingSystem.IsLinux() ? "linux"
+            : OperatingSystem.IsFreeBSD() ? "freebsd"
+            : "unknown";
+    }
+
+    /// <summary>The process architecture by Node's <c>process.arch</c> name.</summary>
+    private static string Arch()
+    {
+        return RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X86 => "ia32",
+            Architecture.LoongArch64 => "loong64",
+            Architecture.Ppc64le => "ppc64",
+            var other => other.ToString().ToLowerInvariant(),
+        };
     }
 
     public static int Int(JsonElement element, string name)
