@@ -34,6 +34,9 @@ public sealed class Agent
         "status passed when the screen shows the statement is true. " +
         "status failed with code ASSERTION_FAILED when the statement is false. " +
         "status failed with code ASSERTION_INCONCLUSIVE when the screen does not show enough to decide. " +
+        "When the same value or state is shown in more than one place, such as an order total in a summary and again as the amount on a pay button, the statement holds only when every place agrees with it; one place that contradicts it makes the statement false, even if another agrees. " +
+        "This applies only when the statement does not say where to look: a statement that names the place, such as \"the order summary total\", is judged on that place alone. " +
+        "It is about one value shown twice, not about different items: a claim about some item, such as \"a todo is marked done\", holds when one item matches. " +
         "You do not see earlier steps. Do not call any tool except done.";
 
     // assert and extract make one model call and one repair round.

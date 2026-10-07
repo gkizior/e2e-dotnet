@@ -185,6 +185,26 @@ public sealed class AgentOptionsTests
     }
 
     [Fact]
+    public async Task The_judge_is_told_every_place_a_repeated_value_shows_must_agree()
+    {
+        var model = Script();
+        var result = await RunAsync(
+            async ctx =>
+            {
+                await ctx.App.OpenAsync("/settings/billing");
+                await ctx.Agent.AssertAsync("the invoice is Prorated");
+            },
+            model,
+            _ => Options(model));
+
+        Assert.Null(result.Error);
+        var judge = model.Requests.Last();
+        Assert.Contains("the statement holds only when every place agrees with it; one place that contradicts it makes the statement false, even if another agrees.", judge.System, StringComparison.Ordinal);
+        Assert.Contains("a statement that names the place, such as \"the order summary total\", is judged on that place alone.", judge.System, StringComparison.Ordinal);
+        Assert.Contains("a claim about some item, such as \"a todo is marked done\", holds when one item matches.", judge.System, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task The_judge_decides_assert_waitFor_and_extract_and_the_model_acts()
     {
         var model = Script();

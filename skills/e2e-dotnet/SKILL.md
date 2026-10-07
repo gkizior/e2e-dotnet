@@ -91,6 +91,7 @@ Rules for agent steps:
 - One goal per `ActAsync`. Write the outcome, not the clicks: "add a $5 coffee expense", not "click Add, type 5".
 - Follow every `ActAsync` with `AssertAsync`, `WaitForAsync`, or `Expect.That`. Only a verified act is recorded for replay.
 - Prefer `Expect.That` with a locator when the check is exact. It needs no model and does not flake.
+- A value shown in more than one place (a total in the summary and on the pay button) must agree everywhere, or the judgment fails. Name the one you mean (`"the order summary total is $42.00"`) when only it matters.
 - Pass data in `Params`, not in the instruction text. Use `Values.Unique(...)` for fresh emails or names, and a `Secret` for passwords. The model never sees a secret's value.
 
 ```csharp

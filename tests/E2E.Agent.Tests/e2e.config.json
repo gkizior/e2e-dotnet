@@ -1,0 +1,15 @@
+{
+  "targets": [{ "name": "web", "platform": "web", "app": { "url": "http://127.0.0.1" } }],
+  "timeout": 300000,
+  "agents": {
+    "default": {
+      "model": "claude-sonnet-5.5",
+      "provider": "copilot",
+      "judgmentTimeout": 90000,
+      "maxSteps": 40,
+      "maxModelCalls": 60,
+      "context": "This is the e2e playground app: a small multi-page site with todos, forms, a sign-in flow, a workspace wizard, and release notes. Prefer the control whose accessible name matches the request exactly."
+    }
+  },
+  "cache": { "dir": ".e2e/cache" }
+}
