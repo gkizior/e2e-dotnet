@@ -12,6 +12,9 @@
     <Using Include="NUnit.Framework" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Testbed\control-inventory.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\E2E.NUnit\E2E.NUnit.csproj" />
   </ItemGroup>
 </Project>

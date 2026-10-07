@@ -320,6 +320,11 @@ internal static class PageScript
         }
         """;
 
+    // Whether a checkable element is a radio, which a click can select but never clear.
+    public const string IsRadio = """
+        (node) => (node instanceof HTMLInputElement && node.type === "radio") || node.getAttribute("role") === "radio"
+        """;
+
     // The ref an iframe element carries, so the host can hang that frame's
     // observation under the iframe node.
     public const string RefOf = """

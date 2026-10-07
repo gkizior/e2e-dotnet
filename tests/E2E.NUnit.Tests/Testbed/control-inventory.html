@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<!--
+  Copyright 2026 TesterArmy.
+  Modified by Dario Kondratiuk.
+  SPDX-License-Identifier: Apache-2.0
+
+  A plain-script port of upstream's web-benchmark ControlInventory example
+  (apps/web-benchmark/app/src/Examples/ControlInventory.tsx): plain controls with
+  every state exposed, one exercise per agent verb. Each control reports its
+  state in a status line, and the success message shows once every exercise is done.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Control inventory</title>
+  <style>
+    body { font-family: sans-serif; margin: 0 24px; }
+    #root { display: flex; flex-direction: column; gap: 16px; padding: 24px 0; }
+    .hint { font-size: 13px; color: #666; margin: 0; line-height: 1.5; }
+    .success { font-size: 18px; font-weight: 700; color: #0a7a2f; margin: 0; }
+    dl { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 4px; margin: 0; padding: 12px; border: 1px solid #e5e5e5; border-radius: 8px; font-size: 13px; }
+    dt { color: #666; }
+    dd { margin: 0; color: #111; }
+    section { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid #e5e5e5; border-radius: 8px; }
+    h2 { font-size: 15px; font-weight: 600; margin: 0; }
+    .text { font-size: 14px; color: #333; margin: 0; }
+    .check-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    fieldset { display: flex; gap: 16px; border: none; margin: 0; padding: 0; }
+    legend { font-size: 13px; color: #666; padding: 0; }
+    .button-row { display: flex; gap: 12px; }
+    button { font-size: 14px; padding: 8px 14px; border-radius: 6px; border: 1px solid #ccc; background: #fafafa; cursor: pointer; }
+    ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+    li { position: relative; display: flex; align-items: center; }
+    .file-name { font-size: 14px; padding: 6px 8px; border-radius: 6px; cursor: default; user-select: none; }
+    [role="menu"] { position: absolute; top: 100%; left: 0; z-index: 10; display: flex; flex-direction: column; min-width: 140px; background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); padding: 4px; }
+    [role="menuitem"] { text-align: left; padding: 8px 10px; border: none; background: transparent; }
+    .footnote { margin-top: 1600px; font-size: 13px; color: #666; }
+  </style>
+</head>
+<body>
+<div id="root">
+  <p data-testid="success-message" class="success" hidden>All exercises done</p>
+  <p class="hint">
+    Plain controls, one exercise each. Agree to the terms and pick the Medium size; pick Express delivery; hold the Hold me button, then
+    double-click the Double-click me button; rename report.pdf to summary.pdf through its context menu, which opens
+    on right-click only; attach a file; open the details and return with the browser history; bring the footnote at
+    the bottom into view.
+  </p>
+
+  <dl aria-label="Exercise states">
+    <dt>Toggles</dt><dd><output aria-label="Toggles state" id="toggles-state"></output></dd>
+    <dt>Delivery</dt><dd><output aria-label="Delivery state" id="delivery-state"></output></dd>
+    <dt>Hold</dt><dd><output aria-label="Hold state" id="hold-state"></output></dd>
+    <dt>Double-click</dt><dd><output aria-label="Double-click state" id="double-click-state"></output></dd>
+    <dt>File</dt><dd><output aria-label="File state" id="file-state"></output></dd>
+    <dt>Attachments</dt><dd><output aria-label="Attachments state" id="attachments-state"></output></dd>
+    <dt>Navigation</dt><dd><output aria-label="Navigation state" id="navigation-state"></output></dd>
+    <dt>Scroll</dt><dd><output aria-label="Footnote state" id="footnote-state"></output></dd>
+  </dl>
+
+  <div id="view"></div>
+</div>
+
+<template id="details-view">
+  <section aria-label="Details">
+    <h2>Details</h2>
+    <p class="text">The inventory is one history entry back. This view has no link of its own.</p>
+  </section>
+</template>
+
+<template id="inventory-view">
+  <section aria-label="Toggles">
+    <h2>Toggles</h2>
+    <label class="check-row"><input type="checkbox" id="agree"> Agree to terms</label>
+    <fieldset id="size">
+      <legend>Size</legend>
+      <label class="check-row"><input type="radio" name="size" value="Small"> Small</label>
+      <label class="check-row"><input type="radio" name="size" value="Medium"> Medium</label>
+      <label class="check-row"><input type="radio" name="size" value="Large"> Large</label>
+    </fieldset>
+    <div id="delivery"></div>
+  </section>
+
+  <section aria-label="Gestures">
+    <h2>Gestures</h2>
+    <div class="button-row">
+      <button type="button" id="hold">Hold me</button>
+      <button type="button" id="twice">Double-click me</button>
+    </div>
+  </section>
+
+  <section aria-label="Files">
+    <h2>Files</h2>
+    <ul id="files"></ul>
+    <label class="check-row">Attachments <input type="file" multiple id="attachments"></label>
+  </section>
+
+  <section aria-label="Navigation">
+    <h2>Navigation</h2>
+    <button type="button" id="open-details">Open details</button>
+  </section>
+
+  <p class="footnote" id="footnote">Footnote</p>
+</template>
+
+<script>
+  const DELIVERIES = ["Standard", "Express"];
+  const TARGET_FILE = "report.pdf";
+  const RENAMED_FILE = "summary.pdf";
+  const LONG_PRESS_MS = 500;
+  const DETAILS_QUERY = "view=details";
+
+  const state = {
+    agreed: false,
+    size: null,
+    delivery: null,
+    holdState: "none",
+    longPressed: false,
+    doubleClickState: "none",
+    doubleClicked: false,
+    files: ["quarterly-report.pdf", "report.pdf", "notes.txt"],
+    menuFor: null,
+    fileState: "no menu open",
+    attachments: [],
+    view: null,
+    returned: false,
+    footnoteInView: false,
+    footnoteSeen: false,
+  };
+  let heldAt = 0;
+  let openedDetails = false;
+  let observer = null;
+  const byId = (id) => document.getElementById(id);
+  const viewFromLocation = () => (window.location.search.includes(DETAILS_QUERY) ? "details" : "inventory");
+
+  // Writes every status line and the success message from the state.
+  function renderStates() {
+    const renamed = state.files.includes(RENAMED_FILE) && !state.files.includes(TARGET_FILE);
+    byId("toggles-state").textContent = `${state.agreed ? "terms agreed" : "terms not agreed"}, size ${state.size ?? "unset"}`;
+    byId("delivery-state").textContent = state.delivery ?? "unset";
+    byId("hold-state").textContent = state.holdState;
+    byId("double-click-state").textContent = state.doubleClickState;
+    byId("file-state").textContent = state.fileState;
+    byId("attachments-state").textContent = state.attachments.length === 0 ? "none" : state.attachments.join(", ");
+    byId("navigation-state").textContent = state.view === "details" ? "on details" : state.returned ? "back on the inventory" : "not opened";
+    byId("footnote-state").textContent = state.footnoteInView ? "in view" : "out of view";
+    document.querySelector('[data-testid="success-message"]').hidden = !(state.agreed && state.size === "Medium"
+      && state.delivery === "Express" && state.longPressed && state.doubleClicked && renamed
+      && state.attachments.length > 0 && state.returned && state.footnoteSeen);
+  }
+
+  function set(changes) {
+    Object.assign(state, changes);
+    renderStates();
+  }
+
+  // Until a delivery is picked, the radios; once one is, its summary replaces them.
+  function renderDelivery() {
+    const host = byId("delivery");
+    if (state.delivery === null) {
+      const fieldset = document.createElement("fieldset");
+      fieldset.innerHTML = "<legend>Delivery</legend>" + DELIVERIES.map((option) =>
+        `<label class="check-row"><input type="radio" name="delivery" value="${option}"> ${option}</label>`).join("");
+      fieldset.addEventListener("change", (event) => {
+        set({ delivery: event.target.value });
+        renderDelivery();
+      });
+      host.replaceChildren(fieldset);
+    } else {
+      const row = document.createElement("div");
+      row.className = "check-row";
+      row.innerHTML = `<span class="text">${state.delivery} delivery selected</span><button type="button">Change delivery</button>`;
+      row.querySelector("button").addEventListener("click", () => {
+        set({ delivery: null });
+        renderDelivery();
+      });
+      host.replaceChildren(row);
+    }
+  }
+
+  function renderFiles() {
+    byId("files").replaceChildren(...state.files.map((file) => {
+      const row = document.createElement("li");
+      const name = document.createElement("span");
+      name.className = "file-name";
+      name.textContent = file;
+      name.addEventListener("click", () => set({ fileState: "a click selects nothing; the menu opens on right-click" }));
+      name.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        set({ menuFor: file, fileState: `menu open for ${file}` });
+        renderFiles();
+      });
+      row.append(name);
+      if (state.menuFor === file) {
+        const menu = document.createElement("div");
+        menu.setAttribute("role", "menu");
+        menu.setAttribute("aria-label", `${file} actions`);
+        for (const action of ["Rename", "Duplicate", "Delete"]) {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.setAttribute("role", "menuitem");
+          item.textContent = action;
+          item.addEventListener("click", () => {
+            if (action !== "Rename") set({ menuFor: null, fileState: "that is not the action" });
+            else if (file !== TARGET_FILE) set({ menuFor: null, fileState: "that is not the file" });
+            else set({ menuFor: null, files: state.files.map((entry) => (entry === file ? RENAMED_FILE : entry)), fileState: `${TARGET_FILE} renamed to ${RENAMED_FILE}` });
+            renderFiles();
+          });
+          menu.append(item);
+        }
+        row.append(menu);
+      }
+      return row;
+    }));
+  }
+
+  function mountInventory() {
+    byId("view").replaceChildren(byId("inventory-view").content.cloneNode(true));
+    const agree = byId("agree");
+    agree.checked = state.agreed;
+    agree.addEventListener("change", () => set({ agreed: agree.checked }));
+    for (const radio of byId("size").querySelectorAll("input")) {
+      radio.checked = state.size === radio.value;
+      radio.addEventListener("change", () => set({ size: radio.value }));
+    }
+    renderDelivery();
+    const hold = byId("hold");
+    hold.addEventListener("pointerdown", () => { heldAt = performance.now(); });
+    hold.addEventListener("pointerup", () => set(performance.now() - heldAt >= LONG_PRESS_MS
+      ? { holdState: "long-pressed", longPressed: true }
+      : { holdState: "tapped" }));
+    const twice = byId("twice");
+    twice.addEventListener("click", () => set({ doubleClickState: "clicked once" }));
+    twice.addEventListener("dblclick", () => set({ doubleClickState: "double-clicked", doubleClicked: true }));
+    renderFiles();
+    byId("attachments").addEventListener("change", (event) => set({ attachments: Array.from(event.target.files ?? [], (file) => file.name) }));
+    byId("open-details").addEventListener("click", () => {
+      openedDetails = true;
+      window.history.pushState({}, "", `?${DETAILS_QUERY}`);
+      showView("details");
+    });
+    observer = new IntersectionObserver((entries) => {
+      const visible = entries[0]?.isIntersecting === true;
+      set({ footnoteInView: visible, footnoteSeen: state.footnoteSeen || visible });
+    });
+    observer.observe(byId("footnote"));
+  }
+
+  function showView(next) {
+    if (next === state.view) return;
+    observer?.disconnect();
+    observer = null;
+    set({ view: next });
+    if (next === "details") byId("view").replaceChildren(byId("details-view").content.cloneNode(true));
+    else mountInventory();
+  }
+
+  // The view follows the URL: once on load, so a details link opens on
+  // details, and on every history move, which is how Back returns here.
+  function syncView() {
+    const next = viewFromLocation();
+    if (next === "inventory" && openedDetails) set({ returned: true });
+    showView(next);
+  }
+  window.addEventListener("popstate", syncView);
+  renderStates();
+  syncView();
+</script>
+</body>
+</html>

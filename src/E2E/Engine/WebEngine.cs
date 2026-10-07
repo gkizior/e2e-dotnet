@@ -474,10 +474,10 @@ public sealed partial class WebEngine : IEngine
                         await element.SelectOptionAsync(select.Value, new ElementHandleSelectOptionOptions { Timeout = timeout }).ConfigureAwait(false);
                         break;
                     case LocatorAction.Check:
-                        await element.CheckAsync(new ElementHandleCheckOptions { Timeout = timeout }).ConfigureAwait(false);
+                        await SetCheckedAsync(element, true, timeout).ConfigureAwait(false);
                         break;
                     case LocatorAction.Uncheck:
-                        await element.UncheckAsync(new ElementHandleUncheckOptions { Timeout = timeout }).ConfigureAwait(false);
+                        await SetCheckedAsync(element, false, timeout).ConfigureAwait(false);
                         break;
                     case LocatorAction.Clear:
                         await element.FillAsync("", new ElementHandleFillOptions { Timeout = timeout }).ConfigureAwait(false);
@@ -820,6 +820,46 @@ public sealed partial class WebEngine : IEngine
         private IBrowserContext RequireContext() =>
             _context ?? throw new EngineException(EngineErrorCodes.InvalidState, "The browser has no context.");
 
+        /// <summary>
+        /// Sets a checkbox, switch, or radio to <paramref name="checked"/> with one click, as
+        /// Playwright's <c>check</c> does, apart from the read after the click: a control
+        /// that is gone by then (an app that swaps a picked radio for its selected
+        /// view, or navigates on change) took the click, so the action is done, where
+        /// Playwright reports it detached as if the click never happened. Whatever
+        /// took its place is not read: the next observation or assertion shows it,
+        /// as it does after a tap. The reads and the click share one element, so the
+        /// state before and after the click is one control's.
+        /// </summary>
+        private static async Task SetCheckedAsync(IElementHandle element, bool @checked, float timeout)
+        {
+            var verb = @checked ? "check" : "uncheck";
+            if (await element.IsCheckedAsync().ConfigureAwait(false) == @checked)
+            {
+                return;
+            }
+
+            if (!@checked && await element.EvaluateAsync<bool>(PageScript.IsRadio).ConfigureAwait(false))
+            {
+                throw new EngineException(EngineErrorCodes.NotActionable, "uncheck cannot clear a radio button; select another radio in its group", retryable: false);
+            }
+
+            await element.ClickAsync(new ElementHandleClickOptions { Timeout = timeout }).ConfigureAwait(false);
+            bool after;
+            try
+            {
+                after = await element.IsCheckedAsync().ConfigureAwait(false);
+            }
+            catch (PlaywrightException ex) when (WebErrors.IsDetached(ex) || WebErrors.IsNavigationRace(ex))
+            {
+                return;
+            }
+
+            if (after != @checked)
+            {
+                throw new EngineException(EngineErrorCodes.NotActionable, verb + " clicked the control but its checked state did not change", retryable: false);
+            }
+        }
+
         private static string Direction(ScrollDirection direction)
         {
             return direction switch
@@ -970,10 +1010,22 @@ internal static partial class WebErrors
             : new EngineException(EngineErrorCodes.EngineFailure, text, cause);
     }
 
+    /// <summary>Whether Playwright's words for <paramref name="cause"/> say the element left the DOM.</summary>
+    public static bool IsDetached(Exception cause)
+    {
+        return DetachedPattern().IsMatch(Message(cause));
+    }
+
+    /// <summary>Whether a Playwright failure describes a read that lost its document to a navigation.</summary>
+    public static bool IsNavigationRace(Exception cause)
+    {
+        return NavigationRacePattern().IsMatch(Message(cause));
+    }
+
     /// <summary>A read that lost its document to a navigation is a retryable <c>NODE_STALE</c>, so the caller observes the new document.</summary>
     public static EngineException NavigationStaleOr(Exception cause, string label)
     {
-        if (NavigationRacePattern().IsMatch(Message(cause)))
+        if (IsNavigationRace(cause))
         {
             return new EngineException(EngineErrorCodes.NodeStale, label + ": " + Message(cause), retryable: true, cause);
         }
