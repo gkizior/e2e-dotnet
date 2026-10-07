@@ -15,6 +15,8 @@ dotnet add package E2E
 dotnet add package E2E.NUnit
 ```
 
+On xUnit v3, add `E2E.Xunit` in place of `E2E.NUnit`. See [xUnit](#xunit).
+
 The library targets `net10.0` and includes `WebEngine`, which drives Chromium through [Microsoft.Playwright](https://playwright.dev/dotnet/). Firefox and WebKit are not exposed yet. The first `WebEngine` launch in a process installs Chromium, so the first run needs network access. A headless run installs only the headless shell, the build it launches. When that build is already installed, the step does nothing. The install keeps other browsers in the Playwright cache; set `PLAYWRIGHT_SKIP_BROWSER_GC=0` to let it remove them. On a machine that already has the browser, or has no network, set `E2E_SKIP_BROWSER_INSTALL=1` to skip it, and install it yourself from the build output:
 
 ```bash
@@ -45,6 +47,30 @@ public sealed class BillingTests : E2ETest
 ```
 
 `E2ETest` starts a `WebEngine` session for each `[Test]`. Override `CreateEngine` with a `DocumentEngine` when the test should not open a browser. An `act` that a later `assert`, `waitFor`, or locator `Expect` verifies is recorded. The next run replays those actions with no model calls until the screen no longer matches. When the test ends, verified acts are written and unverified acts that recorded or replayed are evicted, whether it passed, failed, or was skipped. `[Retry]` runs the later attempts live, and they still record. Tests that never call the agent need no model.
+
+### xUnit
+
+`E2E.Xunit` has the same `E2ETest` for xUnit v3. Each `[Fact]` gets a session, and the cache commits from the xUnit result.
+
+```csharp
+using E2E;
+using E2E.Xunit;
+using Xunit;
+
+public sealed class BillingTests : E2ETest
+{
+    [Fact]
+    public async Task Member_upgrades_to_Pro()
+    {
+        var token = Context.CancellationToken;
+        await App.OpenAsync("/settings/billing", token);
+        await Agent.ActAsync("upgrade the workspace to the Pro plan", cancellationToken: token);
+        await Expect.That(Screen.GetByRole("status")).ToContainTextAsync("Pro", cancellationToken: token);
+    }
+}
+```
+
+The xUnit analyzer asks for a cancellation token on every call. Pass `Context.CancellationToken`. It carries both xUnit's token and the configured test timeout, and `TestContext.Current.CancellationToken` carries only xUnit's. `Expect.Soft` failures fail the test once its body ends, in one error that lists them all. xUnit has no retry, so every run is a first attempt and can replay. To clean up in a derived class, override `DisposeAsync` and call the base last. Under the .NET 10 SDK, a test project that runs with VSTest `dotnet test` references `xunit.v3.mtp-off`, as [`samples/E2E.Xunit.Sample`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/E2E.Xunit.Sample) does.
 
 ## Config
 
@@ -154,6 +180,7 @@ Most unit tests use `DocumentEngine` and a scripted model. No test needs an API 
 | --- | --- |
 | `e2e` test, expect, agent, cache, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
 | NUnit | `E2E.NUnit` (`E2ETest`) |
+| — | `E2E.Xunit` (`E2ETest` for xUnit v3) |
 | `e2e login`, `e2e logout`, `e2e models` | `E2E.Cli` (the `e2e` .NET tool) |
 
 `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, and `@e2e-dev/eas` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).

@@ -5,7 +5,7 @@
       "src": [
         {
           "src": "../src",
-          "files": ["E2E/E2E.csproj", "E2E.NUnit/E2E.NUnit.csproj"]
+          "files": ["E2E/E2E.csproj", "E2E.NUnit/E2E.NUnit.csproj", "E2E.Xunit/E2E.Xunit.csproj"]
         }
       ],
       "dest": "api"

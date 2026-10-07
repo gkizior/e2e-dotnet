@@ -12,6 +12,8 @@ dotnet add package E2E
 dotnet add package E2E.NUnit
 ```
 
+On xUnit v3, add `E2E.Xunit` in place of `E2E.NUnit`.
+
 - [Guide](../README.md): install, write a test, config, model providers, and subscriptions.
-- [API](api/index.md): every public type in `E2E` and `E2E.NUnit`.
+- [API](api/index.md): every public type in `E2E`, `E2E.NUnit`, and `E2E.Xunit`.
 - [Compatibility](../COMPATIBILITY.md): how this port differs from the TypeScript [e2e](https://github.com/tester-army/e2e).

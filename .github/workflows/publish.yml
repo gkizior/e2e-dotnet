@@ -32,6 +32,7 @@ jobs:
         run: |
           dotnet pack src/E2E/E2E.csproj -c Release -o artifacts --nologo
           dotnet pack src/E2E.NUnit/E2E.NUnit.csproj -c Release -o artifacts --nologo
+          dotnet pack src/E2E.Xunit/E2E.Xunit.csproj -c Release -o artifacts --nologo
           dotnet pack src/E2E.Cli/E2E.Cli.csproj -c Release -o artifacts --nologo
 
       - name: NuGet login

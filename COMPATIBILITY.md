@@ -15,6 +15,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 | `e2e/oauth/chatgpt`, `copilot`, `grok`, `opencode-console` | `E2E.OAuth.Subscriptions` |
 | `e2e login`, `e2e logout`, `e2e models` | `E2E.Cli`, a .NET tool whose command is `e2e` |
 | — | `DocumentEngine`, an in-memory page for hosts that do not want a browser |
+| — | `E2E.Xunit.E2ETest`, the same fixture for xUnit v3. See [xUnit](#xunit) |
 
 ## Ported
 
@@ -38,6 +39,17 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - `ActResult.ModelCalls` (0 for a full replay) and `ActResult.Actions` (replayed and live actions, counting failed attempts)
 - `AgentException.Blocked` and `AgentException.Explanation` (the same text as `Message`)
 - OpenAI-compatible tool calling
+
+## xUnit
+
+`E2E.Xunit` is .NET-only; upstream runs on its own test runner. Its `E2ETest` takes the same config and overrides as the NUnit one, and starts and ends the session in `IAsyncLifetime`. Differences from `E2E.NUnit`:
+
+- `[Fact]`, `[Theory]`, `Assert.Skip`, `[Fact(Timeout)]`, and `[Trait]`. Tag a real-model test `[Trait("TestCategory", "RealModel")]`, so the `TestCategory` filters match it as they match NUnit's `[Category]`
+- No retry, so every run is a first attempt and can replay
+- `CacheTitle` gets the xUnit `ITest`, and the default is its display name
+- `Expect.Soft` failures are kept until the body ends. `ReportSoftFailures` then fails the test with one `ASSERTION_FAILED` that lists them all, after the cache commits. xUnit has no equivalent of `Assert.EnterMultipleScope` to record them on
+- xUnit gives teardown the failure only as text, so the fixture also catches each E2E exception as it is thrown. That way a model outage keeps the cache as it does on NUnit
+- No `ToMatchAsync` for `Expect.Poll`, because xUnit has no constraint objects. Use `ToSatisfyAsync`
 
 ## Replay cache
 

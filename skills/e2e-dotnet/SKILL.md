@@ -1,6 +1,6 @@
 ---
 name: e2e-dotnet
-description: Write, run, and debug agentic end-to-end tests with the .NET port of e2e (NuGet packages E2E, E2E.NUnit, E2E.Cli). Use when adding an E2E test, setting up e2e.config.json or a model provider, or fixing a failing agent step, locator expectation, or replay-cache miss.
+description: Write, run, and debug agentic end-to-end tests with the .NET port of e2e (NuGet packages E2E, E2E.NUnit, E2E.Xunit, E2E.Cli). Use when adding an E2E test, setting up e2e.config.json or a model provider, or fixing a failing agent step, locator expectation, or replay-cache miss.
 ---
 
 # e2e for .NET
@@ -14,6 +14,8 @@ dotnet new nunit -n MyApp.E2E
 dotnet add MyApp.E2E package E2E
 dotnet add MyApp.E2E package E2E.NUnit
 ```
+
+On xUnit v3, add `E2E.Xunit` in place of `E2E.NUnit`. Its `E2ETest` has the same members. Use `[Fact]`, pass `Context.CancellationToken` to each call, and tag model tests `[Trait("TestCategory", "RealModel")]`. With `dotnet test` on VSTest and the .NET 10 SDK, reference `xunit.v3.mtp-off`, not `xunit.v3`.
 
 Targets `net10.0`. The first browser launch in a test run installs Chromium, so the first run needs network access. On a CI image that already has the browser, or with no network, set `E2E_SKIP_BROWSER_INSTALL=1` and install it yourself with `pwsh bin/Debug/net10.0/playwright.ps1 install chromium`.
 

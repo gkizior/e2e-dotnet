@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>E2E.Xunit</RootNamespace>
+    <AssemblyName>E2E.Xunit</AssemblyName>
+    <PackageId>E2E.Xunit</PackageId>
+    <Description>xUnit v3 base class for the E2E .NET port. Each test gets an engine session, and the replay cache commits from the xUnit result.</Description>
+    <PackageTags>e2e;testing;xunit;agent</PackageTags>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\E2E\E2E.csproj" />
+    <PackageReference Include="xunit.v3.extensibility.core" Version="4.0.0" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
