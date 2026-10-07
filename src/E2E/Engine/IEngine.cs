@@ -31,8 +31,8 @@ public sealed class EngineStartOptions
 
 /// <summary>
 /// The body of one target. Core knows this contract and never an engine's internals.
-/// <see cref="Version"/> is the engine contract version recorded in the replay cache
-/// (<c>major.minor</c>). Bumping it misses existing recordings.
+/// <see cref="Version"/> is the engine version. It is not part of the replay cache key:
+/// a recording re-finds its nodes at replay.
 /// </summary>
 public interface IEngine
 {

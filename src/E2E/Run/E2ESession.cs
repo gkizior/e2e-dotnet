@@ -112,7 +112,6 @@ public sealed class E2ESession : IAsyncDisposable
             CleanupTimeout = options.CleanupTimeout,
             TestTitle = options.TestTitle,
             EnginePlatform = options.Engine.Platform,
-            EngineVersion = options.Engine.Version,
             EngineCapabilities = options.Engine.Capabilities,
             Attempt = options.Attempt,
             ActionTimeout = options.ActionTimeout,

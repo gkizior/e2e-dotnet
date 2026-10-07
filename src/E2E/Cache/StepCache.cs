@@ -14,9 +14,8 @@ namespace E2E;
 
 /// <summary>
 /// A recording of one verified <c>act</c>. The key is the cache schema, the replay
-/// policy version, the test, the instruction, the params, the engine's major.minor
-/// version, and which repeat of that same instruction and params in the attempt it
-/// is. The model id is not part of the key.
+/// policy version, the engine, the test, the instruction, the params, and which repeat
+/// of that same instruction and params in the attempt it is. The model id is not part of the key.
 /// </summary>
 public sealed class CacheEntry
 {
@@ -178,7 +177,6 @@ internal static class CacheKeys
 
     public static string Create(
         string engine,
-        string version,
         string test,
         string instruction,
         IReadOnlyDictionary<string, object?>? parameters)
@@ -186,7 +184,7 @@ internal static class CacheKeys
         var builder = new StringBuilder();
         builder.Append("schema=").Append(FileStepCache.SchemaVersion.ToString(CultureInfo.InvariantCulture)).Append('\n');
         builder.Append("policy=").Append(ReplayPolicyVersion).Append('\n');
-        builder.Append(engine).Append('\n').Append(MajorMinor(version)).Append('\n');
+        builder.Append(engine).Append('\n');
         builder.Append(test).Append('\n').Append(instruction.Trim()).Append('\n');
         if (parameters is not null)
         {
@@ -327,17 +325,6 @@ internal static class CacheKeys
         }
 
         return options;
-    }
-
-    private static string MajorMinor(string version)
-    {
-        var parts = version.Split('.');
-        if (parts.Length == 0 || parts[0].Length == 0)
-        {
-            return version;
-        }
-
-        return parts.Length == 1 ? parts[0] : parts[0] + "." + parts[1];
     }
 }
 
