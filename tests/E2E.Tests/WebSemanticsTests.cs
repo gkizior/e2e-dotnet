@@ -299,7 +299,7 @@ public sealed class WebSemanticsTests
         }
     }
 
-    private static async Task<IEngineSession> OpenAsync(string url, WebEngineOptions options)
+    internal static async Task<IEngineSession> OpenAsync(string url, WebEngineOptions options)
     {
         var session = await new WebEngine(options).StartAsync(
             new EngineStartOptions { BaseUrl = url, ActionTimeout = TimeSpan.FromSeconds(10) },

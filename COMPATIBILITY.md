@@ -139,12 +139,11 @@ Differences:
 
 The walk goes through open shadow roots and closed ones that page script attached (an init script records them, as upstream does). Each iframe is a boundary node, and the engine reads that frame's document through Playwright and puts it under the node, so same-origin and cross-origin frames are both listed and acted on. One observation lists at most 3000 nodes across all frames. When a document has more, nodes that intersect the viewport come first and the rest of the budget goes to the others in document order; the observation reports `Truncated`, and the snapshot tells the model to scroll. `OpenAsync` waits for the `load` event.
 
-`WebEngineOptions` carries the upstream `web()` options: `Viewport` (default 1280 by 720, `null` for no emulation), `TestIdAttribute`, `Headers`, `BasicAuth`, `UserAgent`, and `Connect` (a CDP endpoint resolver). Differences:
+`WebEngineOptions` carries the upstream `web()` options: `Viewport` (default 1280 by 720, `null` for no emulation), `TestIdAttribute`, `Headers`, `BasicAuth`, `UserAgent`, `Locale`, `TimezoneId`, and `Connect` (a CDP endpoint resolver). Differences:
 
 - `Headers` ride requests to the base URL's host. Upstream scopes them to the app's site, which can include sibling subdomains
 - `Connect` has no `reconnectEndpoint`, so there is no persistent remote context, and no provider (`browser: BrowserProvider`) or `screencast` option
 - `BasicAuth` takes a `Secret` password, but the value is not added to the session's redaction list
-
 The tree is a subset of upstream's: names follow the port's simpler accname rules, nodes are listed by role or test id only (not by name, direct text, or as an empty painted `box`).
 
 Password fields and `autocomplete=current-password` fields are marked secure. Their values, and their `value` attribute, are omitted from the snapshot. A text, value, or attribute expectation on a secure field fails with `POLICY_DENIED`, as upstream.
