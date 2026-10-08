@@ -162,6 +162,33 @@ public sealed class WebSemanticsTests
     }
 
     [Fact]
+    public async Task Chromium_keeps_controls_in_the_budget_on_a_page_full_of_text()
+    {
+        var html = new StringBuilder("<!DOCTYPE html><html><body>");
+        for (var index = 0; index < ObservationLimits.Nodes + 50; index++)
+        {
+            html.Append("<div>word</div>");
+        }
+
+        html.Append("<button>Last</button></body></html>");
+        using var site = await TinySite.StartAsync(html.ToString());
+        await using var session = await OpenAsync(site.Url, new WebEngineOptions { Headless = true });
+        var observation = await session.ObserveAsync(CancellationToken.None);
+        Assert.True(observation.Truncated);
+        Assert.Contains(Flatten(observation.Roots), node => node.Role == "button" && node.Name == "Last");
+    }
+
+    [Fact]
+    public async Task Chromium_lists_a_container_with_only_its_own_direct_text()
+    {
+        using var site = await TinySite.StartAsync("<!DOCTYPE html><html><body><ul><li data-testid=\"item\">Order <strong>$42.00</strong> due</li></ul></body></html>");
+        await using var session = await OpenAsync(site.Url, new WebEngineOptions { Headless = true });
+        var nodes = Flatten((await session.ObserveAsync(CancellationToken.None)).Roots).ToList();
+        Assert.Equal("Order due", Assert.Single(nodes, node => node.TestId == "item").Text);
+        Assert.Contains(nodes, node => node.Text == "$42.00");
+    }
+
+    [Fact]
     public async Task Chromium_applies_viewport_user_agent_headers_and_basic_auth()
     {
         using var site = await TinySite.StartAsync(async context =>

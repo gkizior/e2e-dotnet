@@ -14,6 +14,43 @@ public sealed class RoleMappingTests
     // An empty block lays out to no height and is hidden; the role fixtures below are about roles, so their empty elements get a box.
     private const string EmptyBoxes = "[data-testid]:empty { min-width: 1px; min-height: 1px }";
 
+    [Theory]
+    [InlineData("open")]
+    [InlineData("closed")]
+    public async Task Scopes_nested_shadow_landmarks_to_their_outer_article(string mode)
+    {
+        using var site = await TinySite.StartAsync(Page($$"""
+            <article><div id="card"></div></article>
+            <div id="page"></div>
+            <script>
+              const card = document.querySelector("#card").attachShadow({ mode: "{{mode}}" });
+              card.innerHTML = '<div id="nested"></div>';
+              card.querySelector("#nested").attachShadow({ mode: "{{mode}}" }).innerHTML =
+                '<header aria-label="Card" data-testid="card-header">Card</header><footer aria-label="Card footer" data-testid="card-footer">Foot</footer>';
+              document.querySelector("#page").attachShadow({ mode: "{{mode}}" }).innerHTML =
+                '<header aria-label="Page" data-testid="page-header">Page</header><footer aria-label="Page footer" data-testid="page-footer">Legal</footer>';
+            </script>
+            """));
+        var nodes = ByTestId(await CaptureAsync(site.Url));
+        Assert.Contains("card-header", nodes.Keys);
+        Assert.Contains("card-footer", nodes.Keys);
+        Assert.Null(nodes["card-header"].Role);
+        Assert.Null(nodes["card-footer"].Role);
+        Assert.Equal("banner", nodes["page-header"].Role);
+        Assert.Equal("contentinfo", nodes["page-footer"].Role);
+
+        if (mode == "open")
+        {
+            var session = await WebSemanticsTests.StartSessionAsync(site.Url);
+            await WebSemanticsTests.RunAsync(session, async () =>
+            {
+                await session.App.OpenAsync("/");
+                Assert.Equal(["page-header"], await TestIdsAsync(session.Screen.GetByRole("banner")));
+                Assert.Equal(["page-footer"], await TestIdsAsync(session.Screen.GetByRole("contentinfo")));
+            });
+        }
+    }
+
     [Fact]
     public async Task Reports_ARIA_img_as_image_alongside_the_img_element()
     {

@@ -36,6 +36,8 @@ internal static class PageScript
             "option", "menuitem", "menuitemcheckbox", "menuitemradio", "switch", "slider", "spinbutton", "progressbar", "meter", "separator", "iframe"]);
           const maxSelectOptions = 60;
           let count = 0;
+          let textCount = 0;
+          let textCut = false;
           let full = false;
           let offBudget = max;
           let offCount = 0;
@@ -49,7 +51,15 @@ internal static class PageScript
             focused = inner;
           }
           const hasOwnName = (el) => ["aria-label", "aria-labelledby", "title"].some((attribute) => (el.getAttribute(attribute) || "").trim() !== "");
-          const pageLevel = (el) => el.closest("article, aside, main, nav, section, [role~=article], [role~=complementary], [role~=main], [role~=navigation], [role~=region]") === null;
+          // A shadow tree sits inside its host's sections, so the scope goes up through the hosts.
+          const pageLevel = (el) => {
+            for (let current = el; current; ) {
+              if (current.closest("article, aside, main, nav, section, [role~=article], [role~=complementary], [role~=main], [role~=navigation], [role~=region]") !== null) return false;
+              const root = current.getRootNode();
+              current = root instanceof ShadowRoot ? root.host : null;
+            }
+            return true;
+          };
           // An option paints inside its select, so it is on screen when the select is.
           const inView = (el) => {
             const box = el.tagName === "OPTION" ? (el.closest("select") ?? el) : el;
@@ -575,14 +585,18 @@ internal static class PageScript
           // answers with it, and a fill acts on the control a label names. An
           // SVG element has no innerText to read, so it is not listed by text.
           const ownsText = (el) => el instanceof HTMLElement && directTextOf(el) !== "" && !namesControl(el);
-          const listed = (el, role) => (role && role !== "presentation" && role !== "none") || !!el.getAttribute(testIdAttribute) || ownsText(el);
-          // How many nodes the walk would list, or only those on screen.
+          const hasRole = (role) => !!role && role !== "presentation" && role !== "none";
+          const listed = (el, role) => hasRole(role) || !!el.getAttribute(testIdAttribute) || ownsText(el);
+          // A node listed for its text alone. It draws on its own allowance, so
+          // a page full of text cannot push controls out of the snapshot.
+          const textOnly = (el, role) => !hasRole(role) && !el.getAttribute(testIdAttribute);
+          // How many nodes the walk would list, or only those on screen. Text-only nodes are not counted.
           const tally = (el, visible) => {
             if (!el || skip.has(el.tagName)) return 0;
             if (el.tagName === "IFRAME" && (ariaHidden(el) || hidden(el))) return 0;
             let n = 0;
             const role = roleOf(el);
-            if (listed(el, role)) {
+            if (listed(el, role) && !textOnly(el, role)) {
               const counted = !visible || inView(el);
               if (counted) n++;
               if (el.tagName === "SELECT") return counted ? n + Math.min(el.options.length, maxSelectOptions) : n;
@@ -605,11 +619,17 @@ internal static class PageScript
             const isFrame = el.tagName === "IFRAME";
             if (isFrame && isHidden) return;
             if (listed(el, role)) {
-              if (count >= max) {
-                full = true;
+              const textNode = textOnly(el, role);
+              if (textNode ? textCount >= max : count >= max) {
+                if (!textNode) {
+                  full = true;
+                  return;
+                }
+                textCut = true;
+                walkChildren(el, into, childrenHidden);
                 return;
               }
-              if (offBudget < max && !inView(el)) {
+              if (!textNode && offBudget < max && !inView(el)) {
                 if (offCount >= offBudget) {
                   if ((role && leaves.has(role)) || el.tagName === "SELECT") return;
                   walkChildren(el, into, childrenHidden);
@@ -617,18 +637,22 @@ internal static class PageScript
                 }
                 offCount++;
               }
-              count++;
+              if (textNode) textCount++;
+              else count++;
               const type = (el.getAttribute("type") || "").toLowerCase();
               const secure = type === "password" || el.getAttribute("autocomplete") === "current-password";
+              const ownsChildren = !(role && leaves.has(role)) && el.tagName !== "SELECT" && !isFrame;
               const node = {
                 ref: stamp(el),
                 role,
                 name: isFrame ? cut(el.getAttribute("title") || "", 256) || null : nameOf(el, role),
-                // A leaf keeps its own text too: a labelled status or button
+                // A leaf keeps its content as text: a labelled status or button
                 // reads its content, not its label, as upstream's node read
-                // does. A secure field withholds it. innerText is empty for a
-                // node that does not render; its DOM text is what a text query matches.
-                text: secure ? "" : cut((isHidden ? el.textContent : el.innerText) || "", 512),
+                // does. Any other node carries only its own direct text, since
+                // the elements under it are listed with theirs. A secure field
+                // withholds it. innerText is empty for a node that does not
+                // render; its DOM text is what a text query matches.
+                text: secure ? "" : cut(ownsChildren ? directTextOf(el) : (isHidden ? el.textContent : el.innerText) || "", 512),
                 value: secure || !("value" in el) || el.tagName === "OPTION" ? null : String(el.value ?? ""),
                 testId,
                 placeholder: el.getAttribute("placeholder"),
@@ -689,7 +713,7 @@ internal static class PageScript
             document.adoptedStyleSheets = sheets;
           }
           window[Symbol.for("e2e.observation.elements")] = elements;
-          return JSON.stringify({ next, count, truncated: truncated || full, scroll, roots });
+          return JSON.stringify({ next, count, truncated: truncated || full || textCut, scroll, roots });
         }
         """;
 
