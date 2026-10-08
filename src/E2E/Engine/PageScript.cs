@@ -60,11 +60,50 @@ internal static class PageScript
             const text = (value || "").replace(/\s+/g, " ").trim();
             return text.length > limit ? text.slice(0, limit) : text;
           };
-          const hidden = (el) => {
-            if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return true;
-            const style = getComputedStyle(el);
-            return style.display === "none" || style.visibility === "hidden";
+          // Content a closed details folds away: anything under it outside its
+          // summary. Every closed ancestor is asked, nested details included.
+          const inClosedDetails = (el) => {
+            for (let details = el.parentElement?.closest("details"); details; details = details.parentElement?.closest("details")) {
+              if (!details.open) {
+                const summary = details.querySelector(":scope > summary");
+                if (!summary || !summary.contains(el)) return true;
+              }
+            }
+            return false;
           };
+          // A text node that lays out to a box a person can see.
+          const visibleText = (node) => {
+            const range = document.createRange();
+            range.selectNode(node);
+            const box = range.getBoundingClientRect();
+            return box.width > 0 && box.height > 0;
+          };
+          // Render visibility, as Playwright reads it: display: none, a
+          // visibility other than visible, and content a closed details folds
+          // away. A display: contents element has no box; it is shown when a
+          // child element or its own text is. Two parts are not in it, since
+          // role queries and the agent read the same hidden state as the
+          // accessibility tree: a box with no size, which an empty landmark
+          // has, and aria-hidden, which the walk adds though the node paints.
+          const hidden = (el, style = getComputedStyle(el)) => {
+            if (style.display === "contents") {
+              // A host paints its shadow tree, so that counts as its children too.
+              const children = [...el.childNodes, ...(shadowOf(el)?.childNodes ?? [])];
+              for (const child of children) {
+                if (child.nodeType === 1 && !skip.has(child.tagName) && !hidden(child)) return false;
+                if (child.nodeType === 3 && style.visibility === "visible" && visibleText(child)) return false;
+              }
+              return true;
+            }
+            return style.display === "none" || style.visibility !== "visible" || inClosedDetails(el);
+          };
+          const ariaHidden = (el) => el.getAttribute("aria-hidden") === "true";
+          // What hides the element and everything under it: an aria-hidden
+          // subtree, which the accessibility tree drops; display: none, which
+          // no descendant can undo; and content-visibility: hidden, which keeps
+          // the element's own box and renders nothing under it. visibility is
+          // not in it, since a child may set visibility: visible and paint again.
+          const hidesSubtree = (el, style) => ariaHidden(el) || style.display === "none" || style.contentVisibility === "hidden";
           const roleOf = (el) => {
             const explicit = (el.getAttribute("role") || "").trim();
             if (explicit) {
@@ -234,7 +273,12 @@ internal static class PageScript
             return role === "presentation" || role === "none";
           };
           // A referenced target accname 2A reads whole: hidden itself, or under an aria-hidden ancestor.
-          const isReferenceHidden = (el) => hidden(el) || el.closest("[aria-hidden=\"true\"]") !== null;
+          // Upstream's hidden includes a box with no size, which a target under display: none has.
+          const isReferenceHidden = (el) => {
+            if (hidden(el) || el.closest("[aria-hidden=\"true\"]") !== null) return true;
+            const box = el.getBoundingClientRect();
+            return !(box.width > 0 && box.height > 0);
+          };
           // An IDREF resolves in the tree scope it is written in.
           const referencedElementOf = (el, id) => {
             const root = el.getRootNode();
@@ -474,7 +518,12 @@ internal static class PageScript
             }
             return out;
           };
+          // No layout box at all (display: none on it or an ancestor, any
+          // display: contents element) is no rect, as Playwright's
+          // boundingBox() answers null; a box with no size, or one
+          // visibility: hidden keeps, is still a rect.
           const rectOf = (el) => {
+            if (el.getClientRects().length === 0) return null;
             const box = el.getBoundingClientRect();
             return { x: box.x, y: box.y, width: box.width, height: box.height };
           };
@@ -529,7 +578,7 @@ internal static class PageScript
           // How many nodes the walk would list, or only those on screen.
           const tally = (el, visible) => {
             if (!el || skip.has(el.tagName)) return 0;
-            if (el.tagName === "IFRAME" && hidden(el)) return 0;
+            if (el.tagName === "IFRAME" && (ariaHidden(el) || hidden(el))) return 0;
             let n = 0;
             const role = roleOf(el);
             if (listed(el, role)) {
@@ -543,10 +592,13 @@ internal static class PageScript
             if (shadow) for (const child of shadow.children) n += tally(child, visible);
             return n;
           };
-          // A node under a hidden ancestor is hidden too.
+          // A node under an ancestor that hides its subtree is hidden too.
+          // parentHidden is that ancestor's verdict, not its own visibility.
           const walk = (el, into, parentHidden) => {
             if (!el || skip.has(el.tagName) || full) return;
-            const isHidden = !!parentHidden || hidden(el);
+            const style = getComputedStyle(el);
+            const isHidden = !!parentHidden || ariaHidden(el) || hidden(el, style);
+            const childrenHidden = !!parentHidden || hidesSubtree(el, style);
             const role = roleOf(el);
             const testId = el.getAttribute(testIdAttribute);
             const isFrame = el.tagName === "IFRAME";
@@ -559,7 +611,7 @@ internal static class PageScript
               if (offBudget < max && !inView(el)) {
                 if (offCount >= offBudget) {
                   if ((role && leaves.has(role)) || el.tagName === "SELECT") return;
-                  walkChildren(el, into, isHidden);
+                  walkChildren(el, into, childrenHidden);
                   return;
                 }
                 offCount++;
@@ -573,8 +625,9 @@ internal static class PageScript
                 name: isFrame ? cut(el.getAttribute("title") || "", 256) || null : nameOf(el, role),
                 // A leaf keeps its own text too: a labelled status or button
                 // reads its content, not its label, as upstream's node read
-                // does. A secure field withholds it.
-                text: secure ? "" : cut(el.innerText || "", 512),
+                // does. A secure field withholds it. innerText is empty for a
+                // node that does not render; its DOM text is what a text query matches.
+                text: secure ? "" : cut((isHidden ? el.textContent : el.innerText) || "", 512),
                 value: secure || !("value" in el) || el.tagName === "OPTION" ? null : String(el.value ?? ""),
                 testId,
                 placeholder: el.getAttribute("placeholder"),
@@ -605,10 +658,10 @@ internal static class PageScript
                 return;
               }
               if (role && leaves.has(role)) return;
-              walkChildren(el, node.children, isHidden);
+              walkChildren(el, node.children, childrenHidden);
               return;
             }
-            walkChildren(el, into, isHidden);
+            walkChildren(el, into, childrenHidden);
           };
           // Light children first, then the shadow tree. Slotted elements are
           // light children and the shadow tree holds only their slots, so

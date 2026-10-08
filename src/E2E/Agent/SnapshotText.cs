@@ -53,7 +53,8 @@ internal static class SnapshotText
             }
 
             builder.Append(" [ref=").Append(node.Ref).Append(']');
-            if (!node.States.Secure && !string.IsNullOrEmpty(node.Value))
+            // A checkbox's or radio's value is an app token its checked state already says more than.
+            if (!node.States.Secure && !string.IsNullOrEmpty(node.Value) && !LocatorResolver.IsCheckable(node))
             {
                 builder.Append(" value=\"").Append(redactor.Redact(node.Value)).Append('"');
             }

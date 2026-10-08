@@ -100,10 +100,10 @@ public sealed class Screen
     /// <summary>Creates a lazy placeholder query.</summary>
     public Locator GetByPlaceholder(TextMatch placeholder, TextMatchOptions options) => new(this, LocatorQuery.For("placeholder", placeholder, options, nameof(placeholder)));
 
-    /// <summary>Creates a lazy displayed-value query: the current value of an input, text area, or select.</summary>
+    /// <summary>Creates a lazy displayed-value query: the current value of an input, text area, or select. A checkbox or radio never shows its value, so it never matches.</summary>
     public Locator GetByDisplayValue(TextMatch value, bool exact = true) => GetByDisplayValue(value, new TextMatchOptions { Exact = exact });
 
-    /// <summary>Creates a lazy displayed-value query: the current value of an input, text area, or select.</summary>
+    /// <summary>Creates a lazy displayed-value query: the current value of an input, text area, or select. A checkbox or radio never shows its value, so it never matches.</summary>
     public Locator GetByDisplayValue(TextMatch value, TextMatchOptions options) => new(this, LocatorQuery.For("displayValue", value, options, nameof(value)));
 
     internal async Task<Observation> ObserveAsync(CancellationToken cancellationToken)
@@ -307,7 +307,10 @@ public sealed class Locator
         return node.Text ?? node.Name;
     }
 
-    /// <summary>Reads an input value once. Does not retry and does not verify an earlier <c>act</c>.</summary>
+    /// <summary>
+    /// Reads an input value once. Does not retry and does not verify an earlier <c>act</c>. A checkbox or
+    /// radio reads its value attribute, <c>on</c> when it has none, whatever its checked state.
+    /// </summary>
     public async Task<string?> InputValueAsync(CancellationToken cancellationToken = default)
     {
         var node = await ResolveStrictAsync(cancellationToken).ConfigureAwait(false);
@@ -354,7 +357,10 @@ public sealed class Locator
         return node.States.Checked;
     }
 
-    /// <summary>Reads the viewport-relative box of exactly one match once, or null when the engine does not report one.</summary>
+    /// <summary>
+    /// Reads the viewport-relative box of exactly one match once, or null when the node lays out no box
+    /// (<c>display: none</c> on it or an ancestor, or any <c>display: contents</c> element) or the engine does not report one.
+    /// </summary>
     public async Task<BoundingBox?> BoundingBoxAsync(CancellationToken cancellationToken = default)
     {
         var node = await ResolveStrictAsync(cancellationToken).ConfigureAwait(false);
@@ -762,10 +768,15 @@ internal static class LocatorResolver
             "label" => value!.Matches(node.Name, query.Exact),
             "testid" => value!.Matches(node.TestId, exact: true),
             "placeholder" => value!.Matches(node.Placeholder, query.Exact),
-            "displayValue" => value!.Matches(node.Value, query.Exact),
+            // A checkbox or radio carries a value it never shows (`on` by default), so it is no candidate.
+            "displayValue" => !IsCheckable(node) && value!.Matches(node.Value, query.Exact),
             _ => false,
         };
     }
+
+    // An input whose type is checkbox or radio, as upstream's `input:not([type="checkbox" i]):not([type="radio" i])`.
+    internal static bool IsCheckable(SemanticNode node) =>
+        node.Attributes.TryGetValue("type", out var type) && (type.Equals("checkbox", StringComparison.OrdinalIgnoreCase) || type.Equals("radio", StringComparison.OrdinalIgnoreCase));
 
     private static bool RoleMatches(SemanticNode node, LocatorQuery query, bool includeHidden)
     {

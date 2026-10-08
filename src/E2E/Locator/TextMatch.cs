@@ -116,8 +116,12 @@ public class TextMatchOptions
 
     /// <summary>
     /// Drops nodes the platform reports as hidden before the exactly-one rule,
-    /// so a visible node with a hidden twin still resolves. Role queries never
-    /// match hidden nodes, whatever this says.
+    /// so a visible node with a hidden twin still resolves. On the web, hidden is
+    /// what renders: <c>display: none</c>, a <c>visibility</c> other than
+    /// <c>visible</c>, and content under <c>content-visibility: hidden</c> or a
+    /// closed <c>details</c>; a child that sets <c>visibility: visible</c> under a
+    /// hidden parent is visible, and an <c>aria-hidden</c> node reads as hidden.
+    /// Role queries never match hidden nodes, whatever this says.
     /// </summary>
     public bool Visible { get; init; }
 }
