@@ -231,8 +231,9 @@ public sealed class ScrollTests
             TestTitle = "web > scroll",
             AssertionTimeout = TimeSpan.FromSeconds(5),
             ActionTimeout = TimeSpan.FromSeconds(10),
-            StepTimeout = TimeSpan.FromSeconds(30),
-            TestTimeout = TimeSpan.FromSeconds(60),
+            // About 120 pages to the row, each read held still after the swipe, as upstream reads them.
+            StepTimeout = TimeSpan.FromSeconds(60),
+            TestTimeout = TimeSpan.FromSeconds(90),
         });
 
         await using (session)

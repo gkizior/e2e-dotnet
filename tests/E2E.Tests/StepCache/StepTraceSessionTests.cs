@@ -465,6 +465,24 @@ public sealed class StepTraceSessionTests
     }
 
     [Fact]
+    public async Task Reads_the_start_capture_for_the_first_relocation_instead_of_capturing_the_same_screen_again()
+    {
+        var directory = CoreTests.TempCache();
+        static DocumentWorld World() => new DocumentWorld().Map("/pricing", page =>
+        {
+            var status = page.Status("Marker draft");
+            page.Button("Upgrade", () => status.Name = status.Text = "Marker saved");
+        });
+        var tap = ModelResponses.Tap("button", "Upgrade");
+        Assert.Null((await RunAsync(World(), directory, "/pricing", Saved, tap)).Error);
+
+        var step = await RunAsync(World(), directory, "/pricing", null, tap);
+        Assert.Equal("self-finalized", step.Cache?.Mode);
+        // One settled start capture serves the relocation; the end state is one raw look.
+        Assert.Equal([SettleMode.HeldStill, SettleMode.Raw], step.Looks);
+    }
+
+    [Fact]
     public async Task Leaves_the_entry_file_untouched_across_replays_and_rewrites_it_after_a_hand_off_the_executor_healed()
     {
         var directory = CoreTests.TempCache();
@@ -561,7 +579,7 @@ public sealed class StepTraceSessionTests
         return StepAsync(world, new FileStepCache(directory), route, check, model);
     }
 
-    private sealed record Step(Exception? Error, CacheInfo? Cache, int Replayed);
+    private sealed record Step(Exception? Error, CacheInfo? Cache, int Replayed, IReadOnlyList<SettleMode> Looks);
 
     /// <summary>
     /// One attempt: open <paramref name="route"/>, act once, then run <paramref name="check"/>, which
@@ -609,7 +627,7 @@ public sealed class StepTraceSessionTests
         }
 
         session.Complete(error);
-        return new Step(error, info, session.Replayed);
+        return new Step(error, info, session.Replayed, [.. session.Context.Agent.Feed.Looks]);
     }
 
     /// <summary>A store whose every read rejects, as a store behind a network can.</summary>

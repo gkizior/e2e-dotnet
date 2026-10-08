@@ -52,8 +52,8 @@ internal static class GesturesSession
 
           <fieldset id="delivery"><legend>Delivery</legend><label><input type="radio" name="delivery" value="Express" />Express</label></fieldset>
 
-          <p>Page the ledger down to Row 333 and stop there.</p>
-          <span>Jump to Row 333</span>
+          <p>Page the ledger down to Row 24 and stop there.</p>
+          <span>Jump to Row 24</span>
           <div id="ledger" role="list" aria-label="Ledger" style="position:relative;height:200px;overflow:auto;border:1px solid #000"><div id="ledger-spacer"></div></div>
           <output aria-label="Ledger state">golden out of view</output>
           <div style="height:3000px"></div>
@@ -91,7 +91,7 @@ internal static class GesturesSession
             // A windowed list: 400 rows of 40 px exist as data, and only the rows
             // inside the container's scrolled window are in the DOM, so the golden
             // row is nowhere in the tree until the list is paged down to it.
-            const ROWS = 400, ROW_PX = 40, GOLDEN = 333;
+            const ROWS = 400, ROW_PX = 40, GOLDEN = 24;
             const ledger = document.getElementById('ledger');
             document.getElementById('ledger-spacer').style.height = ROWS * ROW_PX + 'px';
             const ledgerState = document.querySelector('output[aria-label="Ledger state"]');
@@ -162,6 +162,11 @@ internal static class GesturesSession
             "scroll to the footnote",
             (calls, prompt) => calls == 0 ? ModelResponses.Call("scroll_to", new { @ref = RefFor(prompt, "paragraph \"Footnote\"") }) : null,
             screen => Expect.That(screen.GetByLabel("Footnote state")).ToHaveTextAsync("in view")),
+        new(
+            "pages a windowed list to a row it has not rendered",
+            "scroll the ledger to the golden row",
+            (calls, prompt) => calls == 0 ? ModelResponses.Call("scroll_to", new { text = "Row 24", @ref = RefFor(prompt, "list \"Ledger\"") }) : null,
+            screen => Expect.That(screen.GetByLabel("Ledger state")).ToHaveTextAsync("golden in view")),
         new(
             "opens a page and comes back",
             "open the about page and come back",

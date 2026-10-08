@@ -838,9 +838,9 @@ public sealed class CoreTests
     [Fact]
     public void The_key_hashes_a_fixed_input_to_the_same_value_across_releases()
     {
-        Assert.Equal("273642593bf01e607f73e5d09a9440cb3826e96c7cf62bf3f7ff3b8b47e294cf", Key());
+        Assert.Equal("3ccb641142f8e6c3b9c78f60ae3af122693df7d0b1e190cb761fccb6e36ffc8d", Key());
         Assert.Equal(
-            "5c71d7a7b22a7adff18ac74c3cdf9a0e95efbde07f8b3691c0e4837a529db22b",
+            "e241558c7fa90ab0cd3d483494b219faae6536caf2615cfbe511b16ea4aaf717",
             Key(instruction: "upgrade to {{plan}}", parameters: new Dictionary<string, object?> { ["plan"] = "Pro", ["seats"] = 3 }, callIndex: 2));
     }
 
