@@ -167,7 +167,7 @@ public sealed class LocatorExpect
         return TextListAsync(Field.ContainsText, expected, ignoreCase, timeout, cancellationToken);
     }
 
-    /// <summary>Waits for a form control's value, compared as it is.</summary>
+    /// <summary>Waits for a form control's value, compared as it is. Fails on a node that is not a form control, negated too.</summary>
     public Task ToHaveValueAsync(TextMatch expected, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
         return TextAsync(Field.Value, expected, null, timeout, cancellationToken);
@@ -262,6 +262,12 @@ public sealed class LocatorExpect
                 }
 
                 var actual = field.Read(node);
+                if (actual is null)
+                {
+                    // No sample of a node without the field can answer, so the matcher fails negated or not.
+                    return new Verdict(null, "no " + field.Label + " (not a form control)");
+                }
+
                 return new Verdict(field.Compare(actual, pattern, ignoreCase), field.Label + " " + field.Print(actual));
             },
             cancellationToken);
@@ -275,7 +281,7 @@ public sealed class LocatorExpect
             ArgumentNullException.ThrowIfNull(entry, nameof(expected));
             return entry.WithIgnoreCase(ignoreCase);
         }).ToList();
-        bool Satisfies(SemanticNode node, TextMatch pattern) => field.Compare(field.Read(node), pattern, ignoreCase);
+        bool Satisfies(SemanticNode node, TextMatch pattern) => field.Read(node) is { } actual && field.Compare(actual, pattern, ignoreCase);
         return PollAsync(
             field.Matcher,
             field.DescribeExpected("[" + string.Join(", ", patterns.Select(pattern => pattern.Describe(ignoreCase))) + "]"),
@@ -285,7 +291,7 @@ public sealed class LocatorExpect
             {
                 _locator.DenySecureRead(matches);
                 var holds = field.Contains ? MatchesSubsequence(matches, patterns, Satisfies) : MatchesPositionally(matches, patterns, Satisfies);
-                return new Verdict(holds, field.Label + " [" + string.Join(", ", matches.Select(node => field.Print(field.Read(node)))) + "]");
+                return new Verdict(holds, field.Label + " [" + string.Join(", ", matches.Select(node => field.Read(node) is { } actual ? field.Print(actual) : "no " + field.Label)) + "]");
             },
             cancellationToken);
     }
@@ -476,6 +482,12 @@ public sealed class LocatorExpect
 
         public static readonly Field Name = new("toHaveAccessibleName", "accessible name", contains: false, normalize: true, readsWithheld: false, pattern => "accessible name " + pattern);
 
+        /// <summary>
+        /// Roles whose node carries a value: the editable roles plus the controls a platform reports a value
+        /// for without taking typed text (a range input, a number stepper, a multiple select and its options).
+        /// </summary>
+        private static readonly HashSet<string> ValueRoles = ["textbox", "searchbox", "combobox", "spinbutton", "slider", "listbox", "option"];
+
         private readonly bool _normalize;
 
         private Field(string matcher, string label, bool contains, bool normalize, bool readsWithheld, Func<string, string> describeExpected)
@@ -499,15 +511,17 @@ public sealed class LocatorExpect
         public Func<string, string> DescribeExpected { get; }
 
         /// <summary>
-        /// The field as the matcher reads it, the empty string when absent. The web engine reports text for
-        /// every node, empty for an icon button, so text falls back to the name only for a node with no
-        /// text at all, as the document engine's controls have.
+        /// The field as the matcher reads it. Text and name read as the empty string when absent. The web engine
+        /// reports text for every node, empty for an icon button, so text falls back to the name only for a node
+        /// with no text at all, as the document engine's controls have. A value reads as the empty string only on
+        /// a control whose role carries one, because an engine omits an empty value; any other node is not a form
+        /// control and has no value (null).
         /// </summary>
-        public string Read(SemanticNode node)
+        public string? Read(SemanticNode node)
         {
             if (ReferenceEquals(this, Value))
             {
-                return node.Value ?? "";
+                return node.Value ?? (ValueRoles.Contains(node.Role ?? "") ? "" : null);
             }
 
             if (ReferenceEquals(this, Name))

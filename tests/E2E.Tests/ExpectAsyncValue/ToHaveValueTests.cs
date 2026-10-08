@@ -46,7 +46,7 @@ public sealed class ToHaveValueTests
         Assert.True(error.Message.Contains("observed value \"\"", StringComparison.Ordinal), error.Message);
     }
 
-    [Fact(Skip = "Gap: the port reads a node without a value, such as a heading or a link, as the empty string; upstream fails with \"no value (not a form control)\".")]
+    [Fact]
     public async Task Refuses_a_node_without_a_value_negated_or_not()
     {
         var locator = ScreenFixture.Create(Heading).GetByRole("heading");
@@ -56,7 +56,7 @@ public sealed class ToHaveValueTests
         Assert.True(error.Message.Contains("observed no value (not a form control)", StringComparison.Ordinal), error.Message);
     }
 
-    [Fact(Skip = "Gap: the port reads a node without a value, such as a heading or a link, as the empty string; upstream fails with \"no value (not a form control)\".")]
+    [Fact]
     public async Task Refuses_a_link_whose_name_and_text_are_not_a_value()
     {
         var locator = ScreenFixture.Create(new SemanticNode { Ref = "node-1", Role = "link", Name = "Docs", Text = "Docs" }).GetByRole("link");
