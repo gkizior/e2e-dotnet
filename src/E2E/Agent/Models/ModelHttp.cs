@@ -166,7 +166,7 @@ internal static class ModelHttp
     }
 
     /// <summary>The package version MinVer stamps, without its build metadata.</summary>
-    private static string PackageVersion()
+    internal static string PackageVersion()
     {
         var version = typeof(ModelHttp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
         return version.Split('+')[0];

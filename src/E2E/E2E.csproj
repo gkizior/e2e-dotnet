@@ -12,5 +12,6 @@
     <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <InternalsVisibleTo Include="E2E.Tests" />
+    <InternalsVisibleTo Include="E2E.Cli" />
   </ItemGroup>
 </Project>

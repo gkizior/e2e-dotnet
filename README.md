@@ -134,6 +134,16 @@ Each secret reads `E2E_SECRET_<NAME>` first, then the config value. `null` means
 
 A fixture overrides any value with the matching property, such as `BaseUrl`, `CacheMode`, or `ActionTimeout`, or replaces the whole config by overriding `Config`.
 
+## Coding agents (MCP)
+
+`e2e mcp` serves the project to a coding agent such as Claude Code or Cursor over MCP (stdio). Register it once:
+
+```bash
+claude mcp add e2e -- e2e mcp
+```
+
+The server has four fixed tools (`open_session`, `tools`, `call`, `close_session`) and serves the skill as the resources `e2e://guide` and `e2e://guide/<topic>`. Live sessions are not ported yet: `open_session` answers `UNSUPPORTED_CAPABILITY`. The flags are `--config`, `--target`, `--headed`, and `--max-sessions` (1 through 16, default 4). See [COMPATIBILITY.md](COMPATIBILITY.md#mcp-server).
+
 ## Sample
 
 The sample is a real end-to-end test of [Dariten](https://dariten.vercel.app), a public personal finance demo. It drives Chromium through `WebEngine`, which installs the browser on its first run. The demo data is shared and anyone can edit it, so the tests only read the app and never check specific balances.
@@ -171,6 +181,6 @@ Most unit tests use `DocumentEngine` and a scripted model. No test needs an API 
 | `e2e` test, expect, agent, cache, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
 | NUnit | `E2E.NUnit` (`E2ETest`) |
 | xUnit v3 | `E2E.XUnit.V3` (`E2ETest`) |
-| `e2e login`, `e2e logout`, `e2e models` | `E2E.Cli` (the `e2e` .NET tool) |
+| `e2e login`, `e2e logout`, `e2e models`, `e2e guide`, `e2e mcp` | `E2E.Cli` (the `e2e` .NET tool) |
 
 `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, and `@e2e-dev/eas` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).

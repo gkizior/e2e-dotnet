@@ -5,62 +5,20 @@ description: Write, run, and debug agentic end-to-end tests with the .NET port o
 
 # e2e for .NET
 
-An `E2ETest` opens the app in Chromium. `Agent` runs natural-language steps with a model, and `Screen` and `Expect` check the result without one. A verified agent step is recorded and replayed on the next run with no model call.
-
-## Set up a test project
-
-```bash
-dotnet new nunit -n MyApp.E2E
-dotnet add MyApp.E2E package E2E
-dotnet add MyApp.E2E package E2E.NUnit
-```
-
-For xUnit v3, create the project with `dotnet new install xunit.v3.templates` and `dotnet new xunit3`, then add the `E2E.XUnit.V3` package. Derive from `E2E.XUnit.V3.E2ETest` and write `[Fact]` tests. The members below are the same. `Expect.Soft` failures fail the test when it is disposed, and `Expect.Poll` uses `ToSatisfyAsync(predicate)`. xUnit v2 is not supported.
-
-Targets `net10.0`. The first browser launch in a test run installs Chromium, so the first run needs network access. On a CI image that already has the browser, or with no network, set `E2E_SKIP_BROWSER_INSTALL=1` and install it yourself with `pwsh bin/Debug/net10.0/playwright.ps1 install chromium`.
-
-## Config
-
-Put `e2e.config.json` in the test project folder. `E2ETest` finds the nearest one above the test assembly, then above the working directory. An unknown key fails with `INVALID_CONFIG`.
+An `E2ETest` opens the app in Chromium. `Agent.ActAsync` drives one goal with
+a model; `Agent.AssertAsync`, `Agent.WaitForAsync`, and `Agent.ExtractAsync`
+judge the screen. `Screen`, `App`, `Browser`, and `Expect` make exact
+interactions and checks without a model. A verified agent step is recorded
+and replayed on the next run with no model call; judgments still run live.
+Model sign-in commands are in
+[setup](references/setup.md#subscriptions-and-api-keys).
 
 ```json
 {
-  "targets": [{ "platform": "web", "app": { "url": "https://staging.example.com" } }],
-  "actionTimeout": 15000,
-  "assertionTimeout": 10000,
-  "agents": {
-    "default": {
-      "provider": "copilot",
-      "model": "claude-sonnet-5.5",
-      "context": "Facts about the app the model should know, such as which data it must not change."
-    }
-  },
-  "cache": { "dir": ".e2e/cache" },
-  "secrets": { "admin-password": null }
+  "targets": [{ "platform": "web", "app": { "url": "http://127.0.0.1:3000" } }],
+  "agents": { "default": { "provider": "copilot", "model": "claude-sonnet-5.5" } }
 }
 ```
-
-Pick the model:
-
-| Goal | `provider` | Auth |
-| --- | --- | --- |
-| Claude on a subscription | `copilot` | `e2e login github-copilot` (reuses `gh auth token`) |
-| OpenAI on a subscription | `chatgpt` | `e2e login openai` |
-| Claude on an API key | `anthropic` | `ANTHROPIC_API_KEY`, a workspace key (`sk-ant-api03-...`) |
-| OpenAI on an API key | `openai` (the default) | `OPENAI_API_KEY` |
-| Other | `openai-responses`, `azure`, `google`, `bedrock`, `xai`, `openrouter`, `gateway`, `openai-compatible`, `grok`, `opencode-console` | See the README |
-
-Rules that cause most auth failures:
-
-- Get model ids from `e2e models <login>`. Copilot uses a dot (`claude-sonnet-5.5`). The Anthropic API uses a dash (`claude-sonnet-5-5`).
-- `apiKeyEnv` overrides the provider's variable. Remove it when you change `provider`, or the client sends no key and gets a 401.
-- A Claude Pro or Max plan cannot serve the agent. Use Copilot or an API key.
-- Subscriptions are for local runs. Use API keys in CI.
-- Install the login tool with `dotnet tool install --global E2E.Cli`. In a clone of the e2e-dotnet repo, use `dotnet run --project src/E2E.Cli -- <command>`.
-
-A secret reads `E2E_SECRET_<NAME>` first (`E2E_SECRET_ADMIN_PASSWORD`), then the config value. `null` means the variable is required.
-
-## Write a test
 
 ```csharp
 using E2E;
@@ -73,123 +31,63 @@ public sealed class BillingTests : E2ETest
     {
         await App.OpenAsync("/settings/billing");
         await Agent.ActAsync("upgrade the workspace to the Pro plan");
-        await Agent.AssertAsync("the invoice preview shows a prorated amount");
         await Expect.That(Screen.GetByRole("status")).ToContainTextAsync("Pro");
     }
 }
 ```
 
-Members of `E2ETest`:
+## Topics
 
-- `App`: `OpenAsync(path)`, `BackAsync`, `RestartAsync`, `ClearStateAsync`. A path resolves against the target URL. `OpenAsync` and the agent's navigate step admit only `http:`, `https:`, and the exact `about:blank`; any other scheme (`file:`, `data:`, `javascript:`, `view-source:file:`) is `POLICY_DENIED`.
-- `Agent`: `ActAsync(instruction)` performs a goal. `AssertAsync(statement)` judges the screen once. `WaitForAsync(statement)` judges until true or timeout. `ExtractAsync<T>(instruction)` reads typed data from the screen.
-- `Screen`: `GetByRole(role, name)`, `GetByText`, `GetByLabel`, `GetByPlaceholder`, `GetByTestId`, `GetByDisplayValue`. Text matches are **exact by default**; pass `exact: false` for a substring. A locator has `ClickAsync`, `FillAsync`, `PressAsync`, `SelectOptionAsync`, `CheckAsync`, `First()`, `Last()`, `Nth(i)`, and `Filter(...)`.
-- `Expect.That(locator)`: `ToBeVisibleAsync`, `ToBeHiddenAsync`, `ToContainTextAsync`, `ToHaveTextAsync`, `ToHaveValueAsync`, `ToHaveCountAsync`, `ToBeEnabledAsync`, `ToBeCheckedAsync`, `ToHaveAttributeAsync`, and more. `Expect.Soft` records a failure and continues. `Expect.Poll(read)` retries any value.
-- Text reads: `ToHaveTextAsync`, `ToContainTextAsync`, `TextContentAsync`, and `AllTextContentsAsync` read the node's rendered text, whitespace collapsed. On the web that is what `innerText` reads, not the label: `<output aria-label="Remaining">1 remaining</output>` reads `1 remaining`, and an icon-only button reads `""`. Check a label with `ToHaveAccessibleNameAsync`.
-- `Browser`: URL, title, cookies, viewport, and raw keyboard and mouse.
-  - `RouteAsync(pattern, handler)`, `UnrouteAsync(pattern)`: intercept requests, newest route first. `route.Request` has `Url`, `Method`, `Headers`, `PostData`. The handler calls exactly one of `FulfillAsync(new RouteFulfillResponse { Status, Headers, ContentType, Json | Body | Path })`, `ContinueAsync(new RouteContinueOverrides { Url, Method, Headers, PostData })` (straight to the network), `FallbackAsync()` (the route registered before it), or `AbortAsync()`. None or two fails the next step with `ACTION_FAILED`, a bad option with `INVALID_ARGUMENT`. `Path` is relative to the project root.
-  - `WaitForResponseAsync(pattern, timeout?)`: resolves once the headers arrive, with a `WebResponse` (`Url`, `Status`, `Headers`, `TextAsync()`, `JsonAsync<T>()`). `TextAsync` and `JsonAsync` wait for the body (up to the action timeout) and fail with `ACTION_FAILED` when it could not be read. Start it before the step that sends the request, and await it after.
-  - `CookiesAsync()`, `SetCookiesAsync([...])`: a target is an http(s) URL, relative to the base URL, or a domain. `SetCookiesAsync` refuses a cookie URL that is not http(s), `about:blank` included, with `POLICY_DENIED`.
-  - A `RouteAsync`, `UnrouteAsync`, or `WaitForResponseAsync` pattern is a glob string or a `Regex` matched against the full URL (`*` stays within one path segment, `**` crosses `/`, `?` is one character, `\` escapes the next one).
-  - `AddInitScriptAsync(source | WebInitScript)`, `AddInitScriptAsync(WebInitScript.FromFunction(fn), arg)`: runs before the page's own scripts; call it before `App.OpenAsync`. `arg` is JSON.
-- `Secrets.Get("admin-password")`: a `Secret` from config.
+Read the topic for the job before writing code. The files sit next to this
+one; the installed tool prints the same text with `e2e guide <topic>`
+(`e2e guide` alone prints this page), and `e2e mcp` serves it as
+`e2e://guide/<topic>`. Differences from the TypeScript
+[tester-army/e2e](https://github.com/tester-army/e2e) are listed in
+`COMPATIBILITY.md` in the e2e-dotnet repo.
 
-Rules for agent steps:
-
-- One goal per `ActAsync`. Write the outcome, not the clicks: "add a $5 coffee expense", not "click Add, type 5".
-- Follow every `ActAsync` with `AssertAsync`, `WaitForAsync`, or `Expect.That`. Only a verified act is recorded for replay.
-- Prefer `Expect.That` with a locator when the check is exact. It needs no model and does not flake.
-- A value shown in more than one place (a total in the summary and on the pay button) must agree everywhere, or the judgment fails. Name the one you mean (`"the order summary total is $42.00"`) when only it matters.
-- Pass data in `Params`, not in the instruction text. Use `Values.Unique(...)` for fresh emails or names, and a `Secret` for passwords. The model never sees a secret's value.
-
-```csharp
-await Agent.ActAsync("sign in as the admin", new ActOptions
-{
-    Params = new Dictionary<string, object?>
-    {
-        ["email"] = "admin@example.com",
-        ["password"] = Secrets.Get("admin-password"),
-    },
-});
-```
-
-Mark tests that call a real model with `[Category("RealModel")]`, so CI can skip them with `--filter "TestCategory!=RealModel"`. A test with no agent call needs no model and no config entry for one.
-
-To pin the language and time zone, so dates and numbers format the same on every machine, override `CreateEngine()` and pass `WebEngineOptions`:
-
-```csharp
-protected override IEngine CreateEngine() => new WebEngine(new WebEngineOptions
-{
-    Locale = "de-DE",
-    TimezoneId = "Europe/Berlin",
-});
-```
-
-- `Locale` is the language every attempt runs in, a BCP 47 tag: `navigator.language`, `Intl`, and `Accept-Language`. An `accept-language` entry in `Headers` beside it is `INVALID_CONFIG`; set `Locale` only.
-- `TimezoneId` is the IANA time zone every attempt runs in. Spell it with its exact case (`Europe/Berlin`, not `europe/berlin`), or it is `INVALID_CONFIG`.
-
-To test without a browser or model, override `CreateEngine()` to return a `DocumentEngine`, and `CreateModel()` to return a scripted `IAgentModel`.
-
-### Run a script before the page
-
-An init script runs in every document before the page's own scripts, in every tab and frame: mock a browser API, seed `Math.random`, or set a flag the app reads at boot. A script is JavaScript source (a string), a file (`WebInitScript.FromPath`, relative to the project root), or a function's JavaScript source (`WebInitScript.FromFunction`). A function cannot close over test variables; pass a JSON `arg` instead. For every test, set `InitScripts` on the engine:
-
-```csharp
-protected override IEngine CreateEngine() => new WebEngine(new WebEngineOptions
-{
-    InitScripts = [WebInitScript.FromPath("tests/init.js")],
-});
-```
-
-For one test, before the page opens:
-
-```csharp
-await Browser.AddInitScriptAsync(WebInitScript.FromFunction("(value) => { Math.random = () => value; }"), 0.5);
-await App.OpenAsync("/raffle");
-```
-
-A script added after the page opened runs from the next navigation or reload. A configured file that cannot be read fails the test with `INVALID_CONFIG`. A bad script or an argument passed with anything but a function fails with `INVALID_ARGUMENT`, and a `Secret` in the argument with `POLICY_DENIED`.
-
-## Run
-
-```bash
-dotnet test
-dotnet test --filter "FullyQualifiedName~BillingTests"
-```
-
-Runs are headless. To watch a run, set `E2E_HEADLESS=0`, as in `E2E_HEADLESS=0 dotnet test`. `WebEngineOptions.Headless` overrides it.
-
-The first passing run records each verified act in `cache.dir`. The next run replays it with no model call. `AssertAsync` and `WaitForAsync` still call the model. `cache.mode` is `read-write` locally and `read-only` when `CI` is set. Commit the cache directory if CI should replay it.
-
-## Debug a failure
-
-An `E2EException` has a `Code`. Read it first.
-
-| Code or message | Cause | Fix |
+| Topic | File | Read it when |
 | --- | --- | --- |
-| `MODEL_PROVIDER_FAILED` with 401, "x-api-key header is required", or "You didn't provide an API key" | No key reached the provider | Set the provider's variable. Remove a stale `apiKeyEnv` |
-| `MODEL_PROVIDER_FAILED` with 400 "not scoped to a workspace" | An Anthropic user key (`sk-ant-usr-`) | Use a workspace key, or `provider: copilot` |
-| `MODEL_PROVIDER_FAILED` with "The subscription login failed (NOT_LOGGED_IN)" or `LOGIN_REQUIRED` | No login is stored, or it was rejected | `e2e login <provider>` |
-| `MODEL_PROVIDER_FAILED` with a 4xx that names the model | The plan or key does not serve that model id | Pick an id from `e2e models <login>` |
-| `MODEL_UNAVAILABLE` | No model is set and no replay finished the step | Set `agents.default.model` |
-| `SECRET_UNAVAILABLE` | `Secrets.Get` named a secret the config does not declare | Add it under `secrets` |
-| `INVALID_CONFIG` | Unknown key or bad value in `e2e.config.json` | Fix the key the message names |
-| `ASSERTION_FAILED` | The judge or locator saw a different screen | Check the app, then the statement. Do not loosen the statement to pass |
-| `ASSERTION_INCONCLUSIVE` | The judge could not decide | Make the statement concrete and visible on screen |
-| `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | The goal was too large or unclear | Split it into smaller `ActAsync` calls |
-| `LOCATOR_NOT_FOUND`, `STRICT_MODE` | No match, or more than one match | Use the exact accessible name, or `First()`, `Nth(i)`, `Filter(...)` |
-| `APP_NOT_OPEN` | A `Screen` call before `App.OpenAsync()` | Open the app first |
-| `NOT_ACTIONABLE` | The element is covered, disabled, or does not take that input. The message names the last blocker Playwright logged, such as `<div class="toast">…</div> intercepts pointer events` | `Expect` the condition first. Close the overlay the message names |
-| `NODE_STALE` | The element left the page, or Playwright found more than one element (a strict mode violation) before any input was sent. The step looks again | Usually nothing. If it repeats, make the locator match one element |
-| `OPERATION_TIMEOUT` | A navigation or a page read (observe, `Browser.EvaluateAsync`, `Browser.TitleAsync`) did not finish within `actionTimeout`. A page stuck in a script fails here, not at the test timeout | Look for a script that never ends or a request that never answers. Raise `actionTimeout` only for a slow UI |
-| `ACTION_MAY_HAVE_COMMITTED` | An action, scroll, key press, typing, or mouse call timed out, or hit a strict mode violation, after its input may have reached the page. It is never repeated | Check the page state before you retry by hand |
-| `ENVIRONMENT_UNAVAILABLE` with "Chromium is not installed" or "could not install Chromium" | The browser install was skipped or failed | Allow network access for the first run, or install Chromium and set `E2E_SKIP_BROWSER_INSTALL=1` |
-| `APP_UNREACHABLE` | The agent found the app down or not loading | Start the app, or fix `targets[].app.url` |
-| `POLICY_DENIED` | A URL whose scheme is not `http:` or `https:` (`file:`, `view-source:`, `data:`), from `OpenAsync`, the agent's navigate step, or `SetCookiesAsync` | http(s) or `about:blank` only (no `about:blank` cookie) |
-| `REPLAY_STALE` | `cache.strict` is on and a recording no longer matches | Re-run once without `cache.strict` to re-record |
+| `setup` | [references/setup.md](references/setup.md) | Adding e2e to a project, writing `e2e.config.json`, picking a model provider, browser options |
+| `writing-tests` | [references/writing-tests.md](references/writing-tests.md) | Writing or fixing tests: fixture members, locators, actions, matchers, sign-in, the `Browser` member |
+| `writing-tests-nunit` | [references/writing-tests-nunit.md](references/writing-tests-nunit.md) | NUnit: the `E2E.NUnit` base class, `[Test]`, `[Category("RealModel")]`, `dotnet test --filter`, a complete test |
+| `writing-tests-xunit` | [references/writing-tests-xunit.md](references/writing-tests-xunit.md) | xUnit v3: the `E2E.XUnit.V3` base class, `[Fact]`, `[Trait("TestCategory", "RealModel")]`, `dotnet test --filter`, a complete test |
+| `agent` | [references/agent.md](references/agent.md) | Adding `Agent` steps, picking a model, budgets, the replay cache |
+| `running` | [references/running.md](references/running.md) | `dotnet test` filters, the `e2e` tool, exit codes, CI |
+| `explore` | [references/explore.md](references/explore.md) | Exploring an app toward a goal without a test file (not ported) |
+| `debugging` | [references/debugging.md](references/debugging.md) | A run failed: error codes and their fixes, a visible browser, replay misses |
+| `mcp` | [references/mcp.md](references/mcp.md) | Driving the live app from a coding agent over MCP: `e2e mcp`, its tools, and the explore-then-write loop |
+| `bug-bash` | [references/bug-bash.md](references/bug-bash.md) | Asked to bug bash or hunt for bugs: proving each bug with a repro test |
 
-A failed fill of a `Secret` never shows the value. The message reads `[redacted]` in its place, and the Playwright error is dropped.
+## Workflow
 
-A replay miss is not a failure. The step runs live and records again. `ActResult.Cache.Reason` says why it missed: `no-entry` (nothing recorded yet), `invalid-entry` (an old or broken file), `target-not-found` (the control's role or name changed), `target-ambiguous`, `wrong-context` (the page or path changed), or `end-mismatch` (the replay ended on a different screen).
+1. Look at what exists: `e2e.config.json`, a test project that references
+   `E2E.NUnit` or `E2E.XUnit.V3`. Nothing there: follow `setup`.
+2. Learn the screens before writing a test: routes, labels, roles, button
+   text. Semantic locators need the accessible names the app renders, so read
+   the components or watch a run with `E2E_HEADLESS=0`.
+3. Write an `E2ETest` class. Drive the flow with `Agent.ActAsync`, one goal
+   per call, and pin each outcome right after with `Expect.That` or
+   `Agent.AssertAsync`. Exact values go through `Screen`.
+4. Run one class: `dotnet test --filter "FullyQualifiedName~<Class>"`. Agent
+   steps need a model in the config and that provider's authentication.
+   Tests without agent steps need no model.
+5. Read the exception's `Code` and message (topic `debugging`). Fix the
+   locator, the expectation, or the app. Never add a sleep.
 
-Differences from the TypeScript [tester-army/e2e](https://github.com/tester-army/e2e) are listed in `COMPATIBILITY.md` in the e2e-dotnet repo.
+## Rules
+
+- Text matches are exact by default. A locator that matches two nodes
+  fails with `STRICT_MODE`; narrow it (topic `writing-tests`).
+- Actions wait for readiness and `Expect` retries. Reads such as
+  `TextContentAsync` look once; use a matcher when a value has to settle.
+- Secrets never appear in test code. Declare them under `secrets` in the
+  config and read them with `Secrets.Get(name)`; accounts come from
+  `Credentials.User(name)`. Hand the `Secret` only to `FillAsync` or
+  `ActOptions.Params`.
+- Agent instructions: one goal per act, the wording on screen, real values
+  in `Params`. Judge meaning, not phrasing.
+- Check each act's outcome. Only a verified act is recorded and replayed
+  (topic `agent`).
+- Shape the agent for this app: `context` for the vocabulary the screens
+  use, `system` for how it works, named agents under `agents`.
+- `.e2e/cache/` is output; commit it to share replays, never edit it.

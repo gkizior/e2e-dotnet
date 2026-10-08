@@ -4,8 +4,8 @@
     <RootNamespace>E2E.Cli</RootNamespace>
     <AssemblyName>E2E.Cli</AssemblyName>
     <PackageId>E2E.Cli</PackageId>
-    <Description>The e2e command for the E2E .NET port: sign in to a model subscription (ChatGPT, GitHub Copilot, OpenCode Console, SuperGrok), sign out, and list the models a login serves.</Description>
-    <PackageTags>e2e;testing;agent;llm;oauth;cli</PackageTags>
+    <Description>The e2e command for the E2E .NET port: sign in to a model subscription (ChatGPT, GitHub Copilot, OpenCode Console, SuperGrok), sign out, list the models a login serves, and serve the guide to a coding agent over MCP (e2e mcp).</Description>
+    <PackageTags>e2e;testing;agent;llm;oauth;cli;mcp</PackageTags>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>e2e</ToolCommandName>
@@ -15,7 +15,13 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\E2E\E2E.csproj" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="E2E.Cli.Tests" />
+  </ItemGroup>
+  <!-- The skill ships inside the tool: e2e mcp serves it as the guide resources. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\skills\e2e-dotnet\**\*.md" LogicalName="skill/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
   <!-- The E2E reference still flows its Playwright driver into the publish list, which the tool package is built from. -->
   <Target Name="DropPlaywrightDriver" AfterTargets="ComputeResolvedFilesToPublishList">

@@ -14,7 +14,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 | `e2e.config.ts` | `e2e.config.json`, the same keys as JSON. `E2ETest` finds and applies it; fixture properties override it |
 | Vercel AI SDK model | `OpenAiCompatibleModel`, `OpenAiResponsesModel`, `AnthropicModel`, `GoogleModel`, and `BedrockModel`, built from `provider` in JSON or `ModelProviders` in code. See [Models](#models) |
 | `e2e/oauth/chatgpt`, `copilot`, `grok`, `opencode-console` | `E2E.OAuth.Subscriptions` |
-| `e2e login`, `e2e logout`, `e2e models` | `E2E.Cli`, a .NET tool whose command is `e2e` |
+| `e2e login`, `e2e logout`, `e2e models`, `e2e guide`, `e2e mcp` | `E2E.Cli`, a .NET tool whose command is `e2e`. `e2e guide [topic]` prints the bundled skill, as upstream; an unknown topic exits 2. `e2e mcp` is partly ported: see [MCP server](#mcp-server) |
 | — | `DocumentEngine`, an in-memory page for hosts that do not want a browser |
 
 ## Ported
@@ -82,9 +82,9 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 
 ## Not ported
 
-- The `e2e` command-line tool apart from `login`, `logout`, and `models`: the custom runner, `[E2ETest]` discovery, `--grep`, `test.only`, and the JSON report
+- The `e2e` command-line tool apart from `login`, `logout`, `models`, `guide`, and `mcp`: the custom runner, `[E2ETest]` discovery, `--grep`, `test.only`, and the JSON report
 - `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
-- MCP server and `e2e init`
+- `e2e init`
 - Vision, screenshots, traces, and video
 - Parallel workers and serial suites
 - The full locator action set (`dragTo`, `swipe`, `hover`, `setInputFiles`, `secondaryTap`, `longPress`, pointer points). `secondaryTap` and `longPress` have no counterpart in the document engine
@@ -97,6 +97,24 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - Value expectations (`expect(value).toBe`, `toEqual`, `toMatchObject`, `toHaveProperty`, `toMatchSchema`, and the rest) and their `expect.soft` form. Use NUnit `Assert.That` with constraints, and `Assert.EnterMultipleScope` (or `Assert.Multiple`) for soft value checks. `expect.poll` takes NUnit constraints through `ToMatchAsync` in their place
 - Asymmetric matchers (`expect.any`, `anything`, `objectContaining`, `arrayContaining`, `stringContaining`, `stringMatching`). Use NUnit constraints such as `Is.InstanceOf`, `Is.Not.Null`, `Has.Property`, `Is.SupersetOf`, `Does.Contain`, and `Does.Match`
 - The upstream reporter, GitHub pull request comment, and trace viewer
+
+## MCP server
+
+Partly ported. `e2e mcp` serves over stdio with the server name `e2e`, the tools, resources, and logging capabilities, and upstream's four fixed tools with their names, descriptions, and closed argument schemas. Stdout carries only the protocol; every other write goes to stderr, and the MCP SDK logs nothing. The flags are `--config`, `--target`, `--headed`, a hidden `--headless`, and `--max-sessions` (1 through 16, default 4). A bad command line exits with 2, a disconnect or a signal with 0, and an unexpected error with 1. The resources `e2e://guide` and `e2e://guide/<topic>` serve the bundled skill; an unknown topic fails with `UNKNOWN_TOPIC`.
+
+Differences:
+
+- The fixed tools check their arguments with a strict check of the JSON Schema subset tool schemas use, since the .NET MCP SDK does not validate them. The messages are zod's, so an unknown argument reads `Invalid arguments for tool <name>: Unrecognized key: "<key>"`, as upstream.
+- The server instructions name `e2e.config.json`, `E2ETest` classes, and `dotnet test` in place of `e2e.config.ts`, `tests/*.e2e.ts`, and `npx e2e run`.
+- The guide has upstream's eight topics, written for .NET, plus `writing-tests-nunit` and `writing-tests-xunit`, one per test framework. `explore` and `bug-bash` say that `e2e explore` is not ported.
+- The 2026-07-28 MCP revision deprecates logging. The server still declares it and sends its log lines, as upstream does.
+
+Not ported yet:
+
+- Live sessions. `open_session` answers `UNSUPPORTED_CAPABILITY`. `tools` and `call` answer `NO_SESSION`, and `close_session` answers `No session is open.`, as upstream does with no session open. `--config`, `--target`, `--headed`, and `--max-sessions` are accepted and have no effect yet.
+- The session catalog behind `call`: `observe`, the grammar verbs, `type_secret`, `locate`, `screenshot` and the point tools, `start_recording` and `stop_recording`, and project tools.
+- The idle and lifetime limits of a session, redaction of what user code prints, telemetry, and `e2e init` registering the server.
+- The Playwright driver in the tool package. The tool still ships without it.
 
 ## Agents
 

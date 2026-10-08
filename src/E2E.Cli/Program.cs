@@ -5,13 +5,15 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using E2E.Cli.Mcp;
 using E2E.OAuth;
 
 namespace E2E.Cli;
 
 /// <summary>
 /// <c>e2e login</c>, <c>e2e logout</c>, and <c>e2e models</c>: upstream's subscription commands. Logins go to the
-/// credentials file upstream's CLI uses, so a login made with either one serves both.
+/// credentials file upstream's CLI uses, so a login made with either one serves both. <c>e2e guide</c> prints
+/// the bundled skill, and <c>e2e mcp</c> serves a coding agent over MCP.
 /// </summary>
 public static class Program
 {
@@ -20,12 +22,17 @@ public static class Program
           e2e login [provider] [--device] [--client-id <id>] [--from-gh] [--enterprise-url <host>]
           e2e logout [provider]
           e2e models [provider]
+          e2e guide [topic]
+          e2e mcp [--config <path>] [--target <name>] [--headed] [--max-sessions <n>]
 
         Providers:
           openai            ChatGPT Plus/Pro, the Codex sign-in (--device for a machine without a browser)
           github-copilot    GitHub Copilot (gh signed in, or --client-id of your OAuth App; --enterprise-url for GHE)
           opencode-console  OpenCode Console workspace (OpenCode Zen and Go)
           spacexai          SuperGrok or X Premium+
+
+        e2e mcp serves a coding agent such as Claude Code over MCP (stdio): the fixed tools and the guide
+        resources. Register it with: claude mcp add e2e -- e2e mcp
 
         Credentials live in $XDG_CONFIG_HOME/e2e/oauth.json (or ~/.config/e2e/oauth.json).
         E2E_OAUTH_CREDENTIALS holding the same JSON stands in for the file. Use API keys in CI.
@@ -64,6 +71,11 @@ public static class Program
             return args.Length == 0 ? 1 : 0;
         }
 
+        if (args[0] == "mcp")
+        {
+            return await McpAsync(args.Skip(1), stdout, stderr, cancellationToken).ConfigureAwait(false);
+        }
+
         var (positional, flags) = Parse(args.Skip(1));
         var provider = positional.FirstOrDefault();
         switch (args[0])
@@ -74,6 +86,8 @@ public static class Program
                 return await LogoutAsync(provider, stdout, stdin, interactive, cancellationToken).ConfigureAwait(false);
             case "models":
                 return await ModelsAsync(provider, stdout, stderr, cancellationToken).ConfigureAwait(false);
+            case "guide":
+                return await GuideAsync(positional.FirstOrDefault(), stdout, stderr).ConfigureAwait(false);
             default:
                 await stderr.WriteLineAsync("unknown command \"" + args[0] + "\"\n\n" + Usage).ConfigureAwait(false);
                 return 1;
@@ -202,6 +216,97 @@ public static class Program
         }
 
         return failed ? 1 : 0;
+    }
+
+    /// <summary><c>e2e guide</c>: prints the bundled skill's overview, or one topic. An unknown topic exits 2.</summary>
+    private static async Task<int> GuideAsync(string? topic, TextWriter stdout, TextWriter stderr)
+    {
+        var text = Skill.ReadGuide(topic);
+        if (text is null)
+        {
+            await stderr.WriteLineAsync("unknown topic \"" + topic + "\"; topics: " + string.Join(", ", Skill.Topics())).ConfigureAwait(false);
+            return 2;
+        }
+
+        await stdout.WriteAsync(text.EndsWith('\n') ? text : text + "\n").ConfigureAwait(false);
+        return 0;
+    }
+
+    /// <summary>Parses the flags of <c>e2e mcp</c> and serves. A bad command line exits 2.</summary>
+    private static async Task<int> McpAsync(IEnumerable<string> args, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
+    {
+        string? config = null;
+        string? target = null;
+        var headed = false;
+        var maxSessions = SessionHost.SessionBounds.Default;
+        var positional = 0;
+        using var e = args.GetEnumerator();
+        while (e.MoveNext())
+        {
+            var arg = e.Current;
+            var eq = arg.IndexOf('=', StringComparison.Ordinal);
+            var name = eq >= 0 ? arg[..eq] : arg;
+            void NoValue()
+            {
+                if (eq >= 0)
+                {
+                    throw new ArgumentException("option '" + name + "' takes no argument");
+                }
+            }
+
+            string? Value(string label) => eq >= 0 ? arg[(eq + 1)..] : e.MoveNext() ? e.Current : throw new ArgumentException("option '" + name + " " + label + "' argument missing");
+            try
+            {
+                switch (name)
+                {
+                    case "--config":
+                        config = Value("<path>");
+                        break;
+                    case "--target":
+                        target = Value("<name>");
+                        break;
+                    case "-h" or "--help":
+                        await stdout.WriteLineAsync(Usage).ConfigureAwait(false);
+                        return 0;
+                    case "--headed":
+                        NoValue();
+                        headed = true;
+                        break;
+                    case "--headless":
+                        NoValue();
+                        // Sessions were headed by default before upstream 0.18 and took --headless; a client config
+                        // that still passes it asks for the default now, and a refused flag would surface as
+                        // nothing but a failed connection.
+                        break;
+                    case "--max-sessions":
+                        var value = Value("<n>");
+                        var (min, max, _) = SessionHost.SessionBounds;
+                        maxSessions = int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed >= min && parsed <= max
+                            ? parsed
+                            : throw new ArgumentException("option '--max-sessions <n>' argument '" + value + "' is invalid. must be an integer from " + min.ToString(CultureInfo.InvariantCulture) + " through " + max.ToString(CultureInfo.InvariantCulture));
+                        break;
+                    case var _ when arg.StartsWith('-'):
+                        throw new ArgumentException("unknown option '" + arg + "'");
+                    default:
+                        positional++;
+                        break;
+                }
+            }
+            catch (ArgumentException ex)
+            {
+                await stderr.WriteLineAsync("error: " + ex.Message).ConfigureAwait(false);
+                return 2;
+            }
+        }
+
+        if (positional > 0)
+        {
+            await stderr.WriteLineAsync("error: too many arguments for 'mcp'. Expected 0 arguments but got " + positional.ToString(CultureInfo.InvariantCulture) + ".").ConfigureAwait(false);
+            return 2;
+        }
+
+        var options = new McpCommandOptions { Config = config, Target = target, Headed = headed, MaxSessions = maxSessions };
+        return await McpCommand.RunAsync(options, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<string> PickAsync(string question, IReadOnlyList<string> ids, ICredentialStore store, TextWriter stdout, TextReader stdin, bool interactive, CancellationToken cancellationToken)
