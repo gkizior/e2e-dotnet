@@ -61,6 +61,9 @@ internal sealed class Redactor
         }
     }
 
+    /// <summary>A redactor with no values, which leaves every text as it is.</summary>
+    public static Redactor None { get; } = new([]);
+
     public static Redactor For(IEnumerable<Secret> secrets)
     {
         return new Redactor(secrets.Select(secret => (Marker(secret.Name), secret.Value)));

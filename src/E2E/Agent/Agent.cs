@@ -158,7 +158,7 @@ public sealed class Agent
                     Role = "tool",
                     ToolCallId = toolCall.Id,
                     Name = toolCall.Name,
-                    Content = SnapshotText.Redact(outcome.Content, _scope.Secrets),
+                    Content = _scope.Redactor.Redact(outcome.Content),
                 });
                 if (!outcome.Succeeded)
                 {
@@ -253,7 +253,7 @@ public sealed class Agent
         var last = "the statement did not hold";
         try
         {
-            var snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Secrets);
+            var snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Redactor);
             while (true)
             {
                 var verdict = await JudgeOnceAsync(statement, snapshot, agent, maxCalls - (_scope.ModelCalls - callsBefore), token).ConfigureAwait(false);
@@ -288,7 +288,7 @@ public sealed class Agent
                         await Task.Delay(wait < remaining ? wait : remaining, token).ConfigureAwait(false);
                     }
 
-                    snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Secrets);
+                    snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Redactor);
                     if (DateTime.UtcNow - judgedAt >= interval && !string.Equals(snapshot, judged, StringComparison.Ordinal))
                     {
                         break;
@@ -318,7 +318,7 @@ public sealed class Agent
         using var linked = Link(cancellationToken, ResolveTimeout(options?.Timeout, agent.JudgmentTimeout));
         var token = linked.Token;
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-        var snapshot = SnapshotText.Render(observation, _scope.Secrets);
+        var snapshot = SnapshotText.Render(observation, _scope.Redactor);
         var schema = JsonSchemaExporter.GetJsonSchemaAsNode(ExtractJson, typeof(T));
         var tools = AgentTools.ExtractFor(schema);
         var messages = new List<ModelMessage>
@@ -326,7 +326,7 @@ public sealed class Agent
             new()
             {
                 Role = "user",
-                Content = SnapshotText.Redact("Instruction: " + instruction + "\n\nReturn data matching this JSON schema: " + schema.ToJsonString() + "\n\n", _scope.Secrets) + snapshot,
+                Content = _scope.Redactor.Redact("Instruction: " + instruction + "\n\nReturn data matching this JSON schema: " + schema.ToJsonString() + "\n\n") + snapshot,
             },
         };
         for (var call = 1; ; call++)
@@ -386,13 +386,12 @@ public sealed class Agent
             messages.Add(new ModelMessage
             {
                 Role = "user",
-                Content = SnapshotText.Redact(
+                Content = _scope.Redactor.Redact(
                     Repair(
                         issue,
                         previous,
                         fields,
-                        "Correct a misread or a wrong shape. When the screen cannot satisfy the errors, call done with status failed and code ASSERTION_INCONCLUSIVE and say in summary what is missing, rather than change values."),
-                    _scope.Secrets),
+                        "Correct a misread or a wrong shape. When the screen cannot satisfy the errors, call done with status failed and code ASSERTION_INCONCLUSIVE and say in summary what is missing, rather than change values.")),
             });
         }
     }
@@ -402,7 +401,7 @@ public sealed class Agent
         using var linked = Link(cancellationToken, timeout);
         var token = linked.Token;
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-        var verdict = await JudgeOnceAsync(statement, SnapshotText.Render(observation, _scope.Secrets), agent, JudgmentModelCalls, token).ConfigureAwait(false);
+        var verdict = await JudgeOnceAsync(statement, SnapshotText.Render(observation, _scope.Redactor), agent, JudgmentModelCalls, token).ConfigureAwait(false);
         if (string.Equals(verdict.Status, "passed", StringComparison.Ordinal))
         {
             _scope.MarkVerified();
@@ -417,7 +416,7 @@ public sealed class Agent
     {
         var messages = new List<ModelMessage>
         {
-            new() { Role = "user", Content = SnapshotText.Redact("Statement: " + statement + "\n\n", _scope.Secrets) + snapshot },
+            new() { Role = "user", Content = _scope.Redactor.Redact("Statement: " + statement + "\n\n") + snapshot },
         };
         var system = JudgeSystemFor(agent);
         var response = await CallModelAsync(agent.Judge, system, messages, AgentTools.Judge, agent, token).ConfigureAwait(false);
@@ -1036,7 +1035,7 @@ public sealed class Agent
 
             // The tree can stay the same while the page moves under it (every node
             // already fits the budget), so the scroll position counts too.
-            var shape = SnapshotText.Render(observation, []) + "\n" + observation.ScrollPosition;
+            var shape = SnapshotText.Render(observation, Redactor.None) + "\n" + observation.ScrollPosition;
             still = string.Equals(shape, previous, StringComparison.Ordinal) ? still + 1 : 0;
             if (still >= ScrollUntilStillPages)
             {
@@ -1259,7 +1258,7 @@ public sealed class Agent
     private async Task<string> DescribeAsync(string action, CancellationToken token)
     {
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-        return action + "\n" + SnapshotText.Render(observation, _scope.Secrets);
+        return action + "\n" + SnapshotText.Render(observation, _scope.Redactor);
     }
 
     private string Opening(
@@ -1300,8 +1299,8 @@ public sealed class Agent
             }
         }
 
-        builder.Append('\n').Append(SnapshotText.Render(start, _scope.Secrets));
-        return SnapshotText.Redact(builder.ToString(), _scope.Secrets);
+        builder.Append('\n').Append(SnapshotText.Render(start, _scope.Redactor));
+        return _scope.Redactor.Redact(builder.ToString());
     }
 
     private async Task<ModelResponse> CallModelAsync(
@@ -1322,7 +1321,7 @@ public sealed class Agent
         {
             var request = new ModelRequest
             {
-                System = SnapshotText.Redact(system, _scope.Secrets),
+                System = _scope.Redactor.Redact(system),
                 Messages = messages,
                 Tools = tools,
                 ProviderOptions = agent.ProviderOptions,
@@ -1749,6 +1748,8 @@ public sealed class CacheInfo
 internal sealed class AttemptScope
 {
     private readonly Dictionary<string, int> _callIndexes = new(StringComparer.Ordinal);
+    private readonly List<Secret> _secrets = [];
+    private Built? _redactor;
 
     /// <summary>
     /// An agent call in this attempt hit a model outage or a stale strict replay. The cache keeps its
@@ -1823,7 +1824,29 @@ internal sealed class AttemptScope
     /// <summary>True once the test has failed. Verification stops there, so a later teardown check proves nothing.</summary>
     public Func<bool> TestFailed { get; init; } = static () => false;
 
-    public List<Secret> Secrets { get; } = [];
+    public IReadOnlyList<Secret> Secrets => _secrets;
+
+    /// <summary>
+    /// The redactor for <see cref="Secrets"/>, rebuilt only when <see cref="Remember"/>
+    /// has added a secret since the last build: building one costs time linear in
+    /// the values' length, so a long value must not pay it on every snapshot.
+    /// </summary>
+    public Redactor Redactor
+    {
+        get
+        {
+            var built = _redactor;
+            if (built is not null && built.Count == _secrets.Count)
+            {
+                return built.Redactor;
+            }
+
+            var secrets = _secrets.ToArray();
+            built = new Built(Redactor.For(secrets), secrets.Length);
+            _redactor = built;
+            return built.Redactor;
+        }
+    }
 
     public List<string> Completed { get; } = [];
 
@@ -1880,7 +1903,7 @@ internal sealed class AttemptScope
         {
             if (value is Secret secret && !Secrets.Any(item => string.Equals(item.Name, secret.Name, StringComparison.Ordinal) && string.Equals(item.Value, secret.Value, StringComparison.Ordinal)))
             {
-                Secrets.Add(secret);
+                _secrets.Add(secret);
             }
         }
     }
@@ -1900,6 +1923,9 @@ internal sealed class AttemptScope
             }
         }
     }
+
+    /// <summary>A redactor and how many secrets it was built from. One object, so a reader never sees one without the other.</summary>
+    private sealed record Built(Redactor Redactor, int Count);
 }
 
 internal sealed class PendingAct

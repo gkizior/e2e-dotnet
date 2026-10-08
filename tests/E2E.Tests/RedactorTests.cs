@@ -23,7 +23,7 @@ public sealed class RedactorTests
     [InlineData("written Hunter2/Pass  word end")]
     public void Redacts_each_spelling(string text)
     {
-        var redacted = SnapshotText.Redact(text, Secrets);
+        var redacted = Redactor.For(Secrets).Redact(text);
         Assert.Contains("<secret:token>", redacted, StringComparison.Ordinal);
         Assert.DoesNotContain("hunter2", redacted, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith(" end", redacted, StringComparison.Ordinal);
@@ -33,16 +33,16 @@ public sealed class RedactorTests
     public void Redacting_twice_is_redacting_once()
     {
         var secrets = new[] { Secret.Create("secret", "secret") };
-        var once = SnapshotText.Redact("a secret here", secrets);
+        var once = Redactor.For(secrets).Redact("a secret here");
         Assert.Equal("a <secret:secret> here", once);
-        Assert.Equal(once, SnapshotText.Redact(once, secrets));
+        Assert.Equal(once, Redactor.For(secrets).Redact(once));
     }
 
     [Fact]
     public void Longer_value_wins()
     {
         var secrets = new[] { Secret.Create("short", "abcdef"), Secret.Create("long", "abcdef-123456") };
-        Assert.Equal("x <secret:long> y <secret:short>", SnapshotText.Redact("x ABCDEF-123456 y abcdef", secrets));
+        Assert.Equal("x <secret:long> y <secret:short>", Redactor.For(secrets).Redact("x ABCDEF-123456 y abcdef"));
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class RedactorTests
     [Fact]
     public void Text_without_values_is_unchanged()
     {
-        Assert.Equal("nothing to see", SnapshotText.Redact("nothing to see", Secrets));
-        Assert.Equal("nothing to see", SnapshotText.Redact("nothing to see", []));
+        Assert.Equal("nothing to see", Redactor.For(Secrets).Redact("nothing to see"));
+        Assert.Equal("nothing to see", Redactor.None.Redact("nothing to see"));
     }
 }

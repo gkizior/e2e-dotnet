@@ -5,6 +5,7 @@
 using System.Globalization;
 using System.Text;
 using E2E.Engine;
+using E2E.Internal;
 
 namespace E2E.Tests;
 
@@ -189,8 +190,8 @@ public sealed class ScrollTests
             Truncated = true,
         };
 
-        Assert.Contains("Scroll to reach it", SnapshotText.Render(observation, []), StringComparison.Ordinal);
-        Assert.DoesNotContain("Scroll", SnapshotText.Render(new Observation { Route = "/", Roots = observation.Roots }, []), StringComparison.Ordinal);
+        Assert.Contains("Scroll to reach it", SnapshotText.Render(observation, Redactor.None), StringComparison.Ordinal);
+        Assert.DoesNotContain("Scroll", SnapshotText.Render(new Observation { Route = "/", Roots = observation.Roots }, Redactor.None), StringComparison.Ordinal);
     }
 
     [Fact]
