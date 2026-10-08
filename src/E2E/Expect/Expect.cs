@@ -140,7 +140,10 @@ public sealed class LocatorExpect
         return StateAsync("toBeFocused", node => node.States.Focused, true, "focused", timeout, cancellationToken);
     }
 
-    /// <summary>Waits for exact normalized text. <paramref name="ignoreCase"/> folds a string's case, and adds or removes a pattern's.</summary>
+    /// <summary>
+    /// Waits for exact normalized text: the node's rendered text (<c>innerText</c> on the web), not its label.
+    /// <paramref name="ignoreCase"/> folds a string's case, and adds or removes a pattern's.
+    /// </summary>
     public Task ToHaveTextAsync(TextMatch expected, bool? ignoreCase = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
         return TextAsync(Field.HasText, expected, ignoreCase, timeout, cancellationToken);
@@ -505,8 +508,9 @@ public sealed class LocatorExpect
         public Func<string, string> DescribeExpected { get; }
 
         /// <summary>
-        /// The field as the matcher reads it, the empty string when absent. Text falls back to the name,
-        /// since this port reports a control's label as its name and leaves its text empty.
+        /// The field as the matcher reads it, the empty string when absent. The web engine reports text for
+        /// every node, empty for an icon button, so text falls back to the name only for a node with no
+        /// text at all, as the document engine's controls have.
         /// </summary>
         public string Read(SemanticNode node)
         {
