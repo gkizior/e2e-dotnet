@@ -54,10 +54,15 @@ A failed fill of a `Secret` never shows the value. The message reads
 
 A replay miss is not a failure. The step runs live and records again.
 `ActResult.Cache.Reason` says why it missed: `no-entry` (nothing recorded
-yet), `invalid-entry` (an old or broken file), `target-not-found` (the
-control's role or name changed), `target-ambiguous`, `wrong-context` (the
-page or path changed), or `end-mismatch` (the replay ended on a different
-screen).
+yet), `invalid-entry` (an old or broken file, or a store that could not be
+read), `target-not-found` (the control's role or name changed),
+`target-ambiguous`, `wrong-context` (the page or path changed), or
+`end-mismatch` (every action ran, but the recorded route, a control that
+should have appeared or gone away, or a recorded state did not come back;
+the outcome was already on screen before the replay; or the replay raised
+an alert the recording never saw). Leftover data from an earlier run, a
+banner that comes and goes, or a regression causes it.
+`ActResult.Cache.ReplayedActions` and `TotalActions` say how far it got.
 
 ## Tools
 

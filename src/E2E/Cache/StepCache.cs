@@ -14,8 +14,9 @@ namespace E2E;
 
 /// <summary>
 /// A recording of one verified <c>act</c>. The key is the cache schema, the replay
-/// policy version, the engine, the test, the instruction, the params, and which repeat
-/// of that same instruction and params in the attempt it is. The model id is not part of the key.
+/// policy version, the engine, the test, the instruction, the params, the agent's name,
+/// a digest of the agent's redacted context, and which repeat of that same call in the
+/// attempt it is. The model id is not part of the key.
 /// </summary>
 public sealed class CacheEntry
 {
@@ -31,7 +32,11 @@ public sealed class CacheEntry
 
     public List<RecordedAction> Actions { get; set; } = [];
 
+    /// <summary>Nodes on screen when the step passed and not when it began (<see cref="Anchors"/>).</summary>
     public List<RecordedTarget> Appeared { get; set; } = [];
+
+    /// <summary>Nodes on screen when the step began and gone when it passed.</summary>
+    public List<RecordedTarget> Gone { get; set; } = [];
 }
 
 public sealed class RecordedAction
@@ -67,6 +72,21 @@ public sealed class RecordedTarget
     public string? Name { get; set; }
 
     public string? TestId { get; set; }
+
+    /// <summary>An anchor's text when it differs from its name, with secrets redacted.</summary>
+    public string? Text { get; set; }
+
+    /// <summary>An anchor's placeholder.</summary>
+    public string? Placeholder { get; set; }
+
+    /// <summary>An anchor's input purpose, such as <c>password</c>. Null for <c>none</c>.</summary>
+    public string? InputPurpose { get; set; }
+
+    /// <summary>An anchor's value, with secrets redacted. Null for an empty or secure field.</summary>
+    public string? Value { get; set; }
+
+    /// <summary>An anchor's <c>checked</c>, <c>expanded</c>, <c>pressed</c>, and <c>selected</c> states that are on. Null for none.</summary>
+    public List<string>? States { get; set; }
 }
 
 public sealed class CacheLookup
@@ -169,7 +189,7 @@ internal static class CacheKeys
     /// Version of the rules that decide whether a recording replays. Bump it when those
     /// rules change, so old entries become misses instead of wrong replays.
     /// </summary>
-    public const string ReplayPolicyVersion = "1";
+    public const string ReplayPolicyVersion = "2";
 
     private static readonly JsonSerializerOptions KeyJson = Json(new LeafConverter<Secret>(Canonical), new LeafConverter<UniqueValue>(Canonical));
 
@@ -179,7 +199,9 @@ internal static class CacheKeys
         string engine,
         string test,
         string instruction,
-        IReadOnlyDictionary<string, object?>? parameters)
+        IReadOnlyDictionary<string, object?>? parameters,
+        string agent,
+        string? agentContext)
     {
         var builder = new StringBuilder();
         builder.Append("schema=").Append(FileStepCache.SchemaVersion.ToString(CultureInfo.InvariantCulture)).Append('\n');
@@ -194,6 +216,10 @@ internal static class CacheKeys
             }
         }
 
+        // The agent acts as one person with one context, so another agent, or a changed context, records again.
+        // The context enters as a digest of its redacted text, so a secret in it contributes only its name.
+        builder.Append("agent=").Append(agent).Append('\n');
+        builder.Append("context=").Append(Hash(agentContext ?? "")).Append('\n');
         return Hash(builder.ToString());
     }
 

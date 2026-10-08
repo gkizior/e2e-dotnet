@@ -36,9 +36,11 @@ public sealed class AgentActGrammarVerbsRecordThenZeroTurnReplayTests(AgentActGr
     public void Replays_hover_drag_check_upload_and_scroll_into_view_without_a_model_call_and_runs_a_round_trip_that_changed_nothing_live()
     {
         // Every second-run flow passed its check: RunFlowAsync fails the fixture otherwise.
-        // Upstream never records a round trip that left the screen and the route as it
-        // found them, so its second run calls the model again. This port records and
-        // replays it, so those two upstream assertions are not ported.
+        // A round trip leaves the screen and the route as it found them: nothing a
+        // replay could check, so it is never recorded and the model runs it again.
+        var roundTrip = runs.Second[RoundTrip];
+        Assert.Equal(("missed", "no-entry"), (roundTrip.Cache?.Mode, roundTrip.Cache?.Reason));
+        Assert.Equal(runs.Second.Values.Sum(result => result.ModelCalls), roundTrip.ModelCalls);
         foreach (var flow in ReplayFlows.Where(entry => entry.Title != RoundTrip))
         {
             var step = runs.Second[flow.Title];

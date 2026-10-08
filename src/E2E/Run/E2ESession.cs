@@ -277,19 +277,37 @@ public sealed class E2ESession : IAsyncDisposable
 
         // A stale recording under strict mode stays in place, so the next strict run fails the same way until someone re-records it.
         var preserve = AttemptScope.KeepsCache(error) || _scope.KeepCache;
-        foreach (var act in _scope.Acts)
+        Flush(_scope.Cache, _scope.Acts, preserve);
+    }
+
+    /// <summary>
+    /// Settles the acts of one attempt: a verified act's recording is written, and an unverified one that
+    /// recorded or replayed is evicted, unless <paramref name="preserve"/> says the failure implicates nothing.
+    /// </summary>
+    internal static void Flush(IStepCache cache, IEnumerable<PendingAct> acts, bool preserve)
+    {
+        foreach (var act in acts)
         {
             var recorded = act.Completed && act.Entry is { Actions.Count: > 0 } && !act.ParamCollision;
-            if (act.Verified && recorded)
+            try
             {
-                if (!act.ReplayedWhole && !HoldsSameFlow(_scope.Cache, act.Key, act.Entry!))
+                if (act.Verified && recorded)
                 {
-                    _scope.Cache.Write(act.Key, act.Entry!);
+                    if (!act.ReplayedWhole && !HoldsSameFlow(cache, act.Key, act.Entry!))
+                    {
+                        cache.Write(act.Key, act.Entry!);
+                    }
+                }
+                // An entry read for an act that then passed with nothing to record is evicted too: it did not serve
+                // this pass, and nothing replaces it, so every later run would hand off the same way.
+                else if (!preserve && (recorded || act.ConsumedReplay || (act.Completed && act.ReadEntry)))
+                {
+                    cache.Delete(act.Key);
                 }
             }
-            else if (!preserve && (recorded || act.ConsumedReplay))
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _scope.Cache.Delete(act.Key);
+                // The cache is disposable, as a replay's read is: a store that fails here costs the next run a live step.
             }
         }
     }

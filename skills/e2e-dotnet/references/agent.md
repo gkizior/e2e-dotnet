@@ -170,10 +170,20 @@ continues when the app no longer matches. `AssertAsync`, `WaitForAsync`, and
   nothing.
 - A replay re-finds each control by role, name, test id, and path, and
   needs the recorded start route unless the recording opens with a
-  navigation. When the end state differs, the agent takes over.
-  `ActResult.Cache.Reason` says why a replay missed: `no-entry`,
-  `invalid-entry`, `wrong-context`, `target-not-found`, `target-ambiguous`,
-  `end-mismatch`.
+  navigation. It passes alone only when the recorded end route is back,
+  every control that appeared (with its text, value, and checked or
+  selected state) is there, every one that went away is gone, at least one
+  of those changed during the replay, and no new alert showed; otherwise
+  the agent takes over mid-step. Text that reads differently on every run,
+  a date, a time, an id, is not checked. Entries are keyed per agent and
+  per agent `context`. `ActResult.Cache.Reason` says why a replay missed:
+  `no-entry`, `invalid-entry`, `wrong-context`, `target-not-found`,
+  `target-ambiguous`, `end-mismatch`.
+- A step recording no actions, or changing nothing on screen or in the
+  route, creates no entry. The screen it passed on is read once it holds
+  still, so a late render still counts. One whose `Values.Unique` value
+  equals another param's value is not recorded either
+  (`ActResult.Cache.NotRecorded`: `param-collision`).
 - Only the first attempt replays. A `[Retry]` attempt runs live and still
   records.
 - Commit `.e2e/cache/` to share replays with CI and teammates.

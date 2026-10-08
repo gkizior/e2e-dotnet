@@ -16,7 +16,8 @@ internal static partial class Routes
             return "/";
         }
 
-        if (Uri.TryCreate(url, UriKind.Absolute, out var absolute))
+        // Checked by scheme because on Unix Uri reads "/x?y" as the absolute file:///x%3Fy.
+        if (SchemePattern().IsMatch(url) && Uri.TryCreate(url, UriKind.Absolute, out var absolute))
         {
             return string.IsNullOrEmpty(absolute.AbsolutePath) ? "/" : absolute.AbsolutePath;
         }
