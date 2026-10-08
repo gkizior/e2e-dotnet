@@ -258,11 +258,18 @@ public sealed class ModelProviderTests
     }
 
     [Fact]
-    public async Task OpenAi_chat_requests_carry_cache_hints_only_for_openai()
+    public async Task Chat_requests_carry_cache_hints_only_for_openai_models_on_the_gateway()
     {
         var openai = new RecordingHandler("""{ "choices": [{ "message": { "content": "ok" } }] }""");
         using (var http = new HttpClient(openai))
         using (var model = new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = "gpt", ApiKey = "k" }, http))
+        {
+            await model.CompleteAsync(Conversation(), CancellationToken.None);
+        }
+
+        var gateway = new RecordingHandler("""{ "choices": [{ "message": { "content": "ok" } }] }""");
+        using (var http = new HttpClient(gateway))
+        using (var model = new OpenAiCompatibleModel(new OpenAiCompatibleModelOptions { Model = "openai/gpt-6-luna", Provider = "gateway", ApiKey = "k" }, http))
         {
             await model.CompleteAsync(Conversation(), CancellationToken.None);
         }
@@ -274,8 +281,10 @@ public sealed class ModelProviderTests
             await model.CompleteAsync(Conversation(), CancellationToken.None);
         }
 
-        Assert.False(openai.Requests.Single().Json()["store"]!.GetValue<bool>());
-        Assert.NotNull(openai.Requests.Single().Json()["prompt_cache_key"]);
+        Assert.Null(openai.Requests.Single().Json()["store"]);
+        Assert.Null(openai.Requests.Single().Json()["prompt_cache_key"]);
+        Assert.False(gateway.Requests.Single().Json()["store"]!.GetValue<bool>());
+        Assert.NotNull(gateway.Requests.Single().Json()["prompt_cache_key"]);
         Assert.Null(local.Requests.Single().Json()["store"]);
         Assert.False(local.Requests.Single().Headers.ContainsKey("Authorization"));
     }

@@ -130,7 +130,8 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
         };
 
         // OpenAI caches prompt prefixes on its own and takes a routing key, one per system prompt. Nothing is stored.
-        if (_options.PromptCacheHints ?? ModelEndpoint.IsOpenAi(_options.BaseUrl))
+        // Upstream sends this to Responses models and to openai/* models on the gateway, not to chat completions.
+        if (_options.PromptCacheHints ?? IsGatewayOpenAi())
         {
             payload["prompt_cache_key"] = ModelHttp.PromptCacheKey(request.System);
             payload["store"] = false;
@@ -138,7 +139,19 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
 
         // Provider options ride the request body as given, so a field such as reasoning_effort reaches the server.
         ModelHttp.MergeProviderOptions(payload, request, _options.Provider, "model", "messages", "tools");
+
+        // The AI SDK spells the effort reasoningEffort and sends it as reasoning_effort.
+        if (payload.Remove("reasoningEffort", out var effort))
+        {
+            payload["reasoning_effort"] = effort;
+        }
+
         return payload;
+    }
+
+    private bool IsGatewayOpenAi()
+    {
+        return string.Equals(_options.Provider, "gateway", StringComparison.Ordinal) && _options.Model.StartsWith("openai/", StringComparison.Ordinal);
     }
 
     private static ModelResponse Parse(JsonElement root)
@@ -214,8 +227,8 @@ public sealed class OpenAiCompatibleModelOptions
     public IReadOnlyDictionary<string, string>? QueryParameters { get; init; }
 
     /// <summary>
-    /// Whether requests carry a prompt-cache key and <c>store: false</c>, as upstream sends OpenAI. Null (the
-    /// default) sends them only to <c>api.openai.com</c>. Provider options win over both.
+    /// Whether requests carry a prompt-cache key and <c>store: false</c>. Null (the default) sends them only to
+    /// <c>openai/*</c> models on the gateway, as upstream does; chat completions elsewhere get neither. Provider options win over both.
     /// </summary>
     public bool? PromptCacheHints { get; init; }
 
@@ -269,10 +282,5 @@ internal static class ModelEndpoint
             message.Headers.Remove(name);
             message.Headers.TryAddWithoutValidation(name, value);
         }
-    }
-
-    public static bool IsOpenAi(string baseUrl)
-    {
-        return Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) && string.Equals(uri.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase);
     }
 }

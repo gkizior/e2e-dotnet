@@ -47,7 +47,7 @@ public sealed class OpencodeConsoleTests
         Assert.Equal("claude-sonnet-5", JsonNode.Parse(call.Body)!["model"]!.GetValue<string>());
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/131: Go models ignore provider options under the opencode key")]
+    [Fact]
     public async Task Serves_Go_models_from_the_Go_provider_remembering_the_route_and_keeping_one_session_per_model()
     {
         var api = OpencodeConsoleWorkspace.Serve();
@@ -70,7 +70,7 @@ public sealed class OpencodeConsoleTests
         Assert.NotEqual(sessions[0], sessions[2]);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/132: a promptless Responses call keys the cache on the empty prompt")]
+    [Fact]
     public async Task Calls_Responses_models_without_server_storage_under_the_system_prompt_cache_key_and_Google_models_with_the_bearer_alone()
     {
         var api = OpencodeConsoleWorkspace.Serve();

@@ -119,7 +119,9 @@ public sealed class OpenAiResponsesModel : IAgentModel, IDisposable
 
         if (_options.PromptCacheHints)
         {
-            payload["prompt_cache_key"] = ModelHttp.PromptCacheKey(request.System);
+            payload["prompt_cache_key"] = request.System.Length == 0 && _options.SessionId is not null
+                ? _options.SessionId
+                : ModelHttp.PromptCacheKey(request.System);
         }
 
         ModelHttp.MergeProviderOptions(payload, request, _options.Provider, "model", "input", "tools", "instructions");
@@ -210,6 +212,9 @@ public sealed class OpenAiResponsesModelOptions
 
     /// <summary>Whether requests carry a prompt-cache routing key, one per system prompt. Upstream sends it to OpenAI and Azure.</summary>
     public bool PromptCacheHints { get; init; } = true;
+
+    /// <summary>The routing key for a request with no system prompt, so promptless calls of one session share a cache and other sessions do not. Null hashes the empty prompt.</summary>
+    public string? SessionId { get; init; }
 
     public string? ResolveApiKey()
     {
