@@ -59,6 +59,10 @@ Members of `E2ETest` in both frameworks:
   name the app renders.
 - Text matches are **exact by default**. Pass `exact: false` for a
   case-insensitive substring, or a .NET `Regex`.
+- `GetByText` and `GetByLabel` return the innermost match, so a container
+  echoing its child does not count twice: `GetByText("$42.00")` finds the
+  `<strong>` in `<p>Order total: <strong>$42.00</strong></p>`. Text inside a
+  control's `<label>` answers with the control.
 - `RoleOptions` adds `Checked`, `Disabled`, `Selected`, `Expanded`,
   `Pressed`, and `Level`.
 - Narrow with `Filter(text)` or `Filter(locator)`, and pick with `First()`,

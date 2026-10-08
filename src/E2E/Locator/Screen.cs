@@ -66,10 +66,16 @@ public sealed class Screen
         return new Locator(this, LocatorQuery.ForRole(role, name, options));
     }
 
-    /// <summary>Creates a lazy visible-text query.</summary>
+    /// <summary>
+    /// Creates a lazy visible-text query. It answers with the innermost match, such as a
+    /// <c>&lt;strong&gt;</c> inside a paragraph. Text inside a control's label answers with the control.
+    /// </summary>
     public Locator GetByText(TextMatch text, bool exact = true) => GetByText(text, new TextMatchOptions { Exact = exact });
 
-    /// <summary>Creates a lazy visible-text query.</summary>
+    /// <summary>
+    /// Creates a lazy visible-text query. It answers with the innermost match, such as a
+    /// <c>&lt;strong&gt;</c> inside a paragraph. Text inside a control's label answers with the control.
+    /// </summary>
     public Locator GetByText(TextMatch text, TextMatchOptions options) => new(this, LocatorQuery.For("text", text, options, nameof(text)));
 
     /// <summary>Creates a lazy accessible-label query: any node whose accessible name matches.</summary>

@@ -190,7 +190,54 @@ internal static class PageScript
             const box = el.getBoundingClientRect();
             return { x: box.x, y: box.y, width: box.width, height: box.height };
           };
-          const listed = (el, role) => (role && role !== "presentation" && role !== "none") || !!el.getAttribute(testIdAttribute);
+          // Text owned directly by an element, not by its child elements. An
+          // element with content-visibility: hidden renders none of it. The
+          // budget tally and the walk both ask, so each answer is kept.
+          const directTexts = new Map();
+          const directTextOf = (el) => {
+            if (directTexts.has(el)) return directTexts.get(el);
+            let out = "";
+            for (const child of el.childNodes) {
+              if (child.nodeType === Node.TEXT_NODE) out += child.nodeValue ?? "";
+            }
+            out = out.replace(/\s+/g, " ").trim();
+            if (out && getComputedStyle(el).getPropertyValue("content-visibility") === "hidden") out = "";
+            directTexts.set(el, out);
+            return out;
+          };
+          // The elements that reference each id from aria-labelledby, read once
+          // per walk. nameOf resolves those ids in the document, so this does too.
+          let labelledBy = null;
+          const referencesOf = (id) => {
+            if (!labelledBy) {
+              labelledBy = new Map();
+              for (const ref of document.querySelectorAll("[aria-labelledby]")) {
+                for (const each of ref.getAttribute("aria-labelledby").trim().split(/\s+/)) {
+                  if (!labelledBy.has(each)) labelledBy.set(each, []);
+                  labelledBy.get(each).push(ref);
+                }
+              }
+            }
+            return labelledBy.get(id) ?? [];
+          };
+          // Text inside a label of a control, or in an element a role's
+          // aria-labelledby names, is the labelled element's name already.
+          const namesControl = (el) => {
+            if (el.closest("label")?.control) return true;
+            if (!el.id || document.getElementById(el.id) !== el) return false;
+            return referencesOf(el.id).some((ref) => {
+              const role = roleOf(ref);
+              return !!role && role !== "presentation" && role !== "none";
+            });
+          };
+          // As upstream's tree, an element is listed by its role, its test id,
+          // or text of its own, so text inside a bare span or a strong is a node
+          // a text query can answer with. Text that names another element is
+          // not listed: that element carries it as its name, so a text query
+          // answers with it, and a fill acts on the control a label names. An
+          // SVG element has no innerText to read, so it is not listed by text.
+          const ownsText = (el) => el instanceof HTMLElement && directTextOf(el) !== "" && !namesControl(el);
+          const listed = (el, role) => (role && role !== "presentation" && role !== "none") || !!el.getAttribute(testIdAttribute) || ownsText(el);
           // How many nodes the walk would list, or only those on screen.
           const tally = (el, visible) => {
             if (!el || skip.has(el.tagName)) return 0;

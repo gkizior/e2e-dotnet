@@ -44,7 +44,9 @@ internal static class SnapshotText
             builder.Append(' ', depth * 2);
             builder.Append("- ");
             builder.Append(node.Role ?? "text");
-            var name = redactor.Redact(node.Name ?? node.Text ?? "");
+            // A node with no accessible name, such as one listed for its text
+            // or its test id, shows its text.
+            var name = redactor.Redact((string.IsNullOrEmpty(node.Name) ? node.Text : node.Name) ?? "");
             if (name.Length > 0)
             {
                 builder.Append(" \"").Append(TextRules.Normalize(name)).Append('"');

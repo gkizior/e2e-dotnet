@@ -25,8 +25,6 @@ public sealed class ControlInventoryTests : ControlInventoryTest
     {
         await Screen.GetByRole("radio", "Express").CheckAsync();
         await Expect.That(Screen.GetByLabel("Delivery state")).ToHaveTextAsync("Express");
-        // Upstream reads the summary with getByText. Until #81 lands, the port lists
-        // no node for a bare span, so the summary is read through the section that holds it.
-        await Expect.That(Screen.GetByRole("region", "Toggles")).ToContainTextAsync("Express delivery selected");
+        await Expect.That(Screen.GetByText("Express delivery selected")).ToBeVisibleAsync();
     }
 }
