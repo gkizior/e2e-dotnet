@@ -43,16 +43,27 @@ public sealed class App
         return _session.BackAsync(Token(cancellationToken));
     }
 
-    /// <summary>Closes the current document and opens a blank one. Cookies and storage are kept. Call <see cref="OpenAsync"/> next.</summary>
+    /// <summary>Closes the current document and reopens the app at <see cref="BaseUrl"/>. Cookies and storage are kept.</summary>
     public Task RestartAsync(CancellationToken cancellationToken = default)
     {
-        return _session.RestartAsync(Token(cancellationToken));
+        return SteerAsync(_session.RestartAsync, Token(cancellationToken));
     }
 
-    /// <summary>Discards cookies, storage, and history, and opens a blank document. Call <see cref="OpenAsync"/> next.</summary>
+    /// <summary>Discards cookies, storage, and history, and reopens the app at <see cref="BaseUrl"/>.</summary>
     public Task ClearStateAsync(CancellationToken cancellationToken = default)
     {
-        return _session.ClearStateAsync(Token(cancellationToken));
+        return SteerAsync(_session.ClearStateAsync, Token(cancellationToken));
+    }
+
+    // A steering hook ends at a blank surface, so the app is reopened at its base URL
+    // through the same path as OpenAsync. Without a base URL there is nothing to reopen.
+    private async Task SteerAsync(Func<CancellationToken, Task> hook, CancellationToken cancellationToken)
+    {
+        await hook(cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(_baseUrl))
+        {
+            await OpenAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private CancellationToken Token(CancellationToken cancellationToken) =>

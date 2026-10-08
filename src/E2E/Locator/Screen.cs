@@ -298,13 +298,14 @@ public sealed class Locator
     }
 
     /// <summary>
-    /// Reads text once: the node's rendered text (<c>innerText</c> on the web), not its label.
+    /// Reads whitespace-normalized text once: the node's rendered text (<c>innerText</c> on the web), not its label.
     /// Does not retry and does not verify an earlier <c>act</c>.
     /// </summary>
     public async Task<string?> TextContentAsync(CancellationToken cancellationToken = default)
     {
         var node = await ResolveStrictAsync(cancellationToken).ConfigureAwait(false);
-        return node.Text ?? node.Name;
+        var text = node.Text ?? node.Name;
+        return text is null ? null : TextRules.Normalize(text);
     }
 
     /// <summary>
@@ -387,11 +388,11 @@ public sealed class Locator
         return locators;
     }
 
-    /// <summary>Reads the rendered text of every current match, without waiting. Empty when nothing matches.</summary>
+    /// <summary>Reads the whitespace-normalized rendered text of every current match, without waiting. Empty when nothing matches.</summary>
     public async Task<IReadOnlyList<string>> AllTextContentsAsync(CancellationToken cancellationToken = default)
     {
         var matches = await ResolveAsync(_screen.Token(cancellationToken)).ConfigureAwait(false);
-        return matches.Select(node => node.Text ?? node.Name ?? "").ToList();
+        return matches.Select(node => TextRules.Normalize(node.Text ?? node.Name ?? "")).ToList();
     }
 
     /// <summary>

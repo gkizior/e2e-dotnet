@@ -53,7 +53,11 @@ public static class Subscriptions
     /// </summary>
     public static OpenCodeConsoleModel OpenCodeConsole(string model, ICredentialStore? store = null)
     {
-        var provider = new OpenCodeConsoleProvider();
+        return OpenCodeConsole(model, store, new OpenCodeConsoleProvider(), inner: null);
+    }
+
+    internal static OpenCodeConsoleModel OpenCodeConsole(string model, ICredentialStore? store, OpenCodeConsoleProvider provider, HttpMessageHandler? inner)
+    {
         var apiKey = ModelHttp.Environment("OPENCODE_API_KEY");
         string? hint = null;
         if (apiKey is not null)
@@ -65,7 +69,7 @@ public static class Subscriptions
             hint = "check OPENCODE_API_KEY";
         }
 
-        return new OpenCodeConsoleModel(model, provider, Client(provider, store, hint));
+        return new OpenCodeConsoleModel(model, provider, Client(provider, store, hint, inner));
     }
 
     /// <summary>An <see cref="HttpClient"/> that carries <paramref name="provider"/>'s stored login on every request.</summary>

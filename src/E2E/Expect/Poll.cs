@@ -133,7 +133,8 @@ public sealed class PollExpectation<T>
             return Task.CompletedTask;
         }
 
-        return Task.Delay(remaining < interval ? remaining : interval, cancellationToken);
+        // Rounded up to a whole millisecond: a delay under one completes at once, and the loop would spin to the deadline.
+        return Task.Delay(remaining < interval ? TimeSpan.FromMilliseconds(Math.Ceiling(remaining.TotalMilliseconds)) : interval, cancellationToken);
     }
 
     private static string Format(T value)

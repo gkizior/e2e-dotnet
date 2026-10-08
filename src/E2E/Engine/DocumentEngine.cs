@@ -11,7 +11,7 @@ namespace E2E.Engine;
 /// Each open builds a fresh page from the route mapped on
 /// <see cref="DocumentWorld"/>. Actions mutate that page until the next open.
 /// <c>app.back</c> rebuilds the previous route, and <c>app.restart</c> and
-/// <c>app.clearState</c> leave a blank page with no history. The document engine
+/// <c>app.clearState</c> drop the history and reopen the base URL. The document engine
 /// has no browser, so the <see cref="Browser"/> fixture is unsupported.
 /// </summary>
 public sealed class DocumentEngine : IEngine

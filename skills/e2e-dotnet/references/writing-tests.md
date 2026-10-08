@@ -41,8 +41,10 @@ Members of `E2ETest` in both frameworks:
 - `App`: `OpenAsync(path)`, `BackAsync`, `RestartAsync`, `ClearStateAsync`,
   and `BaseUrl`. A path resolves against the target URL. `OpenAsync` and the
   agent's navigate step admit only `http:`, `https:`, and the exact
-  `about:blank`; any other scheme is `POLICY_DENIED`. `ClearStateAsync` is
-  `UNSUPPORTED_CAPABILITY` with `Connect.ReconnectEndpoint`.
+  `about:blank`; any other scheme is `POLICY_DENIED`. `RestartAsync` keeps
+  cookies and storage, `ClearStateAsync` drops them, and both reopen the
+  target URL. `ClearStateAsync` is `UNSUPPORTED_CAPABILITY` with
+  `Connect.ReconnectEndpoint`.
 - `Agent`: `ActAsync`, `AssertAsync`, `WaitForAsync`, `ExtractAsync<T>`
   (topic `agent`).
 - `Screen`: the locators below.

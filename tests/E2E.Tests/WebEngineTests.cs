@@ -243,15 +243,13 @@ public sealed class WebEngineTests
             await browser.SetViewportAsync(700, 500);
 
             await session.App.RestartAsync();
-            Assert.Equal("about:blank", await browser.UrlAsync());
+            Assert.Equal(site.Url, await browser.UrlAsync());
             Assert.Contains(await browser.CookiesAsync(), cookie => cookie.Name == "plan" && cookie.Value == "pro");
-            await session.App.OpenAsync("/");
             Assert.Equal(700, await browser.EvaluateAsync<int>("() => window.innerWidth"));
 
             await session.App.ClearStateAsync();
-            Assert.Equal("about:blank", await browser.UrlAsync());
+            Assert.Equal(site.Url, await browser.UrlAsync());
             Assert.Empty(await browser.CookiesAsync());
-            await session.App.OpenAsync("/");
             await Expect.That(session.Screen.GetByRole("textbox")).ToBeVisibleAsync();
         });
     }

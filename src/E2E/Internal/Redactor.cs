@@ -69,6 +69,12 @@ internal sealed class Redactor
         return new Redactor(secrets.Select(secret => (Marker(secret.Name), secret.Value)));
     }
 
+    /// <summary>A redactor over named values of any length, as upstream's <c>SecretLedger</c> takes them.</summary>
+    internal static Redactor For(IEnumerable<(string Name, string Value)> values)
+    {
+        return new Redactor(values.Select(value => (Marker(value.Name), value.Value)));
+    }
+
     /// <summary>A redactor for one value whose name is not known, as an engine sees a sensitive fill.</summary>
     public static Redactor ForValue(string value)
     {
