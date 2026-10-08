@@ -84,6 +84,9 @@ Members of `E2ETest`:
 - `Screen`: `GetByRole(role, name)`, `GetByText`, `GetByLabel`, `GetByPlaceholder`, `GetByTestId`, `GetByDisplayValue`. Text matches are **exact by default**; pass `exact: false` for a substring. A locator has `ClickAsync`, `FillAsync`, `PressAsync`, `SelectOptionAsync`, `CheckAsync`, `First()`, `Last()`, `Nth(i)`, and `Filter(...)`.
 - `Expect.That(locator)`: `ToBeVisibleAsync`, `ToBeHiddenAsync`, `ToContainTextAsync`, `ToHaveTextAsync`, `ToHaveValueAsync`, `ToHaveCountAsync`, `ToBeEnabledAsync`, `ToBeCheckedAsync`, `ToHaveAttributeAsync`, and more. `Expect.Soft` records a failure and continues. `Expect.Poll(read)` retries any value.
 - `Browser`: URL, title, cookies, viewport, and raw keyboard and mouse.
+  - `WaitForResponseAsync(pattern, timeout?)`: resolves once the headers arrive, with a `WebResponse` (`Url`, `Status`, `Headers`, `TextAsync()`, `JsonAsync<T>()`). `TextAsync` and `JsonAsync` wait for the body (up to the action timeout) and fail with `ACTION_FAILED` when it could not be read. Start it before the step that sends the request, and await it after.
+  - `CookiesAsync()`, `SetCookiesAsync([...])`: a target is an http(s) URL, relative to the base URL, or a domain.
+  - A `WaitForResponseAsync` pattern is a glob string or a `Regex` matched against the full URL (`*` stays within one path segment, `**` crosses `/`, `?` is one character, `\` escapes the next one).
 - `Secrets.Get("admin-password")`: a `Secret` from config.
 
 Rules for agent steps:

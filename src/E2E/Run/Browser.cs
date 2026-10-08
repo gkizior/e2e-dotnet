@@ -23,14 +23,16 @@ public sealed class Browser
     private readonly IEngineSession _session;
     private readonly string _platform;
     private readonly string? _baseUrl;
+    private readonly TimeSpan _actionTimeout;
     private readonly TimeSpan _assertionTimeout;
     private readonly Func<CancellationToken> _token;
 
-    internal Browser(IEngineSession session, string platform, string? baseUrl, TimeSpan assertionTimeout, Func<CancellationToken> token)
+    internal Browser(IEngineSession session, string platform, string? baseUrl, TimeSpan actionTimeout, TimeSpan assertionTimeout, Func<CancellationToken> token)
     {
         _session = session;
         _platform = platform;
         _baseUrl = baseUrl;
+        _actionTimeout = actionTimeout;
         _assertionTimeout = assertionTimeout;
         _token = token;
         Keyboard = new BrowserKeyboard(this);
@@ -93,16 +95,36 @@ public sealed class Browser
     public Task<T?> EvaluateAsync<T>(string expression, object? arg, CancellationToken cancellationToken = default) =>
         EvaluateCoreAsync<T>(expression, arg, hasArg: true, cancellationToken);
 
+    /// <summary>
+    /// Waits for a response whose complete URL matches the glob <paramref name="pattern"/>:
+    /// <c>*</c> matches within one path segment, <c>**</c> crosses <c>/</c>, <c>?</c>
+    /// matches one character, and <c>\</c> escapes the next one. The timeout bounds
+    /// the match only, and defaults to the action timeout.
+    /// </summary>
+    public Task<WebResponse> WaitForResponseAsync(string pattern, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        return WaitForResponseCoreAsync(Routes.CompilePattern(pattern).IsMatch, timeout, cancellationToken);
+    }
+
+    /// <summary>Waits for a response whose URL matches <paramref name="pattern"/>. The timeout bounds the match only, and defaults to the action timeout.</summary>
+    public Task<WebResponse> WaitForResponseAsync(Regex pattern, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        return WaitForResponseCoreAsync(pattern.IsMatch, timeout, cancellationToken);
+    }
+
     /// <summary>Returns the cookies visible to the browser context.</summary>
     public Task<IReadOnlyList<BrowserCookie>> CookiesAsync(CancellationToken cancellationToken = default) =>
         Require("cookies").GetCookiesAsync(Token(cancellationToken));
 
-    /// <summary>Sets cookies. Each target URL, or the origin a domain cookie is sent to, must pass the URL rule.</summary>
+    /// <summary>Sets cookies. Each target URL, or the origin a domain cookie is sent to, must pass the URL rule. A relative url resolves against the base URL.</summary>
     public Task SetCookiesAsync(IReadOnlyList<BrowserCookie> cookies, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(cookies);
         var session = Require("setCookies");
         var scheme = _baseUrl is not null && _baseUrl.StartsWith("https:", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
+        var resolved = new List<BrowserCookie>(cookies.Count);
         foreach (var cookie in cookies)
         {
             ArgumentNullException.ThrowIfNull(cookie);
@@ -111,10 +133,13 @@ public sealed class Browser
                 throw new TestException("INVALID_ARGUMENT", "Cookie \"" + cookie.Name + "\" needs a url, or a domain with an optional path, not both.");
             }
 
-            Routes.Resolve(_baseUrl, cookie.Url ?? scheme + "://" + cookie.Domain!.TrimStart('.'));
+            // A url cookie is set on the URL the rule resolved, so a relative one
+            // lands on the base URL the way OpenAsync would.
+            var target = Routes.Resolve(_baseUrl, cookie.Url ?? scheme + "://" + cookie.Domain!.TrimStart('.'));
+            resolved.Add(cookie.Url is null ? cookie : cookie with { Url = target });
         }
 
-        return session.SetCookiesAsync(cookies, Token(cancellationToken));
+        return session.SetCookiesAsync(resolved, Token(cancellationToken));
     }
 
     /// <summary>Sets the viewport size for the rest of the attempt.</summary>
@@ -156,6 +181,13 @@ public sealed class Browser
         }
     }
 
+    private async Task<WebResponse> WaitForResponseCoreAsync(Func<string, bool> matches, TimeSpan? timeout, CancellationToken cancellationToken)
+    {
+        var session = Require("waitForResponse");
+        var response = await session.WaitForResponseAsync(matches, timeout ?? _actionTimeout, Token(cancellationToken)).ConfigureAwait(false);
+        return new WebResponse(response, _actionTimeout, _token);
+    }
+
     private async Task WaitForURLAsync(Func<string, bool> matches, string label, TimeSpan? timeout, CancellationToken cancellationToken)
     {
         var session = Require("waitForURL");
@@ -178,6 +210,54 @@ public sealed class Browser
             await Task.Delay(PollInterval, token).ConfigureAwait(false);
         }
     }
+}
+
+/// <summary>A response <see cref="Browser.WaitForResponseAsync(string, TimeSpan?, CancellationToken)"/> matched.</summary>
+public sealed class WebResponse
+{
+    private readonly Task<string> _body;
+    private readonly TimeSpan _actionTimeout;
+    private readonly Func<CancellationToken> _token;
+
+    internal WebResponse(BrowserResponse response, TimeSpan actionTimeout, Func<CancellationToken> token)
+    {
+        Url = response.Url;
+        Status = response.Status;
+        Headers = response.Headers;
+        _body = response.Body;
+        _actionTimeout = actionTimeout;
+        _token = token;
+    }
+
+    /// <summary>Response URL.</summary>
+    public string Url { get; }
+
+    /// <summary>HTTP status.</summary>
+    public int Status { get; }
+
+    /// <summary>Response headers, with lower-cased names.</summary>
+    public IReadOnlyDictionary<string, string> Headers { get; }
+
+    /// <summary>
+    /// Waits for the body, up to the action timeout, and reads it as text. Fails with
+    /// <c>ACTION_FAILED</c> when the body could not be read or did not finish in time.
+    /// </summary>
+    public async Task<string> TextAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _body.WaitAsync(_actionTimeout, cancellationToken == default ? _token() : cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException) when (!_body.IsCompleted)
+        {
+            var budget = ((long)_actionTimeout.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            throw new TestException("ACTION_FAILED", "waitForResponse: response body did not finish within " + budget + "ms");
+        }
+    }
+
+    /// <summary>Waits for the body as <see cref="TextAsync"/> does and deserializes it as JSON.</summary>
+    public async Task<T?> JsonAsync<T>(CancellationToken cancellationToken = default) =>
+        JsonSerializer.Deserialize<T>(await TextAsync(cancellationToken).ConfigureAwait(false), JsonDefaults.Options);
 }
 
 /// <summary>Keyboard input for whatever holds focus in the active tab.</summary>

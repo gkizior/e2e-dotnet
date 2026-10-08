@@ -25,6 +25,15 @@ public interface IBrowserSession : IEngineSession
     /// <summary>Evaluates trusted test code in the page. <paramref name="hasArg"/> says whether <paramref name="arg"/> is passed.</summary>
     Task<JsonElement?> EvaluateAsync(string expression, object? arg, bool hasArg, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Waits up to <paramref name="timeout"/> for a response whose URL <paramref name="matches"/>
+    /// accepts. The timeout bounds the match only: the body read starts once the
+    /// response is known and goes on in <see cref="BrowserResponse.Body"/>. A session
+    /// that does not override it fails with <c>UNSUPPORTED_CAPABILITY</c>.
+    /// </summary>
+    Task<BrowserResponse> WaitForResponseAsync(Func<string, bool> matches, TimeSpan timeout, CancellationToken cancellationToken) =>
+        Task.FromException<BrowserResponse>(new EngineException("UNSUPPORTED_CAPABILITY", "browser.waitForResponse is not supported by this engine."));
+
     Task<IReadOnlyList<BrowserCookie>> GetCookiesAsync(CancellationToken cancellationToken);
 
     Task SetCookiesAsync(IReadOnlyList<BrowserCookie> cookies, CancellationToken cancellationToken);
@@ -68,4 +77,18 @@ public sealed record BrowserCookie
 
     /// <summary><c>Strict</c>, <c>Lax</c>, or <c>None</c>.</summary>
     public string? SameSite { get; init; }
+}
+
+/// <summary>A response an engine observed, with its body still being read.</summary>
+public sealed record BrowserResponse
+{
+    public required string Url { get; init; }
+
+    public required int Status { get; init; }
+
+    /// <summary>Response headers, with lower-cased names.</summary>
+    public required IReadOnlyDictionary<string, string> Headers { get; init; }
+
+    /// <summary>The body as text. Faults with <c>ACTION_FAILED</c> when the browser could not read it.</summary>
+    public required Task<string> Body { get; init; }
 }

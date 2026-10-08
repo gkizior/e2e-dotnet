@@ -2,6 +2,7 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace E2E.Internal;
@@ -61,6 +62,50 @@ internal static partial class Routes
         }
 
         return resolved.AbsoluteUri;
+    }
+
+    /// <summary>
+    /// Compiles a URL glob with upstream's route pattern grammar: <c>*</c> matches
+    /// within one path segment, <c>**</c> crosses <c>/</c>, <c>?</c> matches one
+    /// character, <c>\</c> escapes the next character; everything else is literal.
+    /// The pattern matches the complete URL.
+    /// </summary>
+    public static Regex CompilePattern(string pattern)
+    {
+        var source = new StringBuilder("^");
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            var ch = pattern[i];
+            if (ch == '\\')
+            {
+                i++;
+                if (i < pattern.Length)
+                {
+                    source.Append(Regex.Escape(pattern[i].ToString()));
+                }
+
+                continue;
+            }
+
+            if (ch == '*')
+            {
+                if (i + 1 < pattern.Length && pattern[i + 1] == '*')
+                {
+                    i++;
+                    source.Append(".*");
+                }
+                else
+                {
+                    source.Append("[^/]*");
+                }
+
+                continue;
+            }
+
+            source.Append(ch == '?' ? "." : Regex.Escape(ch.ToString()));
+        }
+
+        return new Regex(source.Append('$').ToString(), RegexOptions.CultureInvariant);
     }
 
     [GeneratedRegex("^[A-Za-z][A-Za-z0-9+.-]*:")]

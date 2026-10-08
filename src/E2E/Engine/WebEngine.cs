@@ -628,6 +628,34 @@ public sealed partial class WebEngine : IEngine
             }
         }
 
+        public async Task<BrowserResponse> WaitForResponseAsync(Func<string, bool> matches, TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IResponse response;
+            try
+            {
+                response = await Page.WaitForResponseAsync(
+                    candidate => matches(candidate.Url),
+                    new PageWaitForResponseOptions { Timeout = (float)timeout.TotalMilliseconds }).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (WebErrors.IsPlaywright(ex))
+            {
+                throw WebErrors.Translate(ex, "waitForResponse");
+            }
+
+            // Started now, while the browser still holds the body, and awaited
+            // only by the caller's body read on a budget of its own: the timeout
+            // bounds the match, never a body still streaming in behind headers
+            // that already arrived.
+            return new BrowserResponse
+            {
+                Url = response.Url,
+                Status = response.Status,
+                Headers = response.Headers,
+                Body = ReadBodyAsync(response),
+            };
+        }
+
         public async Task<IReadOnlyList<BrowserCookie>> GetCookiesAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -840,6 +868,27 @@ public sealed partial class WebEngine : IEngine
 
         private IBrowserContext RequireContext() =>
             _context ?? throw new EngineException(EngineErrorCodes.InvalidState, "The browser has no context.");
+
+        /// <summary>
+        /// Reads the body of a known response. A body the browser could not read
+        /// faults with <c>ACTION_FAILED</c> naming the cause, never an empty string
+        /// the server did not send. The browser reports the reason on the request
+        /// (<c>net::ERR_CONTENT_LENGTH_MISMATCH</c> for a connection cut short of the
+        /// declared length), and the error behind the read is the fallback, as for
+        /// a redirect, whose body the browser never keeps.
+        /// </summary>
+        private static async Task<string> ReadBodyAsync(IResponse response)
+        {
+            try
+            {
+                return System.Text.Encoding.UTF8.GetString(await response.BodyAsync().ConfigureAwait(false));
+            }
+            catch (PlaywrightException ex)
+            {
+                var reason = response.Request.Failure ?? WebErrors.Message(ex);
+                throw new TestException("ACTION_FAILED", "waitForResponse: response body could not be read: " + reason, ex);
+            }
+        }
 
         /// <summary>
         /// Sets a checkbox, switch, or radio to <paramref name="checked"/> with one click, as

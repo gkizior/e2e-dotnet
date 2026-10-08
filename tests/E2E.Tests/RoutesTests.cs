@@ -21,7 +21,7 @@ public sealed class RoutesTests
     [InlineData(null, "https://other/x", "https://other/x")]
     public void Resolve_follows_url_resolution(string? baseUrl, string? url, string expected)
     {
-        Assert.Equal(expected, Routes.Resolve(baseUrl, url));
+        Assert.Equal(expected, E2E.Internal.Routes.Resolve(baseUrl, url));
     }
 
     [Theory]
@@ -31,7 +31,7 @@ public sealed class RoutesTests
     [InlineData(null)]
     public void A_relative_url_without_a_base_url_needs_an_app_url(string? url)
     {
-        var error = Assert.Throws<TestException>(() => Routes.Resolve(null, url));
+        var error = Assert.Throws<TestException>(() => E2E.Internal.Routes.Resolve(null, url));
         Assert.Equal("APP_URL_REQUIRED", error.Code);
     }
 
@@ -42,7 +42,7 @@ public sealed class RoutesTests
     [InlineData("JavaScript:alert(1)")]
     public void Forbidden_schemes_are_denied(string url)
     {
-        Assert.Equal("POLICY_DENIED", Assert.Throws<TestException>(() => Routes.Resolve("http://h/", url)).Code);
-        Assert.Equal("POLICY_DENIED", Assert.Throws<TestException>(() => Routes.Resolve(null, url)).Code);
+        Assert.Equal("POLICY_DENIED", Assert.Throws<TestException>(() => E2E.Internal.Routes.Resolve("http://h/", url)).Code);
+        Assert.Equal("POLICY_DENIED", Assert.Throws<TestException>(() => E2E.Internal.Routes.Resolve(null, url)).Code);
     }
 }
