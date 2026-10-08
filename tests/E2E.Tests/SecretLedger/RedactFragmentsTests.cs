@@ -46,7 +46,7 @@ public sealed class RedactFragmentsTests
         Assert.Equal("x <secret:short><secret:long>", ledger.RedactFragments("x " + Long[..59]));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/117: base64 runs that encode a secret are not read")]
+    [Fact]
     public void Rewrites_a_base64_run_that_decodes_to_a_value_or_a_fragment_whole_and_leaves_other_runs()
     {
         var ledger = Ledger.Of(("basic", "S3cretPassw0rd"));
@@ -56,7 +56,7 @@ public sealed class RedactFragmentsTests
         Assert.Equal(clean, ledger.RedactFragments(clean));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/117: base64 runs that encode a secret are not read")]
+    [Fact]
     public void Rewrites_a_base64_run_that_starts_with_text_the_encoding_does_not()
     {
         var ledger = Ledger.Of(("basic", "S3cretPassw0rd"));
@@ -69,7 +69,7 @@ public sealed class RedactFragmentsTests
         Assert.Equal("https://app.<secret:basic>", ledger.RedactFragments("https://app.test/reset/" + encoded));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/117: base64 runs that encode a secret are not read")]
+    [Fact]
     public void Reads_a_marker_a_base64_run_already_encodes_as_page_text_not_as_a_value()
     {
         var ledger = Ledger.Of(("basic", "S3cretPassw0rd"), ("other", "Oth3r-Secret-Value"));
@@ -78,7 +78,7 @@ public sealed class RedactFragmentsTests
         Assert.Equal("<secret:basic>", ledger.RedactFragments(Base64("<secret:other> ada:S3cretPassw0rd")));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/117: base64 runs that encode a secret are not read")]
+    [Fact]
     public void Rewrites_a_whole_short_value_in_a_base64_run()
     {
         var ledger = Ledger.Of(("pin", "pw1234"));
@@ -88,7 +88,7 @@ public sealed class RedactFragmentsTests
         }
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/115: a fragment stops at the Turkish dotted I")]
+    [Fact]
     public void Folds_a_fragment_as_whole_value_matching_does_keeping_every_index()
     {
         var ledger = Ledger.Of(("turkish", "fragment-igloo-sigma-2718"), ("longS", "long-\u017fecret-\u017ftring-3141"));
@@ -98,7 +98,7 @@ public sealed class RedactFragmentsTests
         Assert.Equal("x <secret:longS> y", ledger.RedactFragments("x " + "long-\u017fecret-\u017ftring-3141"[3..18].ToUpperInvariant() + " y"));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/116: a fragment does not span a whitespace run")]
+    [Fact]
     public void Rewrites_a_fragment_spanning_a_whitespace_run_the_text_collapsed_widened_or_spelled_otherwise_run_included()
     {
         var ledger = Ledger.Of(("multi", "abcde\r\n\tfghijklmnopqrstu"));

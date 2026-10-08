@@ -29,6 +29,9 @@ internal sealed class Redactor
         CultureInfo.GetCultureInfo("lt"),
     ];
 
+    /// <summary>A base64 or base64url run long enough to encode a fragment, padding included.</summary>
+    private static readonly Regex EncodedRun = new(@"[A-Za-z0-9+/_-]{8,}={0,2}", RegexOptions.CultureInvariant, MatchTimeout);
+
     private readonly Regex? _pattern;
     private readonly Regex? _known;
     private readonly string[] _markers = [];
@@ -53,7 +56,7 @@ internal sealed class Redactor
         _pattern = new Regex(source, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, MatchTimeout);
         for (var index = 0; index < entries.Count; index++)
         {
-            var key = CaseKey(entries[index].Value);
+            var key = new string(ReadingKey(entries[index].Value).Span);
             for (var start = 0; start + FragmentLength <= key.Length; start++)
             {
                 _fragments.TryAdd(key.Substring(start, FragmentLength), index);
@@ -97,17 +100,19 @@ internal sealed class Redactor
     /// <summary>
     /// <see cref="Redact"/> that also rewrites every run of at least
     /// <see cref="FragmentLength"/> consecutive characters of a value, in any
-    /// case. For raw engine text, such as an error that quotes a value cut short.
+    /// case and with its whitespace runs collapsed, and every base64 run that
+    /// decodes to text holding a value or a fragment. For raw engine text, such
+    /// as an error that quotes a value cut short.
     /// </summary>
     public string RedactFragments(string text)
     {
-        var redacted = Redact(text);
-        if (_fragments.Count == 0)
-        {
-            return redacted;
-        }
+        return _pattern is null ? text : MapPieces(RedactPlainFragments(text), RewriteEncoded);
+    }
 
-        return MapPieces(redacted, RewriteFragments);
+    private string RedactPlainFragments(string text)
+    {
+        var redacted = Redact(text);
+        return _fragments.Count == 0 ? redacted : MapPieces(redacted, RewriteFragments);
     }
 
     private static string ValuePattern(string value)
@@ -160,6 +165,11 @@ internal sealed class Redactor
             forms.Add("SS");
         }
 
+        if (ch is "Σ" or "σ" or "ς")
+        {
+            forms.AddRange(["Σ", "σ", "ς"]);
+        }
+
         foreach (var culture in CaseCultures)
         {
             forms.Add(ch.ToUpper(culture));
@@ -180,7 +190,8 @@ internal sealed class Redactor
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var spelling in spellings)
         {
-            if (seen.Add(spelling.ToUpperInvariant()))
+            // The IgnoreCase flag does not match a final sigma through its capital, so the two stay apart.
+            if (seen.Add(string.Concat(spelling.Select(unit => unit == 'ς' ? unit : char.ToUpperInvariant(unit)))))
             {
                 yield return spelling;
             }
@@ -267,21 +278,68 @@ internal sealed class Redactor
         return string.Concat(ch.Select(unit => "\\u" + ((int)unit).ToString("x4", CultureInfo.InvariantCulture)));
     }
 
-    /// <summary>Each UTF-16 unit in one case, so a cut or fragment matches in any case. Keeps the length.</summary>
-    private static string CaseKey(string text)
+    /// <summary>
+    /// A text as a cut or a fragment of a value is compared: each UTF-16 unit
+    /// in one case (<c>ſ</c>, <c>S</c>, and <c>s</c> agree, and so do <c>İ</c>
+    /// and <c>i</c>), and each whitespace run read as one space, as an engine
+    /// that collapses whitespace shows it. A stretch of the key maps back to
+    /// the text through <see cref="Reading.At"/>.
+    /// </summary>
+    private static Reading ReadingKey(string text)
     {
-        return string.Create(text.Length, text, (span, source) =>
+        var units = new char[text.Length];
+        List<int>? breaks = null;
+        var length = 0;
+        for (var index = 0; index < text.Length; index++)
         {
-            for (var index = 0; index < source.Length; index++)
+            var unit = text[index];
+            if (!IsWhitespace(unit))
             {
-                span[index] = char.ToLowerInvariant(char.ToUpperInvariant(source[index]));
+                units[length++] = FoldCase(unit);
+                continue;
             }
-        });
+
+            var end = index + 1;
+            while (end < text.Length && IsWhitespace(text[end]))
+            {
+                end++;
+            }
+
+            units[length++] = ' ';
+            if (end - index > 1 || unit != ' ')
+            {
+                // Where the stretch after a collapsed run starts, in the key and in the text.
+                (breaks ??= []).Add(length);
+                breaks.Add(end);
+            }
+
+            index = end - 1;
+        }
+
+        return new Reading(units, length, breaks?.ToArray() ?? []);
+    }
+
+    private static char FoldCase(char unit)
+    {
+        var upper = char.ToUpperInvariant(unit);
+        return upper == '\u0130' ? 'i' : char.ToLowerInvariant(upper);
+    }
+
+    /// <summary>Whether a UTF-16 unit is whitespace a reader collapses.</summary>
+    private static bool IsWhitespace(char unit)
+    {
+        return unit is ' ' or (>= '\t' and <= '\r') or '\u00a0' or '\u1680' or (>= '\u2000' and <= '\u200a')
+            or '\u2028' or '\u2029' or '\u202f' or '\u205f' or '\u3000' or '\ufeff';
     }
 
     private string MapPieces(string text, Func<string, string> rewrite)
     {
         var pieces = _known!.Split(text);
+        if (pieces.Length == 1)
+        {
+            return rewrite(text);
+        }
+
         var builder = new StringBuilder(text.Length);
         for (var index = 0; index < pieces.Length; index++)
         {
@@ -309,29 +367,106 @@ internal sealed class Redactor
 
     private string RewriteFragments(string text)
     {
-        var key = CaseKey(text);
-        var builder = new StringBuilder(text.Length);
+        var reading = ReadingKey(text);
+        var key = reading.Span;
+        var owners = _fragments.GetAlternateLookup<ReadOnlySpan<char>>();
+        StringBuilder? builder = null;
         var kept = 0;
         var start = 0;
-        while (start + FragmentLength <= text.Length)
+        while (start + FragmentLength <= key.Length)
         {
-            if (!_fragments.TryGetValue(key.Substring(start, FragmentLength), out var owner))
+            if (!owners.TryGetValue(key.Slice(start, FragmentLength), out var owner))
             {
                 start++;
                 continue;
             }
 
             var end = start + FragmentLength;
-            while (end < text.Length && _fragments.ContainsKey(key.Substring(end + 1 - FragmentLength, FragmentLength)))
+            while (end < key.Length && owners.ContainsKey(key.Slice(end + 1 - FragmentLength, FragmentLength)))
             {
                 end++;
             }
 
-            builder.Append(text, kept, start - kept).Append(_markers[owner]);
-            kept = end;
+            builder ??= new StringBuilder(text.Length);
+            builder.Append(text, kept, reading.At(start) - kept).Append(_markers[owner]);
+            kept = reading.At(end);
             start = end;
         }
 
-        return builder.Append(text, kept, text.Length - kept).ToString();
+        return builder?.Append(text, kept, text.Length - kept).ToString() ?? text;
+    }
+
+    /// <summary>
+    /// Rewrites every base64 run whose decoded text holds a value, whole or a
+    /// fragment, as that value's marker. An encoder spreads a value's bytes over
+    /// the characters around it, so no plain-text spelling matches the run.
+    /// </summary>
+    private string RewriteEncoded(string text)
+    {
+        return EncodedRun.Replace(text, match => EncodedMarker(match.Value) ?? match.Value);
+    }
+
+    /// <summary>
+    /// The marker of the first value a run decodes to text holding. The run can
+    /// start with text the encoding does not (a URL path, a cookie prefix), so
+    /// it is decoded from each of the four offsets a base64 group can start at.
+    /// A marker the decoded text already holds is page text, not a value, so
+    /// only the text between such markers is read.
+    /// </summary>
+    private string? EncodedMarker(string run)
+    {
+        var base64 = run.Replace('-', '+').Replace('_', '/').TrimEnd('=');
+        for (var offset = 0; offset < 4 && offset < base64.Length; offset++)
+        {
+            var pieces = _known!.Split(DecodeBase64(base64[offset..]));
+            for (var index = 0; index < pieces.Length; index += 2)
+            {
+                var marker = _known.Match(RedactPlainFragments(pieces[index]));
+                if (marker.Success)
+                {
+                    return marker.Value;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Decodes unpadded base64 as UTF-8, dropping a trailing character that cannot complete a byte.</summary>
+    private static string DecodeBase64(string base64)
+    {
+        var usable = base64.Length - (base64.Length % 4 == 1 ? 1 : 0);
+        var padded = base64[..usable].PadRight((usable + 3) / 4 * 4, '=');
+        var bytes = new byte[padded.Length / 4 * 3];
+        return Convert.TryFromBase64String(padded, bytes, out var written)
+            ? Encoding.UTF8.GetString(bytes, 0, written)
+            : "";
+    }
+
+    /// <summary>A text as <see cref="ReadingKey"/> reads it, and where each of its units starts in the text.</summary>
+    private readonly record struct Reading(char[] Key, int Length, int[] Breaks)
+    {
+        public ReadOnlySpan<char> Span => Key.AsSpan(0, Length);
+
+        /// <summary>The index in the text of the unit of the key at <paramref name="index"/>; the key's length maps to the text's.</summary>
+        public int At(int index)
+        {
+            // The last stretch starting at or before the index; before the first run the key and the text agree.
+            int low = -1, high = Breaks.Length / 2 - 1;
+            while (low < high)
+            {
+                var middle = (low + high + 1) >> 1;
+                if (Breaks[2 * middle] <= index)
+                {
+                    low = middle;
+                }
+                else
+                {
+                    high = middle - 1;
+                }
+            }
+
+            return low == -1 ? index : Breaks[2 * low + 1] + index - Breaks[2 * low];
+        }
     }
 }

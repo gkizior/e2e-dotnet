@@ -18,7 +18,7 @@ public sealed class CaseTransformedFormsTests
         Assert.Equal("capitalized <secret:token>", ledger.Redact("capitalized Tok-9f3ac0deb1e7"));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/114: the final sigma forms of a Greek value stay in the text")]
+    [Fact]
     public void Redacts_full_Unicode_case_mappings_locale_specific_ones_and_a_sigma_lower_cased_at_the_end_of_a_word()
     {
         var ledger = Ledger.Of(("german", "straße-ǆungla"), ("turkish", "kilit-sifre"), ("greek", "ΚΛΕΙΔΙΣ-77"));
