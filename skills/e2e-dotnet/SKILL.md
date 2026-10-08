@@ -135,6 +135,8 @@ dotnet test
 dotnet test --filter "FullyQualifiedName~BillingTests"
 ```
 
+Runs are headless. To watch a run, set `E2E_HEADLESS=0`, as in `E2E_HEADLESS=0 dotnet test`. `WebEngineOptions.Headless` overrides it.
+
 The first passing run records each verified act in `cache.dir`. The next run replays it with no model call. `AssertAsync` and `WaitForAsync` still call the model. `cache.mode` is `read-write` locally and `read-only` when `CI` is set. Commit the cache directory if CI should replay it.
 
 ## Debug a failure

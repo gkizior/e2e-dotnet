@@ -152,6 +152,8 @@ To use an API key instead, change `agents.default` in `samples/E2E.Sample/e2e.co
 
 [`samples/E2E.XUnit.V3.Sample`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/E2E.XUnit.V3.Sample) has the same two tests for xUnit v3. Run it with `dotnet test --project samples/E2E.XUnit.V3.Sample`.
 
+Runs are headless. To watch a run in a browser window, set `E2E_HEADLESS=0`, for example `E2E_HEADLESS=0 dotnet test --project samples/E2E.Sample`.
+
 [`samples/TodoMvc`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/TodoMvc) ports Playwright's TodoMVC example to agent steps, using the NuGet packages. Its README compares the two.
 
 ## Tests
