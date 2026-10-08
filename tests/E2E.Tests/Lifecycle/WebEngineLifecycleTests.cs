@@ -242,7 +242,7 @@ public sealed class WebEngineLifecycleTests
         Assert.True(stale.Retryable);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/121: a ref acts on its element when a second one matches")]
+    [Fact]
     public async Task Reports_a_located_ref_stale_once_a_second_element_matches_it_and_acts_on_neither()
     {
         // Upstream inserts the second button from the test; the port's engine has no page script call, so
@@ -306,7 +306,7 @@ public sealed class WebEngineLifecycleTests
         Assert.True(started.Elapsed < TimeSpan.FromSeconds(3));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/120: the test-id attribute stays in a node's attributes")]
+    [Fact]
     public async Task Reports_the_configured_test_id_attribute_as_testId_on_observed_and_located_nodes_alike()
     {
         using var site = await TinySite.StartAsync("""

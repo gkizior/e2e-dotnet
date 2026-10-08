@@ -309,7 +309,7 @@ public sealed class LocatorExpect
             node =>
             {
                 _locator.DenySecureRead([node]);
-                if (!node.Attributes.TryGetValue(name, out var attribute))
+                if (node.AttributeOf(name) is not { } attribute)
                 {
                     return new Verdict(false, "attribute \"" + name + "\" absent");
                 }

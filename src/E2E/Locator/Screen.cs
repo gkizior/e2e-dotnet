@@ -311,7 +311,7 @@ public sealed class Locator
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         var node = await ResolveReadableAsync(cancellationToken).ConfigureAwait(false);
-        return node.Attributes.TryGetValue(name, out var value) ? value : null;
+        return node.AttributeOf(name);
     }
 
     /// <summary>Reads current visibility: true when exactly one visible node matches. More than one match fails.</summary>

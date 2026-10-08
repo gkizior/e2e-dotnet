@@ -603,6 +603,9 @@ public sealed partial class WebEngine : IEngine
         private ViewportSize? _viewport;
         private Dictionary<string, IFrame> _frames = new(StringComparer.Ordinal);
         private int _nextRef = 1;
+
+        // How many nodes shared each ref's role, name, and test id when the ref was first observed.
+        private Dictionary<string, int> _twins = new(StringComparer.Ordinal);
         private IBrowser _browser;
 
         // Persistent recovery: the remote default context and page the attempt rides,
@@ -692,7 +695,8 @@ public sealed partial class WebEngine : IEngine
 
             _frames = walk.Frames;
             _observed = true;
-            return new Observation { Route = Route, Roots = roots.Select(ToNode).ToList(), Truncated = walk.Truncated, ScrollPosition = walk.Scroll };
+            _twins = TwinsOf(roots, _twins);
+            return new Observation { Route = Route, Roots = roots.Select(node => ToNode(node, _testIdAttribute)).ToList(), Truncated = walk.Truncated, ScrollPosition = walk.Scroll };
         });
 
         public Task PerformAsync(SemanticNode node, LocatorAction action, CancellationToken cancellationToken) => RunAsync("perform", cancellationToken, async () =>
@@ -701,6 +705,7 @@ public sealed partial class WebEngine : IEngine
             ArgumentNullException.ThrowIfNull(action);
             RequireObservation();
             var budget = Budget(action.GetType().Name.ToLowerInvariant(), cancellationToken);
+            await RequireNoNewTwinAsync(node, budget).ConfigureAwait(false);
             var frame = _frames.GetValueOrDefault(node.Ref) ?? Page.MainFrame;
             if (frame.IsDetached)
             {
@@ -1090,6 +1095,63 @@ public sealed partial class WebEngine : IEngine
             return roots;
         }
 
+        /// <summary>
+        /// Counts the nodes that share each node's role, name, and test id. A ref keeps the count it had
+        /// when first observed: a later observation does not raise it.
+        /// </summary>
+        private static Dictionary<string, int> TwinsOf(List<WebNode> roots, Dictionary<string, int> known)
+        {
+            var nodes = Flatten(roots);
+            var twins = nodes.GroupBy(node => Likeness(node.Role, node.Name, node.TestId)).ToDictionary(group => group.Key, group => group.Count());
+            return nodes.ToDictionary(node => node.Ref, node => known.TryGetValue(node.Ref, out var first) ? first : twins[Likeness(node.Role, node.Name, node.TestId)], StringComparer.Ordinal);
+        }
+
+        private static List<WebNode> Flatten(List<WebNode> roots)
+        {
+            var nodes = new List<WebNode>();
+            var pending = new Stack<WebNode>(roots.AsEnumerable().Reverse());
+            while (pending.TryPop(out var node))
+            {
+                nodes.Add(node);
+                foreach (var child in (node.Children ?? []).AsEnumerable().Reverse())
+                {
+                    pending.Push(child);
+                }
+            }
+
+            return nodes;
+        }
+
+        private static string Likeness(string? role, string? name, string? testId) => string.Join('\0', role, name, testId);
+
+        /// <summary>
+        /// A ref names one element. When a second element now matches it as the first did, the ref is
+        /// ambiguous: acting could hit the wrong element, so it is stale.
+        /// </summary>
+        private async Task RequireNoNewTwinAsync(SemanticNode node, OperationBudget budget)
+        {
+            if (!_twins.TryGetValue(node.Ref, out var first))
+            {
+                return;
+            }
+
+            List<WebNode> roots;
+            try
+            {
+                roots = await CollectAsync(Page.MainFrame, new FrameWalk(), budget).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (WebErrors.IsPlaywright(ex))
+            {
+                throw WebErrors.NavigationStaleOr(ex, "locate " + node.Ref);
+            }
+
+            var likeness = Likeness(node.Role, node.Name, node.TestId);
+            if (Flatten(roots).Count(each => Likeness(each.Role, each.Name, each.TestId) == likeness) > first)
+            {
+                throw new EngineException(EngineErrorCodes.NodeStale, $"Node {node.Ref} now matches more than one element. Observe again.", retryable: true);
+            }
+        }
+
         /// <summary>One operation's budget: the action timeout, shared by every page call in the operation.</summary>
         private OperationBudget Budget(string label, CancellationToken cancellationToken) =>
             new(_actionTimeout, label, cancellationToken, _seams.Clock, _operationStart.Value);
@@ -1387,6 +1449,7 @@ public sealed partial class WebEngine : IEngine
             var size = _page?.ViewportSize is { } current ? new ViewportSize { Width = current.Width, Height = current.Height } : _viewport;
             _observed = false;
             _frames = new(StringComparer.Ordinal);
+            _twins = new(StringComparer.Ordinal);
             try
             {
                 var binding = await AttachWithinAsync(_playwright, _seams, _persistent!.Reconnect, _actionTimeout, started, previous, label, cancellationToken, _lifetime.Token, async candidate =>
@@ -1751,7 +1814,7 @@ public sealed partial class WebEngine : IEngine
             };
         }
 
-        private static SemanticNode ToNode(WebNode dto)
+        private static SemanticNode ToNode(WebNode dto, string testIdAttribute)
         {
             return new SemanticNode
             {
@@ -1761,6 +1824,7 @@ public sealed partial class WebEngine : IEngine
                 Text = dto.Text,
                 Value = dto.Secure ? null : dto.Value,
                 TestId = dto.TestId,
+                TestIdAttribute = dto.TestId is null ? null : testIdAttribute,
                 Placeholder = dto.Placeholder,
                 InputPurpose = dto.InputPurpose,
                 Level = dto.Level,
@@ -1777,7 +1841,7 @@ public sealed partial class WebEngine : IEngine
                 },
                 Attributes = dto.Attributes ?? new Dictionary<string, string>(StringComparer.Ordinal),
                 Rect = dto.Rect is { } rect ? new BoundingBox(rect.X, rect.Y, rect.Width, rect.Height) : null,
-                Children = dto.Children?.Select(ToNode).ToList() ?? [],
+                Children = dto.Children?.Select(child => ToNode(child, testIdAttribute)).ToList() ?? [],
             };
         }
     }

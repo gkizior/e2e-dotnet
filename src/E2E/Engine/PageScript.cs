@@ -514,6 +514,7 @@ internal static class PageScript
             const out = {};
             for (const attr of el.attributes) {
               if (secure && attr.name === "value") continue;
+              if (attr.name === testIdAttribute) continue;
               out[attr.name] = attr.value;
             }
             return out;
