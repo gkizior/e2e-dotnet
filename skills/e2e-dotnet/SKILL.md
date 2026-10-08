@@ -107,6 +107,19 @@ await Agent.ActAsync("sign in as the admin", new ActOptions
 
 Mark tests that call a real model with `[Category("RealModel")]`, so CI can skip them with `--filter "TestCategory!=RealModel"`. A test with no agent call needs no model and no config entry for one.
 
+To pin the language and time zone, so dates and numbers format the same on every machine, override `CreateEngine()` and pass `WebEngineOptions`:
+
+```csharp
+protected override IEngine CreateEngine() => new WebEngine(new WebEngineOptions
+{
+    Locale = "de-DE",
+    TimezoneId = "Europe/Berlin",
+});
+```
+
+- `Locale` is the language every attempt runs in, a BCP 47 tag: `navigator.language`, `Intl`, and `Accept-Language`. An `accept-language` entry in `Headers` beside it is `INVALID_CONFIG`; set `Locale` only.
+- `TimezoneId` is the IANA time zone every attempt runs in. Spell it with its exact case (`Europe/Berlin`, not `europe/berlin`), or it is `INVALID_CONFIG`.
+
 To test without a browser or model, override `CreateEngine()` to return a `DocumentEngine`, and `CreateModel()` to return a scripted `IAgentModel`.
 
 ## Run
