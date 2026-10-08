@@ -14,8 +14,6 @@ namespace E2E.NUnit.Tests.Browser;
 /// </summary>
 public sealed class BrowserFixtureTests : E2ETest
 {
-    private const string LabelledOutputText = "https://github.com/hardkoded/e2e-dotnet/issues/82: ToHaveText reads a labelled output's label, not its text";
-
     private static readonly E2EConfig FixtureConfig = E2EConfig.Parse(
         """{ "cache": { "mode": "off" } }""",
         AppContext.BaseDirectory,
@@ -37,7 +35,6 @@ public sealed class BrowserFixtureTests : E2ETest
     }
 
     [Test]
-    [Ignore(LabelledOutputText)]
     public async Task Reload_runs_the_page_again()
     {
         await Expect.That(Screen.GetByLabel("Loads")).ToHaveTextAsync("loads: 1");
@@ -46,7 +43,6 @@ public sealed class BrowserFixtureTests : E2ETest
     }
 
     [Test]
-    [Ignore(LabelledOutputText)]
     public async Task An_init_script_runs_before_the_page_reads_it_from_the_next_load_on()
     {
         await Expect.That(Screen.GetByLabel("Random")).ToHaveTextAsync("random: unseeded");
@@ -56,7 +52,6 @@ public sealed class BrowserFixtureTests : E2ETest
     }
 
     [Test]
-    [Ignore(LabelledOutputText)]
     public async Task The_viewport_size_is_what_the_page_measures()
     {
         await Browser.SetViewportAsync(500, 700);
@@ -66,7 +61,6 @@ public sealed class BrowserFixtureTests : E2ETest
     }
 
     [Test]
-    [Ignore(LabelledOutputText)]
     public async Task Cookies_set_from_the_test_reach_the_page_and_read_back()
     {
         await Expect.That(Screen.GetByLabel("Cookies")).ToHaveTextAsync("no cookies");

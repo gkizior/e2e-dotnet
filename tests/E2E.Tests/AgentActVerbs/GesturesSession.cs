@@ -139,8 +139,6 @@ internal static class GesturesSession
     /// <summary>
     /// The flows of upstream's record-then-replay pass this port can run: the instruction, the
     /// scripted model's tool call for each turn (null concludes the step), and the check after it.
-    /// Upstream reads each status line with toHaveText. Until #82 lands, the port reads a
-    /// labelled output's label as its text, so the checks read its value.
     /// </summary>
     public static readonly IReadOnlyList<Flow> ReplayFlows =
     [
@@ -152,18 +150,18 @@ internal static class GesturesSession
             async screen =>
             {
                 await Expect.That(screen.GetByLabel("Agree to terms")).ToBeCheckedAsync();
-                await Expect.That(screen.GetByRole("status", "Gesture state")).ToHaveValueAsync("agreed: true");
+                await Expect.That(screen.GetByRole("status", "Gesture state")).ToHaveTextAsync("agreed: true");
             }),
         new(
             "checks a radio the pick replaces with its summary",
             "pick Express delivery",
             (calls, prompt) => calls == 0 ? ModelResponses.Call("check", new { @ref = RefFor(prompt, "radio \"Express\"") }) : null,
-            screen => Expect.That(screen.GetByRole("status", "Gesture state")).ToHaveValueAsync("delivery: Express")),
+            screen => Expect.That(screen.GetByRole("status", "Gesture state")).ToHaveTextAsync("delivery: Express")),
         new(
             "scrolls a listed node into view",
             "scroll to the footnote",
             (calls, prompt) => calls == 0 ? ModelResponses.Call("scroll_to", new { @ref = RefFor(prompt, "paragraph \"Footnote\"") }) : null,
-            screen => Expect.That(screen.GetByLabel("Footnote state")).ToHaveValueAsync("in view")),
+            screen => Expect.That(screen.GetByLabel("Footnote state")).ToHaveTextAsync("in view")),
         new(
             "opens a page and comes back",
             "open the about page and come back",

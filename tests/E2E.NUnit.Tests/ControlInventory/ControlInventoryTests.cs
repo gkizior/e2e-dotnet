@@ -24,11 +24,9 @@ public sealed class ControlInventoryTests : ControlInventoryTest
     public async Task Check_picks_a_radio_the_pick_replaces_with_its_summary()
     {
         await Screen.GetByRole("radio", "Express").CheckAsync();
-        // Upstream reads toHaveText on the status line and getByText on the
-        // summary. Until #82 and #81 land, the port reads a labelled output's
-        // label as its text and lists no node for a bare span, so the status line
-        // is read as its value and the summary through the section that holds it.
-        await Expect.That(Screen.GetByLabel("Delivery state")).ToHaveValueAsync("Express");
+        await Expect.That(Screen.GetByLabel("Delivery state")).ToHaveTextAsync("Express");
+        // Upstream reads the summary with getByText. Until #81 lands, the port lists
+        // no node for a bare span, so the summary is read through the section that holds it.
         await Expect.That(Screen.GetByRole("region", "Toggles")).ToContainTextAsync("Express delivery selected");
     }
 }

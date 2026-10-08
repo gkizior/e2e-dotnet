@@ -11,7 +11,8 @@ namespace E2E.Tests.AgentActVerbs;
 /// <c>agent.act</c> grammar verbs recorded on a first run, then replayed with no model call.
 /// Upstream's replay pass also runs hover, drag, upload, two repeated-press flows, and a
 /// windowed list paged to a row. This port has no hover, drag, or upload tool, its press
-/// tool takes no repeat count, and it reads a labelled list row's label instead of its text (#82).
+/// tool takes no repeat count, and its scroll to a text fails on a windowed list
+/// (https://github.com/hardkoded/e2e-dotnet/issues/166).
 /// The engine-name and policy-event lines are not ported: the port has no engine or policy events.
 /// </summary>
 [Collection(BrowserCollection.Name)]
