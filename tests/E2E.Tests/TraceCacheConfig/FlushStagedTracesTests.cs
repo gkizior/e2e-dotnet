@@ -62,6 +62,23 @@ public sealed class FlushStagedTracesTests
     }
 
     [Fact]
+    public void Completes_the_provenance_of_a_confirmed_kept_entry_recorded_before_the_occurrence_fields_and_nothing_else()
+    {
+        var store = new MemoryCache();
+        var recorded = Trace("open billing");
+        recorded.Engine = null;
+        recorded.ParamsDigest = null;
+        recorded.CallIndex = null;
+        recorded.Agent = null;
+        store.Write(KeyA, recorded);
+
+        E2ESession.Flush(store, [Kept(KeyA, store, verified: true)], preserve: false);
+
+        var expected = Trace("open billing");
+        Assert.Equal(JsonSerializer.Serialize(expected), store.Entries[KeyA]);
+    }
+
+    [Fact]
     public void Writes_what_was_confirmed_and_leaves_every_unconfirmed_entry_as_stored_when_the_failure_implicates_nothing()
     {
         var keyC = new string('c', 64);
@@ -102,9 +119,9 @@ public sealed class FlushStagedTracesTests
         var scope = Fresh();
         var agent = new ResolvedAgent { Name = "default" };
 
-        var first = scope.ClaimKey("open billing", null, agent);
-        var repeat = scope.ClaimKey("open billing", null, agent);
-        var other = scope.ClaimKey("open billing", new Dictionary<string, object?> { ["fast"] = true }, agent);
+        var first = scope.ClaimKey("open billing", null, agent, out _);
+        var repeat = scope.ClaimKey("open billing", null, agent, out _);
+        var other = scope.ClaimKey("open billing", new Dictionary<string, object?> { ["fast"] = true }, agent, out _);
 
         Assert.Matches("^[a-f0-9]{64}$", first);
         Assert.NotEqual(first, repeat);
@@ -113,7 +130,26 @@ public sealed class FlushStagedTracesTests
 
     private static CacheEntry Trace(string summary)
     {
-        return new CacheEntry { Instruction = summary, Route = "/", EndRoute = "/customers", Actions = [new RecordedAction { Kind = "navigate", Url = "/customers" }] };
+        var entry = Step();
+        entry.Instruction = summary;
+        entry.Route = "/";
+        entry.EndRoute = "/customers";
+        entry.Actions = [new RecordedAction { Kind = "navigate", Url = "/customers" }];
+        return entry;
+    }
+
+    // The step every staged entry here was recorded for, whole.
+    private static CacheEntry Step()
+    {
+        return new CacheEntry
+        {
+            Test = "tests/a.e2e.ts::a",
+            Instruction = "open billing",
+            Engine = "web",
+            ParamsDigest = new string('e', 64),
+            CallIndex = 0,
+            Agent = "default",
+        };
     }
 
     // An act that ran live and passed, with its recording.
@@ -134,6 +170,7 @@ public sealed class FlushStagedTracesTests
             ConsumedReplay = true,
             ReplayedWhole = true,
             Entry = store.Read(key).Entry,
+            Step = Step(),
         };
     }
 
@@ -152,7 +189,7 @@ public sealed class FlushStagedTracesTests
 
     private static string Claim(AttemptScope scope, string agent, string? context)
     {
-        return scope.ClaimKey("approve the order", null, new ResolvedAgent { Name = agent, Context = context });
+        return scope.ClaimKey("approve the order", null, new ResolvedAgent { Name = agent, Context = context }, out _);
     }
 
     /// <summary>A store that keeps each entry as the JSON text it was written as.</summary>

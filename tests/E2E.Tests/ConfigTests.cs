@@ -297,14 +297,14 @@ public sealed class ConfigTests
         return name => map.GetValueOrDefault(name);
     }
 
-    private static async Task UpgradeAsync(E2ESession session)
+    internal static async Task UpgradeAsync(E2ESession session)
     {
         await session.App.OpenAsync("/settings/billing");
         await session.Agent.ActAsync("upgrade the workspace to the Pro plan");
         await session.Agent.AssertAsync("the invoice preview shows a prorated amount");
     }
 
-    private static Task<E2ESession> StartAsync(string directory, CacheMode mode, bool strict, string button, Action onAct)
+    internal static Task<E2ESession> StartAsync(string directory, CacheMode mode, bool strict, string button, Action onAct, string title = "billing > upgrades", string? context = null)
     {
         return E2ESession.StartAsync(new E2ESessionOptions
         {
@@ -329,11 +329,12 @@ public sealed class ConfigTests
             CacheMode = mode,
             CacheStrict = strict,
             ActionTimeout = TimeSpan.FromMilliseconds(300),
-            TestTitle = "billing > upgrades",
+            TestTitle = title,
+            AgentContext = context,
         });
     }
 
-    private static string TempCache() => Path.Combine(Path.GetTempPath(), "e2e-config-cache", Guid.NewGuid().ToString("n"));
+    internal static string TempCache() => Path.Combine(Path.GetTempPath(), "e2e-config-cache", Guid.NewGuid().ToString("n"));
 
     private sealed class HangingEngine : IEngine
     {

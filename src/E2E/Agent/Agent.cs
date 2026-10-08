@@ -80,8 +80,13 @@ public sealed class Agent
         using var linked = Link(cancellationToken, timeout);
         var token = linked.Token;
         _scope.Remember(options?.Params);
-        var key = _scope.ClaimKey(instruction, options?.Params, agent);
-        var pending = new PendingAct { Key = key, ParamCollision = CacheKeys.Collides(options?.Params) };
+        var key = _scope.ClaimKey(instruction, options?.Params, agent, out var callIndex);
+        var pending = new PendingAct
+        {
+            Key = key,
+            ParamCollision = CacheKeys.Collides(options?.Params),
+            Step = Provenance(instruction, options?.Params, callIndex, agent.Name),
+        };
         if (_scope.CacheEnabled)
         {
             _scope.Acts.Add(pending);
@@ -103,6 +108,11 @@ public sealed class Agent
                 throw new AgentException(
                     "REPLAY_STALE",
                     "The recording for '" + instruction + "' no longer matches (" + info.Reason + "). Strict cache mode does not run it live; re-record it without cache.strict.");
+            }
+
+            if (_scope.CacheStrict && string.Equals(info?.Reason, "no-entry", StringComparison.Ordinal))
+            {
+                FailIfRekeyed(pending, instruction);
             }
 
             if (replay.Completed)
@@ -200,7 +210,7 @@ public sealed class Agent
                     pending.Completed = true;
                     // Only a cache that writes keeps the recording, so only it waits for the screen to hold still.
                     pending.Entry = _scope.CacheWrite
-                        ? BuildEntry(instruction, start, await ObserveHeldStillAsync(token).ConfigureAwait(false), actions, options?.Params)
+                        ? BuildEntry(pending.Step!, start, await ObserveHeldStillAsync(token).ConfigureAwait(false), actions, options?.Params)
                         : null;
                     _scope.Completed.Add(summary.Length == 0 ? instruction : summary);
                     if (info is not null && pending.ParamCollision && pending.Entry is not null)
@@ -1437,10 +1447,29 @@ public sealed class Agent
         return response;
     }
 
+    /// <summary>
+    /// Under strict mode, ends a step whose key found no entry while the cache directory holds a
+    /// recording made for the same step under another key: the runner or the agent's context changed
+    /// since, and the recording no longer replays. A step whose instruction or params changed is a new
+    /// step and still runs live. A custom <see cref="IStepCache"/> is not checked.
+    /// </summary>
+    private void FailIfRekeyed(PendingAct pending, string instruction)
+    {
+        if (_scope.Cache is not FileStepCache files
+            || files.UnderAnotherKey(pending.Key, pending.Step!) is not { } previous)
+        {
+            return;
+        }
+
+        throw new AgentException(
+            "REPLAY_STALE",
+            "The recording for '" + instruction + "' sits under another cache key (" + previous + ".json), since the runner or the agent's context changed after it was recorded. Strict cache mode does not run it live; re-record it without cache.strict.");
+    }
+
     // A step that changed nothing a replay could check, no node and no route, records nothing:
     // its recording would replay on mechanics alone.
     private CacheEntry? BuildEntry(
-        string instruction,
+        CacheEntry step,
         Observation start,
         Observation end,
         List<RecordedAction> actions,
@@ -1453,16 +1482,31 @@ public sealed class Agent
             return null;
         }
 
+        var entry = new CacheEntry { Schema = step.Schema };
+        entry.SetStep(step);
+        entry.Route = start.Route;
+        entry.EndRoute = end.Route;
+        entry.Actions = actions.ToList();
+        entry.Appeared = appeared;
+        entry.Gone = gone;
+        return entry;
+    }
+
+    /// <summary>
+    /// The step an entry is recorded for, as the entry stores it. None of it is replay input, so a
+    /// secret value in the test title or agent name is masked like any other recorded string.
+    /// </summary>
+    private CacheEntry Provenance(string instruction, IReadOnlyDictionary<string, object?>? parameters, int callIndex, string agent)
+    {
         return new CacheEntry
         {
             Schema = FileStepCache.SchemaVersion,
-            Test = _scope.TestTitle,
+            Test = _scope.Redactor.Redact(_scope.TestTitle),
             Instruction = instruction.Trim(),
-            Route = start.Route,
-            EndRoute = end.Route,
-            Actions = actions.ToList(),
-            Appeared = appeared,
-            Gone = gone,
+            Engine = _scope.EnginePlatform,
+            ParamsDigest = CacheKeys.ParamsDigest(parameters),
+            CallIndex = callIndex,
+            Agent = _scope.Redactor.Redact(agent),
         };
     }
 
@@ -1952,15 +1996,16 @@ internal sealed class AttemptScope
     /// <summary>
     /// Claims one act's cache key. Each claim advances the zero-based repeat of its signature in the
     /// attempt. Only an identical act counts, with the same agent and context, so an optional step or
-    /// another agent's call does not renumber the acts after it.
+    /// another agent's call does not renumber the acts after it. <paramref name="callIndex"/> is that repeat.
     /// </summary>
-    public string ClaimKey(string instruction, IReadOnlyDictionary<string, object?>? parameters, ResolvedAgent agent)
+    public string ClaimKey(string instruction, IReadOnlyDictionary<string, object?>? parameters, ResolvedAgent agent, out int callIndex)
     {
         // The key reads the agent context as the model does, with the secrets known so far redacted.
         var context = agent.Context is null ? null : Redactor.Redact(agent.Context);
         var signature = CacheKeys.Create(EnginePlatform, TestTitle, instruction, parameters, agent.Name, context);
         var index = _callIndexes.GetValueOrDefault(signature);
         _callIndexes[signature] = index + 1;
+        callIndex = index;
         return CacheKeys.ForCall(signature, index);
     }
 
@@ -2020,6 +2065,9 @@ internal sealed class AttemptScope
 internal sealed class PendingAct
 {
     public required string Key { get; init; }
+
+    /// <summary>The step this act is, as an entry records it. Null only in tests that build an act by hand.</summary>
+    public CacheEntry? Step { get; init; }
 
     public bool Completed { get; set; }
 

@@ -293,7 +293,11 @@ public sealed class E2ESession : IAsyncDisposable
             {
                 if (act.Verified && recorded)
                 {
-                    if (!act.ReplayedWhole && !HoldsSameFlow(cache, act.Key, act.Entry!))
+                    if (act.ReplayedWhole)
+                    {
+                        CompleteProvenance(cache, act.Key, act.Step);
+                    }
+                    else if (!HoldsSameFlow(cache, act.Key, act.Entry!))
                     {
                         cache.Write(act.Key, act.Entry!);
                     }
@@ -310,6 +314,19 @@ public sealed class E2ESession : IAsyncDisposable
                 // The cache is disposable, as a replay's read is: a store that fails here costs the next run a live step.
             }
         }
+    }
+
+    // A verified whole replay proved which step an entry recorded before the provenance fields belongs to,
+    // so it writes them in. Strict mode matches only entries that record the whole step. Every other entry stays as stored.
+    private static void CompleteProvenance(IStepCache cache, string key, CacheEntry? step)
+    {
+        if (step is null || cache.Read(key).Entry is not { CallIndex: null } existing)
+        {
+            return;
+        }
+
+        existing.SetStep(step);
+        cache.Write(key, existing);
     }
 
     // Rewriting an identical flow would only churn a committed cache directory.
@@ -365,7 +382,10 @@ public sealed class E2ESessionOptions
     /// <summary><see cref="CacheMode.ReadOnly"/> replays but never writes or deletes recordings.</summary>
     public CacheMode CacheMode { get; init; } = CacheMode.ReadWrite;
 
-    /// <summary>When true, a recording that no longer matches fails the act with <c>REPLAY_STALE</c>.</summary>
+    /// <summary>
+    /// When true, a recording that no longer matches fails the act with <c>REPLAY_STALE</c>. So does a
+    /// <c>no-entry</c> miss while a <see cref="FileStepCache"/> holds a recording of the same step under another key.
+    /// </summary>
     public bool CacheStrict { get; init; }
 
     /// <summary>How long the engine may take to start. Upstream <c>launchTimeout</c>.</summary>

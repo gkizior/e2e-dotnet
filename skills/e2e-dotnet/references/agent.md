@@ -188,7 +188,8 @@ continues when the app no longer matches. `AssertAsync`, `WaitForAsync`, and
   records.
 - Commit `.e2e/cache/` to share replays with CI and teammates.
 - `cache.strict` fails a recording that no longer replays with
-  `REPLAY_STALE`. Re-record with a run without it, then commit.
+  `REPLAY_STALE`, also when the recording sits under an old key (topic
+  `running`). Re-record with a run without it, then commit.
 
 ## Make the agent yours
 

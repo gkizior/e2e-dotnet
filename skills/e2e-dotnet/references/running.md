@@ -40,6 +40,22 @@ changing the agent's `context`, records again. Upgrading to a version that
 changes how entries replay re-keys every entry, so the first run after it
 records them again.
 
+`cache.strict` fails a step whose committed recording no longer replays
+(`REPLAY_STALE`) instead of handing it to the agent. That includes a
+`no-entry` miss while the cache directory holds a recording of the same
+step under another key, for example after an `E2E` upgrade or a change
+to the agent's `context` re-keyed it. The message names that file. A custom `IStepCache` is not
+checked this way. A step never recorded (a new or edited instruction or
+params) and a retry still run live. Re-record with a `read-write` run
+without `cache.strict`, commit the changed entry, and delete the old file
+once nothing replays it.
+
+Each entry records the step it was made for: the test title, the engine,
+the instruction, a params digest, the repeat index, and the agent name. A
+secret value in the test title or agent name is masked before it is
+stored. Entries recorded before these fields existed count once a
+`read-write` run replays them.
+
 ## Output
 
 The port writes no report, trace page, video, or `junit.xml` of its own.

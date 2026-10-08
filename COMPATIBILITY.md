@@ -52,9 +52,9 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - Only the first attempt replays. A `[Retry]` attempt runs live and still records, and its acts report `missed` with reason `retry`. Each `[Repeat]` iteration is a first attempt.
 - A recording that opens with `navigate` replays from any route. Any other recording needs the start route.
 - At the end of an attempt that passed, failed, or was skipped, verified acts are written and the unverified acts that recorded or replayed are evicted. An act that missed the cache and then failed leaves its key alone. A model outage or a cancelled test writes and evicts nothing.
-- An entry that a verified replay finished, or that already holds the same flow, is not rewritten.
+- An entry that a verified replay finished, or that already holds the same flow, is not rewritten, except to write in the step fields an older entry lacks.
 - A replay waits up to `ReplayTimeout` (15 s; a .NET-only fixture property, not a config key) for each recorded target and for the recorded end state. Upstream waits 15 s for the end route and sizes the anchor wait from the recording.
-- `cache.mode` `read-only` replays but never writes or evicts, including the `end-mismatch` eviction. `off` neither replays nor records. Under `cache.strict`, a stale recording fails the act with `REPLAY_STALE` and stays in place.
+- `cache.mode` `read-only` replays but never writes or evicts, including the `end-mismatch` eviction. `off` neither replays nor records. Under `cache.strict`, a stale recording fails the act with `REPLAY_STALE` and stays in place. A `no-entry` miss fails too when the cache directory holds a recording of the same step under another key. Entries record the step as the test, the engine, the instruction, the params digest, the repeat index, and the agent; the port stores the engine where upstream stores the target id, and the instruction text where upstream stores its digest. Only an entry that records the whole step counts, and a verified whole replay in `read-write` mode writes the missing fields into an older entry. A custom `IStepCache` is not checked. The message names the runner or the agent's context, because the port key has no app identity.
 
 ## Defaults
 

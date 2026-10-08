@@ -22,9 +22,22 @@ public sealed class CacheEntry
 {
     public int Schema { get; set; } = 1;
 
+    /// <summary>The test title. A secret value in it is masked.</summary>
     public string? Test { get; set; }
 
     public string? Instruction { get; set; }
+
+    /// <summary>The engine platform the step ran on. Null on an entry recorded before it was stored.</summary>
+    public string? Engine { get; set; }
+
+    /// <summary>SHA-256 of the params as the key holds them, a placeholder for each unique value.</summary>
+    public string? ParamsDigest { get; set; }
+
+    /// <summary>Zero-based repeat of the step among identical acts in the attempt.</summary>
+    public int? CallIndex { get; set; }
+
+    /// <summary>Name of the configured agent the step ran with. A secret value in it is masked.</summary>
+    public string? Agent { get; set; }
 
     public string? Route { get; set; }
 
@@ -37,6 +50,17 @@ public sealed class CacheEntry
 
     /// <summary>Nodes on screen when the step began and gone when it passed.</summary>
     public List<RecordedTarget> Gone { get; set; } = [];
+
+    /// <summary>Sets the fields that name the step this entry is recorded for, from <paramref name="step"/>.</summary>
+    internal void SetStep(CacheEntry step)
+    {
+        Test = step.Test;
+        Instruction = step.Instruction;
+        Engine = step.Engine;
+        ParamsDigest = step.ParamsDigest;
+        CallIndex = step.CallIndex;
+        Agent = step.Agent;
+    }
 }
 
 public sealed class RecordedAction
@@ -113,6 +137,9 @@ public sealed class FileStepCache : IStepCache
 
     private readonly string _directory;
 
+    // Key hashes by the step each entry was recorded for, read once on the first strict miss that asks.
+    private Dictionary<string, List<string>>? _recordings;
+
     public FileStepCache(string directory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
@@ -172,9 +199,103 @@ public sealed class FileStepCache : IStepCache
         }
     }
 
+    /// <summary>
+    /// The key of an entry recorded for the same step as <paramref name="step"/> under a key other
+    /// than <paramref name="key"/>, or null. Only an entry that records the whole step counts: one
+    /// written before the engine, params, repeat, and agent were stored could be another call of
+    /// the same instruction. Strict mode uses it to tell a step whose key changed under its
+    /// recording from a step that was never recorded.
+    /// </summary>
+    internal string? UnderAnotherKey(string key, CacheEntry step)
+    {
+        var stepKey = StepKey(step);
+        if (stepKey is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            _recordings ??= ListRecordings();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        foreach (var candidate in _recordings.GetValueOrDefault(stepKey) ?? [])
+        {
+            // Listed once: an entry evicted since is no evidence.
+            if (!string.Equals(candidate, key, StringComparison.Ordinal) && TryRead(candidate) is not null)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private Dictionary<string, List<string>> ListRecordings()
+    {
+        var recordings = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        if (!Directory.Exists(_directory))
+        {
+            return recordings;
+        }
+
+        foreach (var path in Directory.EnumerateFiles(_directory, "*.json"))
+        {
+            var key = Path.GetFileNameWithoutExtension(path);
+            if (!IsKey(key))
+            {
+                continue;
+            }
+
+            // An entry with no actions never replays under any key, so it is never the reason a step is stale.
+            var entry = TryRead(key);
+            var stepKey = entry is { Actions.Count: > 0 } ? StepKey(entry) : null;
+            if (stepKey is not null)
+            {
+                if (!recordings.TryGetValue(stepKey, out var keys))
+                {
+                    recordings[stepKey] = keys = [];
+                }
+
+                keys.Add(key);
+            }
+        }
+
+        return recordings;
+    }
+
+    // An entry that vanished or cannot be read since the listing is no evidence either way.
+    private CacheEntry? TryRead(string key)
+    {
+        try
+        {
+            return Read(key).Entry;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string? StepKey(CacheEntry step)
+    {
+        if (step.Test is null || step.Instruction is null || step.Engine is null || step.ParamsDigest is null || step.CallIndex is null || step.Agent is null)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Serialize(new object[] { step.Test, step.Engine, step.Instruction, step.ParamsDigest, step.CallIndex.Value, step.Agent });
+    }
+
+    private static bool IsKey(string key) => key.Length > 0 && key.All(char.IsAsciiLetterOrDigit);
+
     private string PathFor(string key)
     {
-        if (key.Length == 0 || key.Any(ch => !char.IsAsciiLetterOrDigit(ch)))
+        if (!IsKey(key))
         {
             throw new TestException("INVALID_ARGUMENT", "Cache key must be ASCII letters and digits.");
         }
@@ -208,19 +329,19 @@ internal static class CacheKeys
         builder.Append("policy=").Append(ReplayPolicyVersion).Append('\n');
         builder.Append(engine).Append('\n');
         builder.Append(test).Append('\n').Append(instruction.Trim()).Append('\n');
-        if (parameters is not null)
-        {
-            foreach (var key in parameters.Keys.OrderBy(item => item, StringComparer.Ordinal))
-            {
-                builder.Append(key).Append('=').Append(Canonical(parameters[key])).Append('\n');
-            }
-        }
+        builder.Append(Params(parameters));
 
         // The agent acts as one person with one context, so another agent, or a changed context, records again.
         // The context enters as a digest of its redacted text, so a secret in it contributes only its name.
         builder.Append("agent=").Append(agent).Append('\n');
         builder.Append("context=").Append(Hash(agentContext ?? "")).Append('\n');
         return Hash(builder.ToString());
+    }
+
+    /// <summary>SHA-256 of the params as <see cref="Create"/> keys them, which an entry records as its provenance.</summary>
+    public static string ParamsDigest(IReadOnlyDictionary<string, object?>? parameters)
+    {
+        return Hash(Params(parameters));
     }
 
     /// <summary>
@@ -323,6 +444,20 @@ internal static class CacheKeys
         }
 
         return false;
+    }
+
+    private static string Params(IReadOnlyDictionary<string, object?>? parameters)
+    {
+        var builder = new StringBuilder();
+        if (parameters is not null)
+        {
+            foreach (var key in parameters.Keys.OrderBy(item => item, StringComparer.Ordinal))
+            {
+                builder.Append(key).Append('=').Append(Canonical(parameters[key])).Append('\n');
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static string Hash(string text)
