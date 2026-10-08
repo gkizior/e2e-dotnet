@@ -8,9 +8,11 @@ This repo is a community .NET port of [tester-army/e2e](https://github.com/teste
 | --- | --- |
 | `src/E2E` | SDK: tests, expect, agent, cache, document engine, Playwright `WebEngine` |
 | `src/E2E.NUnit` | NUnit fixture `E2ETest` |
+| `src/E2E.XUnit.V3` | xUnit v3 fixture `E2ETest` |
 | `tests/E2E.Tests` | Unit tests. No API key. The Chromium tests install the browser on the first launch |
 | `tests/E2E.Agent.Tests` | Agent tests against a real model, ported from upstream's `apps/testbed/tests-agent`. They serve upstream's playground pages on a loopback port. All are in the `RealModel` category and need a GitHub Copilot login |
 | `samples/E2E.Sample` | NUnit tests against the live Dariten demo. The agent test needs a GitHub Copilot login (`dotnet run --project src/E2E.Cli -- login github-copilot`) |
+| `samples/E2E.XUnit.V3.Sample` | The `samples/E2E.Sample` tests, written for xUnit v3 |
 
 ## Development
 
@@ -30,6 +32,6 @@ Do not commit API keys.
 
 ## Release
 
-Push a version tag such as `v0.1.0` (previews use `v0.1.0-preview.1`). `.github/workflows/publish.yml` tests, packs `E2E` and `E2E.NUnit`, and pushes them to nuget.org with trusted publishing. The policy is repository owner `hardkoded`, repository `e2e-dotnet`, workflow file `publish.yml`. The workflow has to be on the default branch before the tag is pushed.
+Push a version tag such as `v0.1.0` (previews use `v0.1.0-preview.1`). `.github/workflows/publish.yml` tests, packs `E2E`, `E2E.NUnit`, and `E2E.XUnit.V3`, and pushes them to nuget.org with trusted publishing. The policy is repository owner `hardkoded`, repository `e2e-dotnet`, workflow file `publish.yml`. The workflow has to be on the default branch before the tag is pushed.
 
 The same tag runs `.github/workflows/docs.yml`, which builds the DocFX site in `docs/` and deploys it to GitHub Pages. Build it locally with `dotnet tool install --global docfx`, then `docfx docs/docfx.json --serve`.

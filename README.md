@@ -12,7 +12,7 @@ Docs and API reference: https://hardkoded.github.io/e2e-dotnet/
 
 ```bash
 dotnet add package E2E
-dotnet add package E2E.NUnit
+dotnet add package E2E.NUnit   # or E2E.XUnit.V3 for xUnit v3
 ```
 
 The library targets `net10.0` and includes `WebEngine`, which drives Chromium through [Microsoft.Playwright](https://playwright.dev/dotnet/). Firefox and WebKit are not exposed yet. The first `WebEngine` launch in a process installs Chromium, so the first run needs network access. A headless run installs only the headless shell, the build it launches. When that build is already installed, the step does nothing. The install keeps other browsers in the Playwright cache; set `PLAYWRIGHT_SKIP_BROWSER_GC=0` to let it remove them. On a machine that already has the browser, or has no network, set `E2E_SKIP_BROWSER_INSTALL=1` to skip it, and install it yourself from the build output:
@@ -45,6 +45,18 @@ public sealed class BillingTests : E2ETest
 ```
 
 `E2ETest` starts a `WebEngine` session for each `[Test]`. Override `CreateEngine` with a `DocumentEngine` when the test should not open a browser. An `act` that a later `assert`, `waitFor`, or locator `Expect` verifies is recorded. The next run replays those actions with no model calls until the screen no longer matches. When the test ends, verified acts are written and unverified acts that recorded or replayed are evicted, whether it passed, failed, or was skipped. `[Retry]` runs the later attempts live, and they still record. Tests that never call the agent need no model.
+
+### xUnit v3
+
+`E2E.XUnit.V3.E2ETest` has the same members and reads the same config. Write `[Fact]` or `[Theory]` tests. It differs from the NUnit fixture in a few ways:
+
+- `Expect.Soft` failures fail the test when it is disposed, in one `ASSERTION_FAILED`.
+- xUnit has no retry, so every test is a first attempt and can replay.
+- The session already stops on `Xunit.TestContext.Current.CancellationToken`, so a call does not need it. You can turn off the analyzer rule `xUnit1051` for E2E calls.
+- `Expect.Poll` takes a predicate through `ToSatisfyAsync`. There is no `ToMatchAsync`.
+- `E2E` and `Xunit` both have a `TestContext`. With both `using` lines, write `Xunit.TestContext.Current` for the xUnit one.
+
+xUnit v2 is not supported. It cannot read a test's result during cleanup, and the replay cache needs that result.
 
 ## Config
 
@@ -138,6 +150,8 @@ dotnet test --project samples/E2E.Sample
 
 To use an API key instead, change `agents.default` in `samples/E2E.Sample/e2e.config.json`, for example to `"provider": "openai", "model": "gpt-4.1-mini"` with `OPENAI_API_KEY` set.
 
+[`samples/E2E.XUnit.V3.Sample`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/E2E.XUnit.V3.Sample) has the same two tests for xUnit v3. Run it with `dotnet test --project samples/E2E.XUnit.V3.Sample`.
+
 [`samples/TodoMvc`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/TodoMvc) ports Playwright's TodoMVC example to agent steps, using the NuGet packages. Its README compares the two.
 
 ## Tests
@@ -154,6 +168,7 @@ Most unit tests use `DocumentEngine` and a scripted model. No test needs an API 
 | --- | --- |
 | `e2e` test, expect, agent, cache, and `@e2e-dev/web` | `E2E` (`WebEngine`) |
 | NUnit | `E2E.NUnit` (`E2ETest`) |
+| xUnit v3 | `E2E.XUnit.V3` (`E2ETest`) |
 | `e2e login`, `e2e logout`, `e2e models` | `E2E.Cli` (the `e2e` .NET tool) |
 
 `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, and `@e2e-dev/eas` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).

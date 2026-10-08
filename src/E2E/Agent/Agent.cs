@@ -60,7 +60,10 @@ public sealed class Agent
         _scope = scope;
     }
 
-    public async Task<ActResult> ActAsync(string instruction, ActOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<ActResult> ActAsync(string instruction, ActOptions? options = null, CancellationToken cancellationToken = default) =>
+        _scope.Track(ActCoreAsync(instruction, options, cancellationToken));
+
+    private async Task<ActResult> ActCoreAsync(string instruction, ActOptions? options, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instruction);
         CheckInstruction(instruction);
@@ -230,10 +233,13 @@ public sealed class Agent
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         var agent = _scope.Select(options?.Agent);
-        return JudgeAsync(statement, ResolveTimeout(options?.Timeout, agent.JudgmentTimeout), agent, cancellationToken);
+        return _scope.Track(JudgeAsync(statement, ResolveTimeout(options?.Timeout, agent.JudgmentTimeout), agent, cancellationToken));
     }
 
-    public async Task WaitForAsync(string statement, WaitForOptions? options = null, CancellationToken cancellationToken = default)
+    public Task WaitForAsync(string statement, WaitForOptions? options = null, CancellationToken cancellationToken = default) =>
+        _scope.Track(WaitForCoreAsync(statement, options, cancellationToken));
+
+    private async Task WaitForCoreAsync(string statement, WaitForOptions? options, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         var agent = _scope.Select(options?.Agent);
@@ -302,7 +308,10 @@ public sealed class Agent
     /// members and nullable annotations respected. An answer that does not gets one repair round, then
     /// <c>MODEL_OUTPUT_INVALID</c>.
     /// </summary>
-    public async Task<T> ExtractAsync<T>(string instruction, ExtractOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<T> ExtractAsync<T>(string instruction, ExtractOptions? options = null, CancellationToken cancellationToken = default) =>
+        _scope.Track(ExtractCoreAsync<T>(instruction, options, cancellationToken));
+
+    private async Task<T> ExtractCoreAsync<T>(string instruction, ExtractOptions? options, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instruction);
         var agent = _scope.Select(options?.Agent);
@@ -1740,6 +1749,40 @@ public sealed class CacheInfo
 internal sealed class AttemptScope
 {
     private readonly Dictionary<string, int> _callIndexes = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// An agent call in this attempt hit a model outage or a stale strict replay. The cache keeps its
+    /// entries even when the host reports the failure without the original exception.
+    /// </summary>
+    public bool KeepCache { get; private set; }
+
+    public static bool KeepsCache(Exception? error) => error is AgentException { Code: "MODEL_UNAVAILABLE" or "MODEL_PROVIDER_FAILED" or "REPLAY_STALE" };
+
+    public async Task Track(Task call)
+    {
+        try
+        {
+            await call.ConfigureAwait(false);
+        }
+        catch (AgentException ex) when (KeepsCache(ex))
+        {
+            KeepCache = true;
+            throw;
+        }
+    }
+
+    public async Task<T> Track<T>(Task<T> call)
+    {
+        try
+        {
+            return await call.ConfigureAwait(false);
+        }
+        catch (AgentException ex) when (KeepsCache(ex))
+        {
+            KeepCache = true;
+            throw;
+        }
+    }
 
     public required IEngineSession Session { get; init; }
 

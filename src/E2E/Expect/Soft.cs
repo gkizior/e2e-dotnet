@@ -90,6 +90,18 @@ internal sealed class SoftFailures
         _handler = handler;
     }
 
+    /// <summary>Whether a failure is kept and not yet closed. Failures sent to a handler are not kept.</summary>
+    public bool Any
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _failures.Count > 0;
+            }
+        }
+    }
+
     public bool Keep(TestException error)
     {
         lock (_gate)

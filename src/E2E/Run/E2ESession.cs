@@ -101,6 +101,8 @@ public sealed class E2ESession : IAsyncDisposable
 
         // A later attempt never replays but still records, so the attempt number does not turn the cache off.
         var cacheOn = options.CacheEnabled && options.CacheMode != CacheMode.Off && options.Cache is not null;
+        var softFailures = new SoftFailures(options.OnSoftFailure);
+        var testFailed = options.TestFailed ?? (static () => false);
         var scope = new AttemptScope
         {
             Session = engine,
@@ -119,7 +121,7 @@ public sealed class E2ESession : IAsyncDisposable
             ReplayTimeout = options.ReplayTimeout,
             StepTimeout = options.StepTimeout,
             Token = () => timeout.Token,
-            TestFailed = options.TestFailed ?? (static () => false),
+            TestFailed = () => softFailures.Any || testFailed(),
         };
         var app = new App(engine, options.BaseUrl, () => timeout.Token);
         var browser = new Browser(engine, options.Engine.Platform, options.BaseUrl, options.ActionTimeout, options.AssertionTimeout, () => timeout.Token);
@@ -131,7 +133,7 @@ public sealed class E2ESession : IAsyncDisposable
             scope.MarkVerified,
             options.ActionTimeout,
             options.AssertionTimeout,
-            new SoftFailures(options.OnSoftFailure));
+            softFailures);
         var context = new TestContext
         {
             App = app,
@@ -273,7 +275,7 @@ public sealed class E2ESession : IAsyncDisposable
         }
 
         // A stale recording under strict mode stays in place, so the next strict run fails the same way until someone re-records it.
-        var preserve = error is AgentException { Code: "MODEL_UNAVAILABLE" or "MODEL_PROVIDER_FAILED" or "REPLAY_STALE" };
+        var preserve = AttemptScope.KeepsCache(error) || _scope.KeepCache;
         foreach (var act in _scope.Acts)
         {
             var recorded = act.Completed && act.Entry is { Actions.Count: > 0 } && !act.ParamCollision;

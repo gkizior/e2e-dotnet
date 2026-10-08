@@ -1,6 +1,6 @@
 ---
 name: e2e-dotnet
-description: Write, run, and debug agentic end-to-end tests with the .NET port of e2e (NuGet packages E2E, E2E.NUnit, E2E.Cli). Use when adding an E2E test, setting up e2e.config.json or a model provider, or fixing a failing agent step, locator expectation, or replay-cache miss.
+description: Write, run, and debug agentic end-to-end tests with the .NET port of e2e (NuGet packages E2E, E2E.NUnit, E2E.XUnit.V3, E2E.Cli). Use when adding an E2E test, setting up e2e.config.json or a model provider, or fixing a failing agent step, locator expectation, or replay-cache miss.
 ---
 
 # e2e for .NET
@@ -14,6 +14,8 @@ dotnet new nunit -n MyApp.E2E
 dotnet add MyApp.E2E package E2E
 dotnet add MyApp.E2E package E2E.NUnit
 ```
+
+For xUnit v3, create the project with `dotnet new install xunit.v3.templates` and `dotnet new xunit3`, then add the `E2E.XUnit.V3` package. Derive from `E2E.XUnit.V3.E2ETest` and write `[Fact]` tests. The members below are the same. `Expect.Soft` failures fail the test when it is disposed, and `Expect.Poll` uses `ToSatisfyAsync(predicate)`. xUnit v2 is not supported.
 
 Targets `net10.0`. The first browser launch in a test run installs Chromium, so the first run needs network access. On a CI image that already has the browser, or with no network, set `E2E_SKIP_BROWSER_INSTALL=1` and install it yourself with `pwsh bin/Debug/net10.0/playwright.ps1 install chromium`.
 

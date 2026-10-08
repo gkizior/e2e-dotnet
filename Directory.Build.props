@@ -22,7 +22,7 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <Deterministic>true</Deterministic>
     <MinVerTagPrefix>v</MinVerTagPrefix>
-    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
+    <MinVerMinimumMajorMinor>0.2</MinVerMinimumMajorMinor>
     <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
     <NoWarn>$(NoWarn);CA1014;CA1848;CA2007;CS1591;NU5104;NU1507;IDE0005</NoWarn>
   </PropertyGroup>
