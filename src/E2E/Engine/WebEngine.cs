@@ -123,14 +123,28 @@ public sealed class WebInitScript
     }
 }
 
-/// <summary>Attach to a remote Chromium over CDP instead of launching one.</summary>
+/// <summary>
+/// Attach to a remote Chromium over CDP instead of launching one. Supplying
+/// <see cref="ReconnectEndpoint"/> opts into a persistent context instead.
+/// </summary>
 public sealed class WebConnectOptions
 {
     /// <summary>
     /// Resolves the CDP endpoint (a <c>ws://</c>, <c>wss://</c>, or <c>http://</c> DevTools URL).
     /// Called when each attempt starts, so a hosted endpoint provisioned per run can be used.
+    /// With <see cref="ReconnectEndpoint"/>, each call must provision a fresh, dedicated browser.
     /// </summary>
     public required Func<CancellationToken, Task<string>> CdpEndpoint { get; init; }
+
+    /// <summary>
+    /// Opts into a dedicated persistent remote context. <see cref="CdpEndpoint"/> provisions
+    /// a fresh browser at each attempt start; this resolver reconnects to that
+    /// same browser after a transport drop. Called once before the next
+    /// operation, within its budget. The original browser and page must survive.
+    /// Dispatched operations are never retried. The host owns browser cleanup.
+    /// Context replacement, headers, basicAuth, userAgent, locale, and timezoneId are unavailable in this mode.
+    /// </summary>
+    public Func<CancellationToken, Task<string>>? ReconnectEndpoint { get; init; }
 }
 
 /// <summary>Options of the browser engine: how it drives the app.</summary>
@@ -208,6 +222,10 @@ public sealed partial class WebEngine : IEngine
     /// <summary>The configured headers, names lower-cased so they replace the browser's own; null when none are set.</summary>
     private readonly Dictionary<string, string>? _siteHeaders;
 
+    // The default contexts earlier attempts rode, so a cdpEndpoint that hands one back is refused.
+    // Process-wide: a test fixture creates an engine for each attempt, retries included.
+    private static readonly HashSet<string> UsedContexts = new(StringComparer.Ordinal);
+
     public WebEngine(bool? headless = null)
         : this(new WebEngineOptions { Headless = headless })
     {
@@ -234,6 +252,12 @@ public sealed partial class WebEngine : IEngine
 
     public string Platform => "web";
 
+    /// <summary>Attaches to a CDP endpoint; tests replace it to stand in for the remote browser.</summary>
+    internal Func<IPlaywright, string, TimeSpan, CancellationToken, Task<IBrowser>> ConnectCdp { get; init; } = BrowserConnection.ConnectCdpAsync;
+
+    /// <summary>The clock operation budgets read; tests replace it to control elapsed time.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
     public string Version => EngineVersion;
 
     public EngineCapabilities Capabilities =>
@@ -257,19 +281,36 @@ public sealed partial class WebEngine : IEngine
             }
 
             var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
+            var app = Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
+            var seams = new SessionSeams(Clock, ConnectCdp);
+            if (_options.Connect is { ReconnectEndpoint: { } reconnect } persistent)
+            {
+                return await WebSession.StartPersistentAsync(
+                    playwright,
+                    new PersistentConnect(persistent.CdpEndpoint, reconnect, UsedContexts),
+                    options.ActionTimeout,
+                    _options,
+                    initScripts,
+                    context => InstallSiteHeadersAsync(context, app),
+                    url => SiteHeadersFor(url, app),
+                    seams,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             IBrowser browser;
             if (_options.Connect is { } connect)
             {
                 var endpoint = await connect.CdpEndpoint(cancellationToken).ConfigureAwait(false);
-                browser = await playwright.Chromium.ConnectOverCDPAsync(endpoint).ConfigureAwait(false);
+
+                // As upstream, a connect that never answers is bounded by the browser launch budget.
+                browser = await ConnectCdp(playwright, endpoint, E2EDefaults.LaunchTimeout, cancellationToken).ConfigureAwait(false);
             }
             else
             {
                 browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = _headless }).ConfigureAwait(false);
             }
 
-            var app = Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
-            var session = new WebSession(playwright, browser, options.ActionTimeout, _options, initScripts, context => InstallSiteHeadersAsync(context, app), url => SiteHeadersFor(url, app));
+            var session = new WebSession(playwright, browser, options.ActionTimeout, _options, initScripts, context => InstallSiteHeadersAsync(context, app), url => SiteHeadersFor(url, app), seams);
             await session.NewContextAsync().ConfigureAwait(false);
             return session;
         }
@@ -311,7 +352,7 @@ public sealed partial class WebEngine : IEngine
         return install(["install", .. InstallArgs(headed)]);
     }
 
-    private static async Task EnsureChromiumAsync(bool headed, CancellationToken cancellationToken)
+    internal static async Task EnsureChromiumAsync(bool headed, CancellationToken cancellationToken)
     {
         var skip = Environment.GetEnvironmentVariable(SkipInstallVariable);
         if (string.Equals(skip, "1", StringComparison.Ordinal) || string.Equals(skip, "true", StringComparison.OrdinalIgnoreCase))
@@ -370,6 +411,25 @@ public sealed partial class WebEngine : IEngine
                 throw new EngineException("INVALID_CONFIG", InitScriptAt(index) + problem + ".");
             }
         }
+
+        // The options applied when the engine creates a browser context, which a persistent context never is.
+        if (options.Connect?.ReconnectEndpoint is not null)
+        {
+            var creationOptions = new (string Name, bool Set)[]
+            {
+                ("headers", options.Headers is not null),
+                ("basicAuth", options.BasicAuth is not null),
+                ("userAgent", options.UserAgent is not null),
+                ("locale", options.Locale is not null),
+                ("timezoneId", options.TimezoneId is not null),
+            }.Where(option => option.Set).Select(option => option.Name).ToList();
+            if (creationOptions.Count > 0)
+            {
+                throw new EngineException(
+                    "INVALID_CONFIG",
+                    "connect.reconnectEndpoint uses a persistent context; " + string.Join(", ", creationOptions) + (creationOptions.Count == 1 ? " requires" : " require") + " a newly created context");
+            }
+        }
     }
 
     private static string InitScriptAt(int index) => "initScripts[" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "] ";
@@ -389,6 +449,10 @@ public sealed partial class WebEngine : IEngine
 
         return sources;
     }
+
+    /// <summary>The live page and context behind a web session, for tests that drive the browser out of band; null for any other session.</summary>
+    internal static LiveSurface? SurfaceOf(IEngineSession session) =>
+        session is WebSession web ? new LiveSurface(() => web.LivePage, () => web.LiveContext) : null;
 
     // Refuses a locale that is not a BCP 47 tag, and one an accept-language
     // header would override on the app's host while navigator.language kept
@@ -511,15 +575,21 @@ public sealed partial class WebEngine : IEngine
     private sealed class WebSession : IBrowserSession
     {
         private readonly IPlaywright _playwright;
-        private readonly IBrowser _browser;
         private readonly TimeSpan _actionTimeout;
         private readonly string _testIdAttribute;
         private readonly WebEngineOptions _options;
         private readonly Func<IBrowserContext, Task> _setUpContext;
         private readonly Func<string, IReadOnlyDictionary<string, string>?> _siteHeaders;
+        private readonly SessionSeams _seams;
+        private readonly PersistentConnect? _persistent;
+        private readonly CancellationTokenSource _lifetime = new();
+        private readonly Lock _recoveryLock = new();
+
+        // When an operation that reconnected first began: its budget, which every page call in it shares, started then.
+        private readonly AsyncLocal<long?> _operationStart = new();
 
         // Attempt-scoped routes, registered on the context so they cover every page,
-        // and registered again on each context ClearStateAsync opens.
+        // and registered again on each context ClearStateAsync opens or a reconnect attaches.
         private readonly List<(Func<string, bool> Matches, Func<IRoute, Task> PlaywrightHandler, Func<IBrowserRoute, Task> Handler)> _routes = [];
 
         // The attempt's init scripts, configured then added, applied to each context the session opens.
@@ -530,8 +600,20 @@ public sealed partial class WebEngine : IEngine
         private ViewportSize? _viewport;
         private Dictionary<string, IFrame> _frames = new(StringComparer.Ordinal);
         private int _nextRef = 1;
+        private IBrowser _browser;
 
-        public WebSession(IPlaywright playwright, IBrowser browser, TimeSpan actionTimeout, WebEngineOptions options, List<string> initScripts, Func<IBrowserContext, Task> setUpContext, Func<string, IReadOnlyDictionary<string, string>?> siteHeaders)
+        // Persistent recovery: the remote default context and page the attempt rides,
+        // the shared reconnect in flight, the failure that ended the attempt, and
+        // whether an observation was captured since the last reconnect.
+        private string? _contextId;
+        private TargetIdentity? _target;
+        private Task? _recovery;
+        private Exception? _failure;
+        private bool _observed = true;
+        private bool _firstPage = true;
+        private bool _disposed;
+
+        public WebSession(IPlaywright playwright, IBrowser browser, TimeSpan actionTimeout, WebEngineOptions options, List<string> initScripts, Func<IBrowserContext, Task> setUpContext, Func<string, IReadOnlyDictionary<string, string>?> siteHeaders, SessionSeams seams, PersistentConnect? persistent = null)
         {
             _playwright = playwright;
             _initScripts = initScripts;
@@ -539,6 +621,8 @@ public sealed partial class WebEngine : IEngine
             _options = options;
             _setUpContext = setUpContext;
             _siteHeaders = siteHeaders;
+            _seams = seams;
+            _persistent = persistent;
             _testIdAttribute = options.TestIdAttribute;
             _viewport = options.Viewport is { } viewport ? new ViewportSize { Width = viewport.Width, Height = viewport.Height } : null;
             _actionTimeout = actionTimeout;
@@ -555,14 +639,18 @@ public sealed partial class WebEngine : IEngine
 
         private float ActionMs => (float)_actionTimeout.TotalMilliseconds;
 
+        internal IPage LivePage => Page;
+
+        internal IBrowserContext LiveContext => RequireContext();
+
         public string Route => Routes.PathOf(Page.Url);
 
-        public async Task OpenAsync(string url, CancellationToken cancellationToken)
+        public Task OpenAsync(string url, CancellationToken cancellationToken) => RunAsync("navigation", cancellationToken, async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (_page is null)
+                if (_page is null || _page.IsClosed)
                 {
                     await NewPageAsync(RequireContext()).ConfigureAwait(false);
                 }
@@ -579,9 +667,9 @@ public sealed partial class WebEngine : IEngine
             {
                 throw WebErrors.Translate(ex, "navigate to " + url);
             }
-        }
+        });
 
-        public async Task<Observation> ObserveAsync(CancellationToken cancellationToken)
+        public Task<Observation> ObserveAsync(CancellationToken cancellationToken) => RunAsync("observe", cancellationToken, async () =>
         {
             var budget = Budget("observe", cancellationToken);
             var walk = new FrameWalk();
@@ -596,13 +684,15 @@ public sealed partial class WebEngine : IEngine
             }
 
             _frames = walk.Frames;
+            _observed = true;
             return new Observation { Route = Route, Roots = roots.Select(ToNode).ToList(), Truncated = walk.Truncated, ScrollPosition = walk.Scroll };
-        }
+        });
 
-        public async Task PerformAsync(SemanticNode node, LocatorAction action, CancellationToken cancellationToken)
+        public Task PerformAsync(SemanticNode node, LocatorAction action, CancellationToken cancellationToken) => RunAsync("perform", cancellationToken, async () =>
         {
             ArgumentNullException.ThrowIfNull(node);
             ArgumentNullException.ThrowIfNull(action);
+            RequireObservation();
             var budget = Budget(action.GetType().Name.ToLowerInvariant(), cancellationToken);
             var frame = _frames.GetValueOrDefault(node.Ref) ?? Page.MainFrame;
             if (frame.IsDetached)
@@ -643,14 +733,19 @@ public sealed partial class WebEngine : IEngine
             {
                 throw WebErrors.ClassifyAction(ex, action);
             }
-        }
+        });
 
-        public Task PressAsync(string key, CancellationToken cancellationToken)
+        public Task PressAsync(string key, CancellationToken cancellationToken) => RunAsync("keyboard.press", cancellationToken, () =>
         {
+            RequireObservation();
             return InputAsync(() => Page.Keyboard.PressAsync(key), "press " + key, cancellationToken);
-        }
+        });
 
-        public async Task BackAsync(CancellationToken cancellationToken)
+        // Direct test input: it needs no observation, so it stays available after a reconnect.
+        public Task KeyboardPressAsync(string key, CancellationToken cancellationToken) => RunAsync("keyboard.press", cancellationToken, () =>
+            InputAsync(() => Page.Keyboard.PressAsync(key), "press " + key, cancellationToken));
+
+        public Task BackAsync(CancellationToken cancellationToken) => RunAsync("back", cancellationToken, async () =>
         {
             var budget = Budget("back", cancellationToken);
             try
@@ -661,9 +756,9 @@ public sealed partial class WebEngine : IEngine
             {
                 throw WebErrors.Translate(ex, "back");
             }
-        }
+        });
 
-        public async Task ForwardAsync(CancellationToken cancellationToken)
+        public Task ForwardAsync(CancellationToken cancellationToken) => RunAsync("forward", cancellationToken, async () =>
         {
             var budget = Budget("forward", cancellationToken);
             try
@@ -674,9 +769,9 @@ public sealed partial class WebEngine : IEngine
             {
                 throw WebErrors.Translate(ex, "forward");
             }
-        }
+        });
 
-        public async Task ReloadAsync(CancellationToken cancellationToken)
+        public Task ReloadAsync(CancellationToken cancellationToken) => RunAsync("reload", cancellationToken, async () =>
         {
             var budget = Budget("reload", cancellationToken);
             try
@@ -687,9 +782,9 @@ public sealed partial class WebEngine : IEngine
             {
                 throw WebErrors.Translate(ex, "reload");
             }
-        }
+        });
 
-        public async Task RestartAsync(CancellationToken cancellationToken)
+        public Task RestartAsync(CancellationToken cancellationToken) => RunAsync("restart", cancellationToken, async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             var context = RequireContext();
@@ -700,11 +795,18 @@ public sealed partial class WebEngine : IEngine
             }
 
             await NewPageAsync(context).ConfigureAwait(false);
-        }
+        });
 
         public async Task ClearStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_persistent is not null)
+            {
+                throw new EngineException(
+                    EngineErrorCodes.UnsupportedCapability,
+                    "app.clearState() is unavailable with connect.reconnectEndpoint: it replaces the browser context, and the attempt rides one persistent context");
+            }
+
             ThrowPending();
             var context = _context;
             _context = null;
@@ -718,18 +820,18 @@ public sealed partial class WebEngine : IEngine
             await NewPageAsync(_context!).ConfigureAwait(false);
         }
 
-        public Task<string> GetUrlAsync(CancellationToken cancellationToken)
+        public Task<string> GetUrlAsync(CancellationToken cancellationToken) => RunAsync("url", cancellationToken, () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(Page.Url);
-        }
+        });
 
-        public Task<string> GetTitleAsync(CancellationToken cancellationToken)
+        public Task<string> GetTitleAsync(CancellationToken cancellationToken) => RunAsync("title", cancellationToken, () =>
         {
             return Budget("title", cancellationToken).WithinAsync(Page.TitleAsync());
-        }
+        });
 
-        public async Task<System.Text.Json.JsonElement?> EvaluateAsync(string expression, object? arg, bool hasArg, CancellationToken cancellationToken)
+        public Task<System.Text.Json.JsonElement?> EvaluateAsync(string expression, object? arg, bool hasArg, CancellationToken cancellationToken) => RunAsync("evaluate", cancellationToken, async () =>
         {
             var budget = Budget("evaluate", cancellationToken);
             try
@@ -743,9 +845,9 @@ public sealed partial class WebEngine : IEngine
             {
                 throw new TestException("EVALUATE_FAILED", ex.Message, ex);
             }
-        }
+        });
 
-        public async Task<BrowserResponse> WaitForResponseAsync(Func<string, bool> matches, TimeSpan timeout, CancellationToken cancellationToken)
+        public Task<BrowserResponse> WaitForResponseAsync(Func<string, bool> matches, TimeSpan timeout, CancellationToken cancellationToken) => RunAsync("waitForResponse", cancellationToken, async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             IResponse response;
@@ -771,18 +873,18 @@ public sealed partial class WebEngine : IEngine
                 Headers = response.Headers,
                 Body = ReadBodyAsync(response),
             };
-        }
+        });
 
-        public async Task RouteAsync(Func<string, bool> matches, Func<IBrowserRoute, Task> handler, CancellationToken cancellationToken)
+        public Task RouteAsync(Func<string, bool> matches, Func<IBrowserRoute, Task> handler, CancellationToken cancellationToken) => RunAsync("route", cancellationToken, async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             var context = RequireContext();
             Func<IRoute, Task> playwrightHandler = route => HandleRouteAsync(route, handler);
             await context.RouteAsync(matches, playwrightHandler).ConfigureAwait(false);
             _routes.Add((matches, playwrightHandler, handler));
-        }
+        });
 
-        public async Task UnrouteAsync(Func<IBrowserRoute, Task> handler, CancellationToken cancellationToken)
+        public Task UnrouteAsync(Func<IBrowserRoute, Task> handler, CancellationToken cancellationToken) => RunAsync("unroute", cancellationToken, async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             var context = RequireContext();
@@ -795,9 +897,9 @@ public sealed partial class WebEngine : IEngine
             var (matches, playwrightHandler, _) = _routes[index];
             _routes.RemoveAt(index);
             await context.UnrouteAsync(matches, playwrightHandler).ConfigureAwait(false);
-        }
+        });
 
-        public async Task<IReadOnlyList<BrowserCookie>> GetCookiesAsync(CancellationToken cancellationToken)
+        public Task<IReadOnlyList<BrowserCookie>> GetCookiesAsync(CancellationToken cancellationToken) => RunAsync<IReadOnlyList<BrowserCookie>>("cookies", cancellationToken, async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             var cookies = await RequireContext().CookiesAsync().ConfigureAwait(false);
@@ -812,9 +914,9 @@ public sealed partial class WebEngine : IEngine
                 Secure = cookie.Secure,
                 SameSite = cookie.SameSite.ToString(),
             }).ToList();
-        }
+        });
 
-        public Task SetCookiesAsync(IReadOnlyList<BrowserCookie> cookies, CancellationToken cancellationToken)
+        public Task SetCookiesAsync(IReadOnlyList<BrowserCookie> cookies, CancellationToken cancellationToken) => RunAsync("cookies", cancellationToken, () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(cookies);
@@ -836,9 +938,9 @@ public sealed partial class WebEngine : IEngine
                     _ => SameSiteAttribute.None,
                 },
             }));
-        }
+        });
 
-        public async Task SetViewportAsync(int width, int height, CancellationToken cancellationToken)
+        public Task SetViewportAsync(int width, int height, CancellationToken cancellationToken) => RunAsync("setViewport", cancellationToken, async () =>
         {
             var budget = Budget("setViewport", cancellationToken);
             _viewport = new ViewportSize { Width = width, Height = height };
@@ -846,62 +948,42 @@ public sealed partial class WebEngine : IEngine
             {
                 await budget.WithinAsync(_page.SetViewportSizeAsync(width, height)).ConfigureAwait(false);
             }
-        }
+        });
 
-        public async Task AddInitScriptAsync(string source, CancellationToken cancellationToken)
+        public Task AddInitScriptAsync(string source, CancellationToken cancellationToken) => RunAsync("addInitScript", cancellationToken, async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             var context = RequireContext();
             await context.AddInitScriptAsync(source).ConfigureAwait(false);
             _initScripts.Add(source);
-        }
+        });
 
-        public Task KeyboardTypeAsync(string text, CancellationToken cancellationToken)
-        {
-            return InputAsync(() => Page.Keyboard.TypeAsync(text), "keyboard.type", cancellationToken);
-        }
+        public Task KeyboardTypeAsync(string text, CancellationToken cancellationToken) => RunAsync("keyboard.type", cancellationToken, () =>
+            InputAsync(() => Page.Keyboard.TypeAsync(text), "keyboard.type", cancellationToken));
 
-        public Task MouseMoveAsync(float x, float y, CancellationToken cancellationToken)
-        {
-            return InputAsync(() => Page.Mouse.MoveAsync(x, y), "mouse.move", cancellationToken);
-        }
+        public Task MouseMoveAsync(float x, float y, CancellationToken cancellationToken) => RunAsync("mouse.move", cancellationToken, () =>
+            InputAsync(() => Page.Mouse.MoveAsync(x, y), "mouse.move", cancellationToken));
 
-        public Task MouseWheelAsync(float deltaX, float deltaY, CancellationToken cancellationToken)
-        {
-            return InputAsync(() => Page.Mouse.WheelAsync(deltaX, deltaY), "mouse.wheel", cancellationToken);
-        }
+        public Task MouseWheelAsync(float deltaX, float deltaY, CancellationToken cancellationToken) => RunAsync("mouse.wheel", cancellationToken, () =>
+            InputAsync(() => Page.Mouse.WheelAsync(deltaX, deltaY), "mouse.wheel", cancellationToken));
 
-        public Task MouseDownAsync(CancellationToken cancellationToken)
-        {
-            return InputAsync(() => Page.Mouse.DownAsync(), "mouse.down", cancellationToken);
-        }
+        public Task MouseDownAsync(CancellationToken cancellationToken) => RunAsync("mouse.down", cancellationToken, () =>
+            InputAsync(() => Page.Mouse.DownAsync(), "mouse.down", cancellationToken));
 
-        public Task MouseUpAsync(CancellationToken cancellationToken)
-        {
-            return InputAsync(() => Page.Mouse.UpAsync(), "mouse.up", cancellationToken);
-        }
+        public Task MouseUpAsync(CancellationToken cancellationToken) => RunAsync("mouse.up", cancellationToken, () =>
+            InputAsync(() => Page.Mouse.UpAsync(), "mouse.up", cancellationToken));
 
         /// <summary>Opens a clean context at the current viewport. Its first page opens on the first navigation.</summary>
         public async Task NewContextAsync()
         {
             var context = await _browser.NewContextAsync(ContextOptions(_options, _viewport)).ConfigureAwait(false);
-            await context.AddInitScriptAsync(PageScript.RecordClosedShadowRoots).ConfigureAwait(false);
-            foreach (var script in _initScripts)
-            {
-                await context.AddInitScriptAsync(script).ConfigureAwait(false);
-            }
-
-            await _setUpContext(context).ConfigureAwait(false);
-            foreach (var (matches, playwrightHandler, _) in _routes)
-            {
-                await context.RouteAsync(matches, playwrightHandler).ConfigureAwait(false);
-            }
-
+            await ConfigureAsync(context).ConfigureAwait(false);
             _context = context;
         }
 
-        public async Task SwipeAsync(ScrollDirection direction, CancellationToken cancellationToken)
+        public Task SwipeAsync(ScrollDirection direction, CancellationToken cancellationToken) => RunAsync("scroll", cancellationToken, async () =>
         {
+            RequireObservation();
             var budget = Budget("scroll", cancellationToken);
             try
             {
@@ -916,13 +998,27 @@ public sealed partial class WebEngine : IEngine
                 // As upstream's viewport swipe, a scroll the deadline cut off may have moved the page.
                 throw WebErrors.ClassifyAction(ex, new LocatorAction.Swipe(direction));
             }
-        }
+        });
 
         public async ValueTask DisposeAsync()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            // Late recovery and page work can only reach this retired session.
+            _disposed = true;
+            await _lifetime.CancelAsync().ConfigureAwait(false);
             try
             {
-                if (_context is not null)
+                if (_recovery is { } recovery)
+                {
+                    await recovery.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                }
+
+                // An ordinary context is engine-owned; a persistent browser belongs to the host, so only the connection closes.
+                if (_context is not null && _persistent is null)
                 {
                     await _context.CloseAsync().ConfigureAwait(false);
                 }
@@ -931,6 +1027,7 @@ public sealed partial class WebEngine : IEngine
             {
                 await _browser.CloseAsync().ConfigureAwait(false);
                 _playwright.Dispose();
+                _lifetime.Dispose();
             }
         }
 
@@ -987,7 +1084,8 @@ public sealed partial class WebEngine : IEngine
         }
 
         /// <summary>One operation's budget: the action timeout, shared by every page call in the operation.</summary>
-        private OperationBudget Budget(string label, CancellationToken cancellationToken) => new(_actionTimeout, label, cancellationToken);
+        private OperationBudget Budget(string label, CancellationToken cancellationToken) =>
+            new(_actionTimeout, label, cancellationToken, _seams.Clock, _operationStart.Value);
 
         /// <summary>Sends one keystroke or pointer event, with no element behind it, within its budget, and classifies its failure.</summary>
         private async Task InputAsync(Func<Task> input, string label, CancellationToken cancellationToken)
@@ -1086,14 +1184,452 @@ public sealed partial class WebEngine : IEngine
 
         private async Task NewPageAsync(IBrowserContext context)
         {
-            var page = await context.NewPageAsync().ConfigureAwait(false);
+            var page = await NextPageAsync(context).ConfigureAwait(false);
             page.SetDefaultTimeout(ActionMs);
             if (_viewport is { } viewport)
             {
                 await page.SetViewportSizeAsync(viewport.Width, viewport.Height).ConfigureAwait(false);
             }
 
+            if (_persistent is not null)
+            {
+                var target = await TargetIdentityAsync(page).ConfigureAwait(false);
+
+                // An identity that arrives after the attempt ended belongs to no page of the next one.
+                if (_disposed)
+                {
+                    throw new EngineException(EngineErrorCodes.NodeStale, "the connection changed while reading the screen", retryable: true);
+                }
+
+                _target = target;
+            }
+
             _page = page;
+        }
+
+        /// <summary>
+        /// The page the attempt shows next. A persistent browser is fresh for the
+        /// attempt, so its own first tab serves as the attempt's first page instead
+        /// of a second tab beside it, which a hosted browser's live view would show
+        /// behind the test's. The tab is navigated to <c>about:blank</c> first, so its
+        /// document runs the context's init scripts as a new tab's does. Every later
+        /// page is a new tab.
+        /// </summary>
+        private async Task<IPage> NextPageAsync(IBrowserContext context)
+        {
+            if (_firstPage && _persistent is not null && context.Pages.FirstOrDefault(page => !page.IsClosed) is { } initial)
+            {
+                // A navigation that failed leaves the tab to the next attempt at opening the first page.
+                await initial.GotoAsync("about:blank", new PageGotoOptions { Timeout = ActionMs }).ConfigureAwait(false);
+                _firstPage = false;
+                return initial;
+            }
+
+            _firstPage = false;
+            return await context.NewPageAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Installs what every context of the attempt carries: the closed-root hook, the
+        /// init scripts configured then added, the site headers, and the test's routes.
+        /// </summary>
+        private async Task ConfigureAsync(IBrowserContext context)
+        {
+            await context.AddInitScriptAsync(PageScript.RecordClosedShadowRoots).ConfigureAwait(false);
+            foreach (var script in _initScripts)
+            {
+                await context.AddInitScriptAsync(script).ConfigureAwait(false);
+            }
+
+            await _setUpContext(context).ConfigureAwait(false);
+            foreach (var (matches, playwrightHandler, _) in _routes)
+            {
+                await context.RouteAsync(matches, playwrightHandler).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// Opens an attempt on a fresh remote browser provisioned by <c>cdpEndpoint</c>,
+        /// riding its default context. A browser an earlier attempt rode is refused.
+        /// The first page opens on the first navigation.
+        /// </summary>
+        public static async Task<WebSession> StartPersistentAsync(
+            IPlaywright playwright,
+            PersistentConnect persistent,
+            TimeSpan actionTimeout,
+            WebEngineOptions options,
+            List<string> initScripts,
+            Func<IBrowserContext, Task> setUpContext,
+            Func<string, IReadOnlyDictionary<string, string>?> siteHeaders,
+            SessionSeams seams,
+            CancellationToken cancellationToken)
+        {
+            SessionBinding binding;
+            try
+            {
+                // As upstream, attaching a persistent attempt has the browser launch budget.
+                binding = await AttachWithinAsync(playwright, seams, persistent.Provision, E2EDefaults.LaunchTimeout, seams.Clock.GetTimestamp(), null, "connection", cancellationToken, CancellationToken.None, static _ => Task.CompletedTask).ConfigureAwait(false);
+            }
+            catch
+            {
+                playwright.Dispose();
+                throw;
+            }
+
+            var session = new WebSession(playwright, binding.Browser, actionTimeout, options, initScripts, setUpContext, siteHeaders, seams, persistent);
+            try
+            {
+                if (!persistent.Claim(binding.ContextId))
+                {
+                    throw RecoveryFailed("cdpEndpoint reused a browser from a previous attempt; provision a fresh browser");
+                }
+
+                session._context = binding.Context;
+                session._contextId = binding.ContextId;
+                await session.ConfigureAsync(binding.Context).ConfigureAwait(false);
+                return session;
+            }
+            catch
+            {
+                await session.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        /// <summary>Observation-backed input needs evidence captured after a reconnect.</summary>
+        private void RequireObservation()
+        {
+            if (!_observed)
+            {
+                throw new EngineException(EngineErrorCodes.NodeStale, "observe the screen again after CDP recovery before acting", retryable: true);
+            }
+        }
+
+        private Task RunAsync(string label, CancellationToken cancellationToken, Func<Task> work) =>
+            _persistent is null
+                ? work()
+                : RunPersistentAsync(label, cancellationToken, async () =>
+                {
+                    await work().ConfigureAwait(false);
+                    return true;
+                });
+
+        /// <summary>
+        /// Runs one operation. On a persistent context whose transport dropped, it
+        /// first shares one reconnect, then dispatches once with the time that remains.
+        /// An operation is never retried.
+        /// </summary>
+        private Task<T> RunAsync<T>(string label, CancellationToken cancellationToken, Func<Task<T>> work)
+        {
+            return _persistent is null ? work() : RunPersistentAsync(label, cancellationToken, work);
+        }
+
+        private async Task<T> RunPersistentAsync<T>(string label, CancellationToken cancellationToken, Func<Task<T>> work)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_failure is not null)
+            {
+                throw _failure;
+            }
+
+            if (_recovery is null && _browser.IsConnected)
+            {
+                return await work().ConfigureAwait(false);
+            }
+
+            var started = _seams.Clock.GetTimestamp();
+            Task recovery;
+            lock (_recoveryLock)
+            {
+                // Started on the pool, so the resolver, which is user code, never runs under the lock.
+                recovery = _recovery ??= Task.Run(() => ReconnectAsync(label, started, cancellationToken), CancellationToken.None);
+            }
+
+            try
+            {
+                await recovery.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && _failure is not null)
+            {
+                // The reconnect this operation waited on was cancelled by the operation that started it.
+                throw _failure;
+            }
+
+            lock (_recoveryLock)
+            {
+                if (_recovery == recovery)
+                {
+                    _recovery = null;
+                }
+            }
+
+            // Recovery is the engine's own work, so it counts against the operation's budget.
+            _operationStart.Value = started;
+            return await work().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Reconnects through <c>reconnectEndpoint</c> to the same browser and page,
+        /// within the budget of the operation that found the transport dropped. Every
+        /// observed ref is retired. A failure ends the attempt: a failed reconnect never
+        /// quietly provisions another session.
+        /// </summary>
+        private async Task ReconnectAsync(string label, long started, CancellationToken cancellationToken)
+        {
+            var previous = (_contextId!, _target);
+            var size = _page?.ViewportSize is { } current ? new ViewportSize { Width = current.Width, Height = current.Height } : _viewport;
+            _observed = false;
+            _frames = new(StringComparer.Ordinal);
+            try
+            {
+                var binding = await AttachWithinAsync(_playwright, _seams, _persistent!.Reconnect, _actionTimeout, started, previous, label, cancellationToken, _lifetime.Token, async candidate =>
+                {
+                    await ConfigureAsync(candidate.Context).ConfigureAwait(false);
+                    if (candidate.Page is { } page)
+                    {
+                        page.SetDefaultTimeout(ActionMs);
+                        if (size is { } viewport)
+                        {
+                            await page.SetViewportSizeAsync(viewport.Width, viewport.Height).ConfigureAwait(false);
+                        }
+                    }
+                }).ConfigureAwait(false);
+                _browser = binding.Browser;
+                _context = binding.Context;
+                _page = binding.Page;
+                _target = binding.Target;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _lifetime.IsCancellationRequested)
+            {
+                _failure = new EngineException(EngineErrorCodes.Cancelled, label + " cancelled", retryable: false);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _failure = ex is EngineException ? ex : WebErrors.IsPlaywright(ex) ? WebErrors.Translate(ex, "connection") : ex;
+                throw _failure;
+            }
+        }
+
+        /// <summary>
+        /// Attaches, then runs <paramref name="prepare"/> on the candidate, all within what is
+        /// left of <paramref name="budget"/> since <paramref name="started"/>: a resolver, dial,
+        /// or configuration still pending at the deadline is cancelled, and the operation fails
+        /// with <c>OPERATION_TIMEOUT</c>. A candidate that fails or arrives late is closed.
+        /// </summary>
+        private static async Task<SessionBinding> AttachWithinAsync(
+            IPlaywright playwright,
+            SessionSeams seams,
+            Func<CancellationToken, Task<string>> resolve,
+            TimeSpan budget,
+            long started,
+            (string ContextId, TargetIdentity? Target)? previous,
+            string label,
+            CancellationToken cancellationToken,
+            CancellationToken lifetime,
+            Func<SessionBinding, Task> prepare)
+        {
+            TimeSpan Remaining() => budget - seams.Clock.GetElapsedTime(started);
+            using var timer = new CancellationTokenSource(Remaining() > TimeSpan.Zero ? Remaining() : TimeSpan.Zero, seams.Clock);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime, timer.Token);
+            var token = deadline.Token;
+            async Task<SessionBinding> AttachAndPrepareAsync()
+            {
+                var candidate = await AttachPersistentAsync(playwright, seams, resolve, Remaining, previous, label, token).ConfigureAwait(false);
+                try
+                {
+                    await prepare(candidate).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                    return candidate;
+                }
+                catch
+                {
+                    await CloseQuietlyAsync(candidate.Browser).ConfigureAwait(false);
+                    throw;
+                }
+            }
+
+            var attach = AttachAndPrepareAsync();
+            try
+            {
+                return await attach.WaitAsync(deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // A connection that arrives once the attach was abandoned is closed; a failure has no one to reach.
+                _ = attach.ContinueWith(
+                    static abandoned => abandoned.IsCompletedSuccessfully ? CloseQuietlyAsync(abandoned.Result.Browser) : Task.FromResult(abandoned.Exception),
+                    CancellationToken.None,
+                    TaskContinuationOptions.None,
+                    TaskScheduler.Default);
+                if (cancellationToken.IsCancellationRequested || lifetime.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                throw new EngineException(EngineErrorCodes.OperationTimeout, label + " timed out", retryable: false);
+            }
+        }
+
+        /// <summary>
+        /// Owns an uncommitted connection until its identity is proven; a cancelled or
+        /// late connection is closed. With <paramref name="previous"/>, the browser must
+        /// be the one the attempt rode and must still hold its exact page.
+        /// </summary>
+        private static async Task<SessionBinding> AttachPersistentAsync(
+            IPlaywright playwright,
+            SessionSeams seams,
+            Func<CancellationToken, Task<string>> resolve,
+            Func<TimeSpan> remaining,
+            (string ContextId, TargetIdentity? Target)? previous,
+            string label,
+            CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            var endpoint = await resolve(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(endpoint))
+            {
+                throw RecoveryFailed("the endpoint is empty");
+            }
+
+            // The resolver's time is spent from the dial's budget, as from the operation's.
+            var left = remaining();
+            if (left <= TimeSpan.Zero)
+            {
+                throw new EngineException(EngineErrorCodes.OperationTimeout, label + " timed out", retryable: false);
+            }
+
+            var browser = await seams.ConnectCdp(playwright, endpoint, left, token).ConfigureAwait(false);
+
+            // A connection whose owner gave up is detached at once, not when its next read returns.
+            using var detach = token.Register(() => _ = CloseQuietlyAsync(browser));
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                var session = await browser.NewBrowserCDPSessionAsync().ConfigureAwait(false);
+                string? contextId;
+                try
+                {
+                    var contexts = (await session.SendAsync("Target.getBrowserContexts").ConfigureAwait(false))!.Value;
+                    if (contexts.GetProperty("browserContextIds").GetArrayLength() > 0)
+                    {
+                        throw RecoveryFailed("the remote browser must contain only its dedicated default context");
+                    }
+
+                    contextId = contexts.TryGetProperty("defaultBrowserContextId", out var id) ? id.GetString() : null;
+                }
+                finally
+                {
+                    await DetachQuietlyAsync(session).ConfigureAwait(false);
+                }
+
+                token.ThrowIfCancellationRequested();
+                var context = browser.Contexts.FirstOrDefault() ?? throw RecoveryFailed("the default context is missing");
+                if (string.IsNullOrEmpty(contextId))
+                {
+                    throw RecoveryFailed("the default context identity is unavailable");
+                }
+
+                if (previous is { } prior && !string.Equals(contextId, prior.ContextId, StringComparison.Ordinal))
+                {
+                    throw RecoveryFailed("reconnectEndpoint returned a different browser");
+                }
+
+                if (previous?.Target is not { } original)
+                {
+                    token.ThrowIfCancellationRequested();
+                    return new SessionBinding(browser, context, null, contextId, null);
+                }
+
+                foreach (var page in context.Pages)
+                {
+                    var target = await TargetIdentityAsync(page).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                    if (!string.Equals(target.TargetId, original.TargetId, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (!string.Equals(target.BrowserContextId, original.BrowserContextId, StringComparison.Ordinal))
+                    {
+                        throw RecoveryFailed("the original page belongs to a different context");
+                    }
+
+                    await RequireShadowTrackingAsync(page, token).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                    return new SessionBinding(browser, context, page, contextId, target);
+                }
+
+                throw RecoveryFailed("the original page no longer exists");
+            }
+            catch
+            {
+                await CloseQuietlyAsync(browser).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        /// <summary>Reads protocol identity, independent of URL, document contents, and tab order.</summary>
+        private static async Task<TargetIdentity> TargetIdentityAsync(IPage page)
+        {
+            var session = await page.Context.NewCDPSessionAsync(page).ConfigureAwait(false);
+            try
+            {
+                var info = (await session.SendAsync("Target.getTargetInfo").ConfigureAwait(false))!.Value.GetProperty("targetInfo");
+                return new TargetIdentity(
+                    info.GetProperty("targetId").GetString()!,
+                    info.TryGetProperty("browserContextId", out var context) ? context.GetString() : null);
+            }
+            finally
+            {
+                await DetachQuietlyAsync(session).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>A document that changed while disconnected never ran the closed-root hook, which observation needs.</summary>
+        private static async Task RequireShadowTrackingAsync(IPage page, CancellationToken token)
+        {
+            foreach (var frame in page.Frames)
+            {
+                var tracked = await frame.EvaluateAsync<bool>(PageScript.TracksClosedShadowRoots).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                if (!tracked)
+                {
+                    throw new EngineException(
+                        EngineErrorCodes.EngineFailure,
+                        "CDP recovery failed: closed shadow root tracking is unavailable after a document changed while disconnected; locators and secure-field masks need it",
+                        retryable: false);
+                }
+            }
+        }
+
+        /// <summary>A failed reconnect must never quietly provision another session.</summary>
+        private static EngineException RecoveryFailed(string detail) =>
+            new(EngineErrorCodes.EngineFailure, "CDP recovery failed: " + detail, retryable: false);
+
+        private static async Task CloseQuietlyAsync(IBrowser browser)
+        {
+            try
+            {
+                await browser.CloseAsync().ConfigureAwait(false);
+            }
+            catch (PlaywrightException)
+            {
+                // The connection is already gone.
+            }
+        }
+
+        private static async Task DetachQuietlyAsync(ICDPSession session)
+        {
+            try
+            {
+                await session.DetachAsync().ConfigureAwait(false);
+            }
+            catch (PlaywrightException)
+            {
+                // The target or connection is already gone.
+            }
         }
 
         private IBrowserContext RequireContext()
@@ -1336,6 +1872,29 @@ public sealed partial class WebEngine : IEngine
         }
     }
 
+    /// <summary>What tests replace: the clock budgets read, and the CDP attach.</summary>
+    private sealed record SessionSeams(TimeProvider Clock, Func<IPlaywright, string, TimeSpan, CancellationToken, Task<IBrowser>> ConnectCdp);
+
+    /// <summary>The <c>connect</c> resolvers of a persistent context, and the default contexts earlier attempts rode.</summary>
+    private sealed record PersistentConnect(
+        Func<CancellationToken, Task<string>> Provision,
+        Func<CancellationToken, Task<string>> Reconnect,
+        HashSet<string> UsedContexts)
+    {
+        /// <summary>Claims a provisioned browser's default context for this attempt; false when an earlier attempt rode it.</summary>
+        public bool Claim(string contextId)
+        {
+            lock (UsedContexts)
+            {
+                return UsedContexts.Add(contextId);
+            }
+        }
+    }
+
+    private sealed record TargetIdentity(string TargetId, string? BrowserContextId);
+
+    private sealed record SessionBinding(IBrowser Browser, IBrowserContext Context, IPage? Page, string ContextId, TargetIdentity? Target);
+
     private sealed class FrameWalk
     {
         public int Remaining { get; set; } = ObservationLimits.Nodes;
@@ -1417,6 +1976,9 @@ public sealed partial class WebEngine : IEngine
     }
 }
 
+/// <summary>The live page and context behind a web session. Each accessor reads the current binding, so it follows a reconnect.</summary>
+internal sealed record LiveSurface(Func<IPage> Page, Func<IBrowserContext> Context);
+
 /// <summary>
 /// One web operation's budget, as upstream <c>withOperationDeadline</c>: one deadline
 /// every page call in the operation shares. A call still pending at the deadline is
@@ -1435,14 +1997,18 @@ internal sealed class OperationBudget
     /// </summary>
     private const double PlaywrightTimeoutLeadMs = 250;
 
-    private readonly long _startedAt = Stopwatch.GetTimestamp();
+    private readonly long _startedAt;
     private readonly TimeSpan _timeout;
     private readonly string _label;
     private readonly CancellationToken _cancellationToken;
+    private readonly TimeProvider _clock;
 
-    public OperationBudget(TimeSpan timeout, string label, CancellationToken cancellationToken)
+    // startedAt is when the operation began, on the clock, when engine work such as a reconnect already spent part of its budget.
+    public OperationBudget(TimeSpan timeout, string label, CancellationToken cancellationToken, TimeProvider? clock = null, long? startedAt = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        _clock = clock ?? TimeProvider.System;
+        _startedAt = startedAt ?? _clock.GetTimestamp();
         _timeout = timeout;
         _label = label;
         _cancellationToken = cancellationToken;
@@ -1463,7 +2029,7 @@ internal sealed class OperationBudget
     {
         try
         {
-            await call.WaitAsync(Remaining(), _cancellationToken).ConfigureAwait(false);
+            await call.WaitAsync(Remaining(), _clock, _cancellationToken).ConfigureAwait(false);
         }
         catch (System.TimeoutException ex) when (ex != call.Exception?.InnerException)
         {
@@ -1485,7 +2051,7 @@ internal sealed class OperationBudget
     private TimeSpan Remaining()
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        var left = _timeout - Stopwatch.GetElapsedTime(_startedAt);
+        var left = _timeout - _clock.GetElapsedTime(_startedAt);
         return left > TimeSpan.Zero ? left : throw Timeout();
     }
 

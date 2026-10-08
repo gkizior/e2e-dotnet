@@ -127,7 +127,15 @@ protected override IEngine CreateEngine() => new WebEngine(new WebEngineOptions
 | `Locale` | The language every attempt runs in, a BCP 47 tag: `navigator.language`, `Intl`, and `Accept-Language`. An `accept-language` entry in `Headers` beside it is `INVALID_CONFIG`. |
 | `TimezoneId` | The IANA time zone every attempt runs in. Spell it with its exact case (`Europe/Berlin`), or it is `INVALID_CONFIG`. |
 | `InitScripts` | Scripts every document runs before the page's own (topic `writing-tests`). |
-| `Connect` | Attach to a remote Chromium over CDP. |
+| `Connect` | Attach to a remote Chromium over CDP. `CdpEndpoint` and `ReconnectEndpoint` are resolvers (`ct => Task<string>`), not strings. With `ReconnectEndpoint` it rides one persistent default context and reconnects only to the original browser and page. |
+
+- `ReconnectEndpoint` rides one persistent context without `Headers`,
+  `BasicAuth`, `UserAgent`, `Locale`, `TimezoneId` (`INVALID_CONFIG`), or
+  `App.ClearStateAsync`. Each attempt needs a fresh browser from `CdpEndpoint`;
+  one an earlier attempt rode is refused. Recovery never repeats a dispatched
+  operation, and exhausting the action timeout is `OPERATION_TIMEOUT`. After a
+  reconnect, observe again before acting on an observed node. Without
+  `ReconnectEndpoint` each attempt attaches and creates a new context.
 
 To test without a browser or model, override `CreateEngine()` to return a
 `DocumentEngine`, and `CreateModel()` to return a scripted `IAgentModel`.

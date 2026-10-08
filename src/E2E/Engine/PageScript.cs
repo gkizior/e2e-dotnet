@@ -352,6 +352,11 @@ internal static class PageScript
         })();
         """;
 
+    // Whether a document ran RecordClosedShadowRoots.
+    public const string TracksClosedShadowRoots = """
+        () => globalThis[Symbol.for("e2e.closedShadowRoots")] instanceof WeakMap
+        """;
+
     public const string Find = """
         (id) => {
           const el = window[Symbol.for("e2e.observation.elements")]?.get(id);

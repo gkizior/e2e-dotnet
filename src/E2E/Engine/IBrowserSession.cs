@@ -65,6 +65,12 @@ public interface IBrowserSession : IEngineSession
 
     Task KeyboardTypeAsync(string text, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Sends one key as direct test input. Unlike <see cref="IEngineSession.PressAsync"/>,
+    /// it never needs a fresh observation.
+    /// </summary>
+    Task KeyboardPressAsync(string key, CancellationToken cancellationToken) => PressAsync(key, cancellationToken);
+
     Task MouseMoveAsync(float x, float y, CancellationToken cancellationToken);
 
     Task MouseWheelAsync(float deltaX, float deltaY, CancellationToken cancellationToken);

@@ -487,7 +487,7 @@ public sealed class BrowserKeyboard
     public Task PressAsync(string key, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(key);
-        return _browser.Require("keyboard.press").PressAsync(key, _browser.Token(cancellationToken));
+        return _browser.Require("keyboard.press").KeyboardPressAsync(key, _browser.Token(cancellationToken));
     }
 
     /// <summary>Types plain text.</summary>

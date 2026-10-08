@@ -44,7 +44,28 @@ public sealed class BillingTests : E2ETest
 }
 ```
 
-`E2ETest` starts a `WebEngine` session for each `[Test]`. Override `CreateEngine` with a `DocumentEngine` when the test should not open a browser. An `act` that a later `assert`, `waitFor`, or locator `Expect` verifies is recorded. The next run replays those actions with no model calls until the screen no longer matches. When the test ends, verified acts are written and unverified acts that recorded or replayed are evicted, whether it passed, failed, or was skipped. `[Retry]` runs the later attempts live, and they still record. Tests that never call the agent need no model.
+`E2ETest` starts a `WebEngine` session for each `[Test]`. Override `CreateEngine` with a `DocumentEngine` when the test should not open a browser, or with a `WebEngine` whose `Connect` attaches to a remote Chromium over CDP (see [Recovering a CDP transport](#recovering-a-cdp-transport)). An `act` that a later `assert`, `waitFor`, or locator `Expect` verifies is recorded. The next run replays those actions with no model calls until the screen no longer matches. When the test ends, verified acts are written and unverified acts that recorded or replayed are evicted, whether it passed, failed, or was skipped. `[Retry]` runs the later attempts live, and they still record. Tests that never call the agent need no model.
+
+### Recovering a CDP transport
+
+`WebConnectOptions.ReconnectEndpoint` opts into recovery of the same remote browser after its CDP transport disconnects. This mode uses the browser's persistent default context, because Chrome deletes ordinary Playwright contexts when their transport detaches.
+
+```csharp
+new WebEngine(new WebEngineOptions
+{
+    Connect = new WebConnectOptions
+    {
+        CdpEndpoint = ct => hosted.ProvisionAsync(ct),
+        ReconnectEndpoint = ct => hosted.EndpointAsync(ct),
+    },
+});
+```
+
+In this mode, `CdpEndpoint` provisions a fresh, dedicated browser at every attempt start, including retries. The engine rejects a browser reused by a previous attempt of the same `WebEngine`. The remote must have only its default context, and the host owns the browser: disposing the session closes the connection, not the browser. The attempt's first page is the browser's own first tab, navigated to `about:blank`.
+
+After a disconnect, the next operation calls `ReconnectEndpoint` once, bounded by the action timeout and its cancellation token. This resolver must return the existing browser's endpoint. The engine verifies the default context id and the original page's target id; a URL match is not enough to pick a replacement tab. Recovery also requires the page's frames to keep the closed shadow root hook, which a document that navigated while disconnected lost. A different browser, a missing page, or a resolver that runs out of time fails the attempt, and every later operation fails the same way. Recovery never repeats an operation that was already dispatched. Route handlers and init scripts, configured and added, are reattached, and each document still runs every init script once. After a reconnect, `PerformAsync`, the agent's key press, and the viewport swipe fail with `NODE_STALE` until the screen is observed again; the `Browser` keyboard and mouse keep working.
+
+Persistent recovery does not support `Headers`, `BasicAuth`, `UserAgent`, `Locale`, or `TimezoneId` (`INVALID_CONFIG`), or `App.ClearStateAsync` (`UNSUPPORTED_CAPABILITY`). `App.RestartAsync` remains available. Omit `ReconnectEndpoint` to keep a new, isolated context per attempt.
 
 ### xUnit v3
 
