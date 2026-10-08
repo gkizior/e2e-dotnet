@@ -6,6 +6,7 @@ This repo is a .NET port of [tester-army/e2e](https://github.com/tester-army/e2e
 
 - Port every test that the upstream commit adds or changes. Keep its name, steps, and assertions.
 - A test that needs a real model or a testbed page is still a test to port. Port the page too. Run the test as a real-model test (`[Category("RealModel")]`, like `samples/TodoMvc`).
+- When the port adds or changes public API or user-visible behavior, update `skills/e2e-dotnet/SKILL.md` and `docs/` in the same PR. Mirror what upstream's `skills/e2e/references/*.md` and `docs/**/*.mdx` say about that member, in the port's C# names.
 - Skip an upstream test only when the port has no such feature at all (for example, tracing). Name each skipped test and the reason in the PR report.
 - Lay out ported tests like upstream:
   - Each upstream test file is a directory, named in PascalCase. `protected-app-options.test.ts` becomes `ProtectedAppOptions/`.
