@@ -395,7 +395,7 @@ public sealed partial class WebEngine : IEngine
             _actionTimeout = actionTimeout;
         }
 
-        private IPage Page => _page ?? throw new EngineException(EngineErrorCodes.InvalidState, "The browser has no open page.");
+        private IPage Page => _page ?? throw new EngineException(EngineErrorCodes.InvalidState, "no app page is open; call app.open() first");
 
         private float ActionMs => (float)_actionTimeout.TotalMilliseconds;
 
@@ -406,6 +406,11 @@ public sealed partial class WebEngine : IEngine
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
+                if (_page is null)
+                {
+                    await NewPageAsync(RequireContext()).ConfigureAwait(false);
+                }
+
                 await Page.GotoAsync(url, new PageGotoOptions
                 {
                     WaitUntil = WaitUntilState.Load,
@@ -599,6 +604,7 @@ public sealed partial class WebEngine : IEngine
             }
 
             await NewContextAsync().ConfigureAwait(false);
+            await NewPageAsync(RequireContext()).ConfigureAwait(false);
         }
 
         public Task<string> GetUrlAsync(CancellationToken cancellationToken)
@@ -701,7 +707,10 @@ public sealed partial class WebEngine : IEngine
         {
             cancellationToken.ThrowIfCancellationRequested();
             _viewport = new ViewportSize { Width = width, Height = height };
-            await Page.SetViewportSizeAsync(width, height).ConfigureAwait(false);
+            if (_page is not null)
+            {
+                await _page.SetViewportSizeAsync(width, height).ConfigureAwait(false);
+            }
         }
 
         public Task KeyboardTypeAsync(string text, CancellationToken cancellationToken)
@@ -734,14 +743,13 @@ public sealed partial class WebEngine : IEngine
             return Page.Mouse.UpAsync();
         }
 
-        /// <summary>Opens a clean context and its first page at the current viewport.</summary>
+        /// <summary>Opens a clean context at the current viewport. Its first page opens on the first navigation.</summary>
         public async Task NewContextAsync()
         {
             var context = await _browser.NewContextAsync(ContextOptions(_options, _viewport)).ConfigureAwait(false);
             await context.AddInitScriptAsync(PageScript.RecordClosedShadowRoots).ConfigureAwait(false);
             await _setUpContext(context).ConfigureAwait(false);
             _context = context;
-            await NewPageAsync(context).ConfigureAwait(false);
         }
 
         public async Task SwipeAsync(ScrollDirection direction, CancellationToken cancellationToken)

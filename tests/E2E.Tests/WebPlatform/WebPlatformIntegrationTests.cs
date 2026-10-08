@@ -22,7 +22,7 @@ public sealed class WebPlatformIntegrationTests
         Assert.Null(await RunAsync(Scenarios[title]));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/111: the tap fails with NOT_FOUND, not APP_NOT_OPEN")]
+    [Fact]
     public async Task Sets_a_viewport_before_the_first_navigation_without_opening_a_page()
     {
         var error = Assert.IsType<TestException>(await RunAsync(Scenarios["a viewport set before the first navigation opens no page"]));

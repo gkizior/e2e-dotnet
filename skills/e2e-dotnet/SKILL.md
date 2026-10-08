@@ -151,6 +151,7 @@ An `E2EException` has a `Code`. Read it first.
 | `ASSERTION_INCONCLUSIVE` | The judge could not decide | Make the statement concrete and visible on screen |
 | `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | The goal was too large or unclear | Split it into smaller `ActAsync` calls |
 | `LOCATOR_NOT_FOUND`, `STRICT_MODE` | No match, or more than one match | Use the exact accessible name, or `First()`, `Nth(i)`, `Filter(...)` |
+| `APP_NOT_OPEN` | A `Screen` call before `App.OpenAsync()` | Open the app first |
 | `ENVIRONMENT_UNAVAILABLE` with "Chromium is not installed" or "could not install Chromium" | The browser install was skipped or failed | Allow network access for the first run, or install Chromium and set `E2E_SKIP_BROWSER_INSTALL=1` |
 | `APP_UNREACHABLE` | The agent found the app down or not loading | Start the app, or fix `targets[].app.url` |
 | `POLICY_DENIED` | A URL whose scheme is not `http:` or `https:` (`file:`, `view-source:`, `data:`), from `OpenAsync`, the agent's navigate step, or `SetCookiesAsync` | http(s) or `about:blank` only (no `about:blank` cookie) |
