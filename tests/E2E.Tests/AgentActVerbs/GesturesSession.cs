@@ -218,7 +218,7 @@ internal static class GesturesSession
     /// <summary>The ref of the last listed node whose line matches <paramref name="line"/>.</summary>
     public static string RefFor(string prompt, string line)
     {
-        return Regex.Matches(prompt, Regex.Escape(line) + @" \[ref=(e\d+)\]")[^1].Groups[1].Value;
+        return Regex.Matches(prompt, Regex.Escape(line) + @"(?: text=""[^""]*"")? \[ref=(e\d+)\]")[^1].Groups[1].Value;
     }
 
     public static async Task<E2ESession> StartAsync(TinySite site, ScriptedModel model, FileStepCache cache, string title)

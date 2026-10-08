@@ -22,7 +22,7 @@ public sealed class AgentActGrammarVerbsTests
         await RunFlowAsync(site, flow, ModelFor(flow), directory);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/176: the screen the model reads drops a named node's text")]
+    [Fact]
     public async Task Pages_a_windowed_list_to_a_row_by_its_text_as_one_action_and_brings_it_into_view()
     {
         using var site = await StartSiteAsync();

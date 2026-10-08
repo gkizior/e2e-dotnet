@@ -51,7 +51,7 @@ public sealed class PrepareObservationTests
             text.Split(Environment.NewLine));
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/135: the screen text leaves out the input purpose")]
+    [Fact]
     public void Masks_secure_fields_and_never_renders_their_value()
     {
         var tree = new SemanticNode
@@ -82,7 +82,7 @@ public sealed class PrepareObservationTests
         Assert.Contains("<secret:member>", text, StringComparison.Ordinal);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/136: the screen text keeps control characters")]
+    [Fact]
     public void Collapses_whitespace_and_strips_control_characters_from_app_text()
     {
         var text = SnapshotText.Render(new Observation { Route = "/", Roots = [new SemanticNode { Ref = "n1", Role = "status", Text = "line\u0007one\n   two  " }] }, Redactor.None);

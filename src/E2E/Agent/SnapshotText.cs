@@ -45,11 +45,20 @@ internal static class SnapshotText
             builder.Append("- ");
             builder.Append(node.Role ?? "text");
             // A node with no accessible name, such as one listed for its text
-            // or its test id, shows its text.
-            var name = redactor.Redact((string.IsNullOrEmpty(node.Name) ? node.Text : node.Name) ?? "");
+            // or its test id, shows its text. A named node shows its text too, when it differs.
+            var name = Clean(redactor.Redact((string.IsNullOrEmpty(node.Name) ? node.Text : node.Name) ?? ""));
             if (name.Length > 0)
             {
-                builder.Append(" \"").Append(TextRules.Normalize(name)).Append('"');
+                builder.Append(" \"").Append(name).Append('"');
+            }
+
+            if (!string.IsNullOrEmpty(node.Name))
+            {
+                var text = Clean(redactor.Redact(node.Text ?? ""));
+                if (text.Length > 0 && text != name)
+                {
+                    builder.Append(" text=\"").Append(text).Append('"');
+                }
             }
 
             builder.Append(" [ref=").Append(node.Ref).Append(']');
@@ -62,6 +71,11 @@ internal static class SnapshotText
             if (node.States.Secure)
             {
                 builder.Append(" secure");
+            }
+
+            if (node.InputPurpose is not (null or "" or "none"))
+            {
+                builder.Append(" purpose=").Append(node.InputPurpose);
             }
 
             if (node.States.Checked)
@@ -104,4 +118,8 @@ internal static class SnapshotText
 
         return wrote;
     }
+
+    // App text is collapsed to one line. A control character becomes U+FFFD, so app text cannot put it in the prompt.
+    private static string Clean(string text) =>
+        string.Concat(TextRules.Normalize(text).Select(character => char.IsControl(character) ? '�' : character));
 }
