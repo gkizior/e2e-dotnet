@@ -73,6 +73,9 @@ public abstract class E2EFixture
     /// <summary><c>targets[0].app.url</c>.</summary>
     protected virtual string? BaseUrl => Config.Target.App.Url;
 
+    /// <summary>Anchors the files a test names, such as a route's fulfill path. Defaults to the config's directory.</summary>
+    protected virtual string ProjectRoot => Config.ProjectRoot;
+
     /// <summary><c>cache.dir</c>, resolved against the config directory.</summary>
     protected virtual string CacheDirectory => Config.Cache.Directory;
 
@@ -132,6 +135,7 @@ public abstract class E2EFixture
                 ProviderOptions = ProviderOptions,
                 Agents = CreateAgents(),
                 BaseUrl = BaseUrl,
+                ProjectRoot = ProjectRoot,
                 Cache = cacheMode == CacheMode.Off ? null : new FileStepCache(CacheDirectory),
                 CacheEnabled = cacheMode != CacheMode.Off,
                 CacheMode = cacheMode,

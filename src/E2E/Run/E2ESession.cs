@@ -124,7 +124,7 @@ public sealed class E2ESession : IAsyncDisposable
             TestFailed = () => softFailures.Any || testFailed(),
         };
         var app = new App(engine, options.BaseUrl, () => timeout.Token);
-        var browser = new Browser(engine, options.Engine.Platform, options.BaseUrl, options.ActionTimeout, options.AssertionTimeout, () => timeout.Token);
+        var browser = new Browser(engine, options.Engine.Platform, options.BaseUrl, Path.GetFullPath(string.IsNullOrEmpty(options.ProjectRoot) ? Directory.GetCurrentDirectory() : options.ProjectRoot), options.ActionTimeout, options.AssertionTimeout, () => timeout.Token);
         var agent = new Agent(scope);
         var screen = new Screen(
             token => engine.ObserveAsync(token),
@@ -335,6 +335,9 @@ public sealed class E2ESessionOptions
     public IReadOnlyDictionary<string, AgentOptions>? Agents { get; init; }
 
     public string? BaseUrl { get; init; }
+
+    /// <summary>Anchors the files a test names, such as a route's fulfill <c>Path</c>. Defaults to the working directory.</summary>
+    public string? ProjectRoot { get; init; }
 
     public IStepCache? Cache { get; init; }
 

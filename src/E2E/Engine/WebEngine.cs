@@ -2,6 +2,8 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Runtime.ExceptionServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using E2E.Internal;
 using Microsoft.Playwright;
@@ -116,6 +118,9 @@ public sealed partial class WebEngine : IEngine
     private readonly WebEngineOptions _options;
     private readonly bool _headless;
 
+    /// <summary>The configured headers, names lower-cased so they replace the browser's own; null when none are set.</summary>
+    private readonly Dictionary<string, string>? _siteHeaders;
+
     public WebEngine(bool? headless = null)
         : this(new WebEngineOptions { Headless = headless })
     {
@@ -126,6 +131,9 @@ public sealed partial class WebEngine : IEngine
         ArgumentNullException.ThrowIfNull(options);
         Validate(options);
         _options = options;
+        _siteHeaders = options.Headers is { Count: > 0 } headers
+            ? headers.ToDictionary(pair => pair.Key.ToLowerInvariant(), pair => pair.Value, StringComparer.Ordinal)
+            : null;
         if (options.Headless is bool chosen)
         {
             _headless = chosen;
@@ -172,7 +180,8 @@ public sealed partial class WebEngine : IEngine
                 browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = _headless }).ConfigureAwait(false);
             }
 
-            var session = new WebSession(playwright, browser, options.ActionTimeout, _options, context => InstallSiteHeadersAsync(context, options.BaseUrl));
+            var app = Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
+            var session = new WebSession(playwright, browser, options.ActionTimeout, _options, context => InstallSiteHeadersAsync(context, app), url => SiteHeadersFor(url, app));
             await session.NewContextAsync().ConfigureAwait(false);
             return session;
         }
@@ -343,18 +352,32 @@ public sealed partial class WebEngine : IEngine
         return context;
     }
 
-    private async Task InstallSiteHeadersAsync(IBrowserContext context, string? baseUrl)
+    /// <summary>
+    /// The configured headers, names lower-cased, that a request to <paramref name="url"/>
+    /// carries: all of them for the app's host, none for any other host or when there is no app.
+    /// </summary>
+    private IReadOnlyDictionary<string, string>? SiteHeadersFor(string url, Uri? app)
     {
-        if (_options.Headers is not { Count: > 0 } headers || !Uri.TryCreate(baseUrl, UriKind.Absolute, out var app))
+        return app is not null && IsAppRequest(url, app) ? _siteHeaders : null;
+    }
+
+    /// <summary>
+    /// Adds the configured headers to every request bound for the app's host, through a
+    /// context route that falls back to the network. Registered before any test route,
+    /// so it runs last: a test route's fallback reaches it, and a continue, which skips
+    /// it, merges the same headers itself.
+    /// </summary>
+    private async Task InstallSiteHeadersAsync(IBrowserContext context, Uri? app)
+    {
+        if (_siteHeaders is not { } headers || app is null)
         {
             return;
         }
 
-        var lowered = headers.ToDictionary(pair => pair.Key.ToLowerInvariant(), pair => pair.Value, StringComparer.Ordinal);
         await context.RouteAsync(url => IsAppRequest(url, app), async route =>
         {
             var merged = new Dictionary<string, string>(route.Request.Headers, StringComparer.Ordinal);
-            foreach (var (name, value) in lowered)
+            foreach (var (name, value) in headers)
             {
                 merged[name] = value;
             }
@@ -378,24 +401,38 @@ public sealed partial class WebEngine : IEngine
         private readonly string _testIdAttribute;
         private readonly WebEngineOptions _options;
         private readonly Func<IBrowserContext, Task> _setUpContext;
+        private readonly Func<string, IReadOnlyDictionary<string, string>?> _siteHeaders;
+
+        // Attempt-scoped routes, registered on the context so they cover every page,
+        // and registered again on each context ClearStateAsync opens.
+        private readonly List<(Func<string, bool> Matches, Func<IRoute, Task> PlaywrightHandler, Func<IBrowserRoute, Task> Handler)> _routes = [];
         private IBrowserContext? _context;
+        private Exception? _pending;
         private IPage? _page;
         private ViewportSize? _viewport;
         private Dictionary<string, IFrame> _frames = new(StringComparer.Ordinal);
         private int _nextRef = 1;
 
-        public WebSession(IPlaywright playwright, IBrowser browser, TimeSpan actionTimeout, WebEngineOptions options, Func<IBrowserContext, Task> setUpContext)
+        public WebSession(IPlaywright playwright, IBrowser browser, TimeSpan actionTimeout, WebEngineOptions options, Func<IBrowserContext, Task> setUpContext, Func<string, IReadOnlyDictionary<string, string>?> siteHeaders)
         {
             _playwright = playwright;
             _browser = browser;
             _options = options;
             _setUpContext = setUpContext;
+            _siteHeaders = siteHeaders;
             _testIdAttribute = options.TestIdAttribute;
             _viewport = options.Viewport is { } viewport ? new ViewportSize { Width = viewport.Width, Height = viewport.Height } : null;
             _actionTimeout = actionTimeout;
         }
 
-        private IPage Page => _page ?? throw new EngineException(EngineErrorCodes.InvalidState, "no app page is open; call app.open() first");
+        private IPage Page
+        {
+            get
+            {
+                ThrowPending();
+                return _page ?? throw new EngineException(EngineErrorCodes.InvalidState, "no app page is open; call app.open() first");
+            }
+        }
 
         private float ActionMs => (float)_actionTimeout.TotalMilliseconds;
 
@@ -595,6 +632,7 @@ public sealed partial class WebEngine : IEngine
         public async Task ClearStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            ThrowPending();
             var context = _context;
             _context = null;
             _page = null;
@@ -604,7 +642,7 @@ public sealed partial class WebEngine : IEngine
             }
 
             await NewContextAsync().ConfigureAwait(false);
-            await NewPageAsync(RequireContext()).ConfigureAwait(false);
+            await NewPageAsync(_context!).ConfigureAwait(false);
         }
 
         public Task<string> GetUrlAsync(CancellationToken cancellationToken)
@@ -660,6 +698,30 @@ public sealed partial class WebEngine : IEngine
                 Headers = response.Headers,
                 Body = ReadBodyAsync(response),
             };
+        }
+
+        public async Task RouteAsync(Func<string, bool> matches, Func<IBrowserRoute, Task> handler, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var context = RequireContext();
+            Func<IRoute, Task> playwrightHandler = route => HandleRouteAsync(route, handler);
+            await context.RouteAsync(matches, playwrightHandler).ConfigureAwait(false);
+            _routes.Add((matches, playwrightHandler, handler));
+        }
+
+        public async Task UnrouteAsync(Func<IBrowserRoute, Task> handler, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var context = RequireContext();
+            var index = _routes.FindIndex(stored => stored.Handler == handler);
+            if (index == -1)
+            {
+                return;
+            }
+
+            var (matches, playwrightHandler, _) = _routes[index];
+            _routes.RemoveAt(index);
+            await context.UnrouteAsync(matches, playwrightHandler).ConfigureAwait(false);
         }
 
         public async Task<IReadOnlyList<BrowserCookie>> GetCookiesAsync(CancellationToken cancellationToken)
@@ -749,6 +811,11 @@ public sealed partial class WebEngine : IEngine
             var context = await _browser.NewContextAsync(ContextOptions(_options, _viewport)).ConfigureAwait(false);
             await context.AddInitScriptAsync(PageScript.RecordClosedShadowRoots).ConfigureAwait(false);
             await _setUpContext(context).ConfigureAwait(false);
+            foreach (var (matches, playwrightHandler, _) in _routes)
+            {
+                await context.RouteAsync(matches, playwrightHandler).ConfigureAwait(false);
+            }
+
             _context = context;
         }
 
@@ -800,7 +867,7 @@ public sealed partial class WebEngine : IEngine
             {
                 json = await frame.EvaluateAsync<string>(PageScript.Collect, new { seed = _nextRef, max = walk.Remaining, testIdAttribute = _testIdAttribute }).ConfigureAwait(false);
             }
-            catch (PlaywrightException) when (frame != Page.MainFrame)
+            catch (PlaywrightException) when (frame != _page?.MainFrame)
             {
                 return [];
             }
@@ -874,8 +941,45 @@ public sealed partial class WebEngine : IEngine
             _page = page;
         }
 
-        private IBrowserContext RequireContext() =>
-            _context ?? throw new EngineException(EngineErrorCodes.InvalidState, "The browser has no context.");
+        private IBrowserContext RequireContext()
+        {
+            ThrowPending();
+            return _context ?? throw new EngineException(EngineErrorCodes.InvalidState, "The browser has no context.");
+        }
+
+        /// <summary>
+        /// Rethrows, once, the first error a route handler raised since the last
+        /// operation. Nothing awaits a route handler, so its error fails the next
+        /// operation that reaches the page or the context.
+        /// </summary>
+        private void ThrowPending()
+        {
+            if (Interlocked.Exchange(ref _pending, null) is { } pending)
+            {
+                ExceptionDispatchInfo.Throw(pending);
+            }
+        }
+
+        /// <summary>
+        /// Runs one handler on one request. The error is kept before an undecided
+        /// request is aborted, so the step after the page saw the failure reports it.
+        /// </summary>
+        private async Task HandleRouteAsync(IRoute route, Func<IBrowserRoute, Task> handler)
+        {
+            var decision = new PlaywrightRoute(route, _siteHeaders);
+            try
+            {
+                await handler(decision).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Interlocked.CompareExchange(ref _pending, ex, null);
+                if (!decision.Decided)
+                {
+                    await PlaywrightRoute.AbortQuietlyAsync(route).ConfigureAwait(false);
+                }
+            }
+        }
 
         /// <summary>
         /// Reads the body of a known response. A body the browser could not read
@@ -977,6 +1081,103 @@ public sealed partial class WebEngine : IEngine
                 Rect = dto.Rect is { } rect ? new BoundingBox(rect.X, rect.Y, rect.Width, rect.Height) : null,
                 Children = dto.Children?.Select(ToNode).ToList() ?? [],
             };
+        }
+    }
+
+    /// <summary>One intercepted request, decided through Playwright.</summary>
+    private sealed class PlaywrightRoute : IBrowserRoute
+    {
+        private readonly IRoute _route;
+        private readonly Func<string, IReadOnlyDictionary<string, string>?> _siteHeaders;
+
+        public PlaywrightRoute(IRoute route, Func<string, IReadOnlyDictionary<string, string>?> siteHeaders)
+        {
+            _route = route;
+            _siteHeaders = siteHeaders;
+            var request = route.Request;
+            Request = new WebRouteRequest
+            {
+                Url = request.Url,
+                Method = request.Method,
+                Headers = request.Headers,
+                PostData = request.PostData,
+            };
+        }
+
+        public WebRouteRequest Request { get; }
+
+        /// <summary>Set the moment a decision starts, before it reaches Playwright.</summary>
+        public bool Decided { get; private set; }
+
+        public static async Task AbortQuietlyAsync(IRoute route)
+        {
+            try
+            {
+                await route.AbortAsync().ConfigureAwait(false);
+            }
+            catch (PlaywrightException)
+            {
+                // The request is already settled, or its page closed.
+            }
+        }
+
+        public Task FulfillAsync(RouteFulfillResponse response) =>
+            DecideAsync("route.fulfill", () => _route.FulfillAsync(new RouteFulfillOptions
+            {
+                Status = response.Status,
+                Headers = response.Headers,
+                ContentType = response.ContentType,
+                Body = response.Body,
+                Path = response.Path,
+            }));
+
+        public Task ContinueAsync(RouteContinueOverrides overrides)
+        {
+            // Continue skips every route registered before this one, the site-header
+            // route included, so it merges those headers itself.
+            var site = _siteHeaders(overrides.Url ?? Request.Url);
+            Dictionary<string, string>? headers = null;
+            if (overrides.Headers is not null || site is not null)
+            {
+                headers = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var (name, value) in overrides.Headers ?? Request.Headers)
+                {
+                    headers[name.ToLowerInvariant()] = value;
+                }
+
+                foreach (var (name, value) in site ?? Enumerable.Empty<KeyValuePair<string, string>>())
+                {
+                    headers[name] = value;
+                }
+            }
+
+            return DecideAsync("route.continue", () => _route.ContinueAsync(new RouteContinueOptions
+            {
+                Url = overrides.Url,
+                Method = overrides.Method,
+                Headers = headers,
+                PostData = overrides.PostData is null ? null : Encoding.UTF8.GetBytes(overrides.PostData),
+            }));
+        }
+
+        public Task FallbackAsync() => DecideAsync("route.fallback", () => _route.FallbackAsync());
+
+        public Task AbortAsync() => DecideAsync("route.abort", () => _route.AbortAsync());
+
+        // A Playwright call that fails after the decision aborts the request rather
+        // than leaving the page's request pending.
+        private async Task DecideAsync(string label, Func<Task> decide)
+        {
+            Decided = true;
+            try
+            {
+                await decide().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (WebErrors.IsPlaywright(ex))
+            {
+                await AbortQuietlyAsync(_route).ConfigureAwait(false);
+                throw WebErrors.Translate(ex, label);
+            }
         }
     }
 
