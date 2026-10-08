@@ -53,7 +53,7 @@ public sealed class DecideTraceReplayTests
         Assert.Equal(0, calls);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/134: a start path that differs in a record id misses")]
+    [Fact]
     public async Task Enforces_the_start_path_precondition_when_the_trace_does_not_open_with_navigate()
     {
         var entry = Entry("/settings", Tap());

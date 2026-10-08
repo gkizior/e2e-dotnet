@@ -32,6 +32,22 @@ internal static partial class Routes
         return path.StartsWith('/') ? path : "/" + path;
     }
 
+    /// <summary>The path, query and fragment of a URL: where the screen is, without the origin.</summary>
+    public static string LocationOf(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return "/";
+        }
+
+        if (SchemePattern().IsMatch(url) && Uri.TryCreate(url, UriKind.Absolute, out var absolute))
+        {
+            return (string.IsNullOrEmpty(absolute.AbsolutePath) ? "/" : absolute.AbsolutePath) + absolute.Query + absolute.Fragment;
+        }
+
+        return url.StartsWith('/') ? url : "/" + url;
+    }
+
     public static string Resolve(string? baseUrl, string? url)
     {
         var resolved = Absolute(baseUrl, url);

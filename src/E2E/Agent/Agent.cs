@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Schema;
 using System.Text.Json.Serialization.Metadata;
+using E2E.Cache;
 using E2E.Engine;
 using E2E.Internal;
 
@@ -591,7 +592,7 @@ public sealed class Agent
         pending.RecordedActions = entry.Actions.Count;
         // A recording that opens with navigate sets up its own start screen.
         var opensWithNavigate = string.Equals(entry.Actions[0].Kind, "navigate", StringComparison.Ordinal);
-        if (!opensWithNavigate && !string.Equals(entry.Route, start.Route, StringComparison.Ordinal))
+        if (!opensWithNavigate && !CacheRoute.Same(Recorded(entry.Route, parameters), start.Route))
         {
             _scope.Missed++;
             return ReplayAttempt.Miss("wrong-context");
@@ -625,7 +626,7 @@ public sealed class Agent
         {
             // An action with no target reads no screen, so the screen the previous action left would go unseen.
             // Look at it, settled as the previous action's policy asks, until one on the recorded end route has been seen.
-            if (Look() is { } before && !HasTarget(action) && !string.Equals(screens[^1].Route, entry.EndRoute, StringComparison.Ordinal))
+            if (Look() is { } before && !HasTarget(action) && !CacheRoute.Same(screens[^1].Route, Recorded(entry.EndRoute, parameters)))
             {
                 screens.Add(await _feed.ObserveAsync(before, token).ConfigureAwait(false));
             }
@@ -638,7 +639,7 @@ public sealed class Agent
                     return ReplayAttempt.Hand("action-budget");
                 }
 
-                await _scope.Session.OpenAsync(Routes.Resolve(_scope.BaseUrl, action.Url ?? "/"), token).ConfigureAwait(false);
+                await _scope.Session.OpenAsync(Routes.Resolve(_scope.BaseUrl, CacheKeys.Detemplate(action.Url ?? "/", parameters)), token).ConfigureAwait(false);
                 _feed.ArmAfter(action);
                 actions.Add(action);
                 started = true;
@@ -770,7 +771,7 @@ public sealed class Agent
         var actedOn = _feed.FirstActedOn ?? start;
         var from = screens.IndexOf(actedOn);
         List<Observation> stretch = from >= 0 ? screens.GetRange(from, screens.Count - from) : [actedOn, .. screens.Skip(1)];
-        var baseline = Baseline(stretch, entry.EndRoute);
+        var baseline = Baseline(stretch, Recorded(entry.EndRoute, parameters));
         var baselineAnchors = baseline is null ? null : Project(baseline, parameters);
         var inputTargets = entry.Actions.Where(HasTarget).Select(action => new RecordedTarget { Role = action.Role, Name = action.Name, TestId = action.TestId });
         if (!Anchors.Evidenced(entry, baselineAnchors, inputTargets))
@@ -784,7 +785,7 @@ public sealed class Agent
         {
             // Every look must still be on the recorded end route: a screen that moved on is another screen.
             var end = await _feed.ObserveAsync(SettleMode.Raw, token).ConfigureAwait(false);
-            if (string.Equals(entry.EndRoute, end.Route, StringComparison.Ordinal) && Anchors.Holds(entry, Project(end, parameters), before))
+            if (CacheRoute.Same(Recorded(entry.EndRoute, parameters), end.Route) && Anchors.Holds(entry, Project(end, parameters), before))
             {
                 return true;
             }
@@ -805,7 +806,7 @@ public sealed class Agent
         Observation? baseline = null;
         foreach (var screen in screens)
         {
-            baseline = string.Equals(screen.Route, endRoute, StringComparison.Ordinal) ? baseline ?? screen : null;
+            baseline = CacheRoute.Same(screen.Route, endRoute) ? baseline ?? screen : null;
         }
 
         return baseline;
@@ -934,7 +935,7 @@ public sealed class Agent
         {
             var url = Args.String(call.Arguments, "url") ?? "/";
             await _scope.Session.OpenAsync(Routes.Resolve(_scope.BaseUrl, url), token).ConfigureAwait(false);
-            actions.Add(new RecordedAction { Kind = "navigate", Url = url });
+            actions.Add(new RecordedAction { Kind = "navigate", Url = CacheKeys.Template(url, parameters) });
             return ToolOutcome.Ok(await DescribeAsync("navigated to " + Routes.PathOf(url), actions[^1], token).ConfigureAwait(false));
         }
 
@@ -1520,6 +1521,13 @@ public sealed class Agent
             "The recording for '" + instruction + "' sits under another cache key (" + previous + ".json), since the runner or the agent's context changed after it was recorded. Strict cache mode does not run it live; re-record it without cache.strict.");
     }
 
+    // A route is recorded redacted, with each unique() value as its slot, and read back with this call's values.
+    private string Template(string route, IReadOnlyDictionary<string, object?>? parameters) =>
+        CacheKeys.Template(_scope.Redactor.Redact(route), parameters);
+
+    private static string? Recorded(string? route, IReadOnlyDictionary<string, object?>? parameters) =>
+        route is null ? null : CacheKeys.Detemplate(route, parameters);
+
     // A step that changed nothing a replay could check, no node and no route, records nothing:
     // its recording would replay on mechanics alone.
     private CacheEntry? BuildEntry(
@@ -1530,7 +1538,7 @@ public sealed class Agent
         List<RecordedAction> actions,
         IReadOnlyDictionary<string, object?>? parameters)
     {
-        var routeMoved = !string.Equals(baseline.Route, end.Route, StringComparison.Ordinal);
+        var routeMoved = !CacheRoute.Same(baseline.Route, end.Route);
         var (appeared, gone) = Anchors.Describe(Project(baseline, parameters), Project(end, parameters), routeMoved);
         if (appeared.Count == 0 && gone.Count == 0 && !routeMoved)
         {
@@ -1539,8 +1547,8 @@ public sealed class Agent
 
         var entry = new CacheEntry { Schema = step.Schema };
         entry.SetStep(step);
-        entry.Route = route;
-        entry.EndRoute = end.Route;
+        entry.Route = Template(route, parameters);
+        entry.EndRoute = Template(end.Route, parameters);
         entry.Actions = actions.ToList();
         entry.Appeared = appeared;
         entry.Gone = gone;

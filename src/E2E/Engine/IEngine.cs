@@ -51,7 +51,7 @@ public interface IEngine
 /// <summary>One attempt's session with the app. Disposed at the end of the attempt, after <c>afterEach</c>.</summary>
 public interface IEngineSession : IAsyncDisposable
 {
-    /// <summary>Path of the current screen, without query or fragment.</summary>
+    /// <summary>Location of the current screen: its path, query and fragment, without the origin.</summary>
     string Route { get; }
 
     Task OpenAsync(string url, CancellationToken cancellationToken);

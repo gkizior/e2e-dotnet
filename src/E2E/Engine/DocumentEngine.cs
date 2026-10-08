@@ -58,12 +58,12 @@ public sealed class DocumentEngine : IEngine
             _world = world;
         }
 
-        public string Route => _page?.Path ?? "/";
+        public string Route => _history.Count > 0 ? _history[^1] : "/";
 
         public Task OpenAsync(string url, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Navigate(Routes.PathOf(url));
+            Navigate(Routes.LocationOf(url));
             return Task.CompletedTask;
         }
 
@@ -109,7 +109,7 @@ public sealed class DocumentEngine : IEngine
             }
 
             _refs = refs;
-            return Task.FromResult(new Observation { Route = page.Path, Roots = roots });
+            return Task.FromResult(new Observation { Route = Route, Roots = roots });
         }
 
         public Task PerformAsync(SemanticNode node, LocatorAction action, CancellationToken cancellationToken)
@@ -137,7 +137,7 @@ public sealed class DocumentEngine : IEngine
                     Tap(element);
                     if (element.NavigateTo is not null)
                     {
-                        Navigate(Routes.PathOf(element.NavigateTo));
+                        Navigate(Routes.LocationOf(element.NavigateTo));
                     }
 
                     Tap(element);
@@ -235,7 +235,7 @@ public sealed class DocumentEngine : IEngine
                 element.OnTap?.Invoke();
                 if (element.NavigateTo is not null)
                 {
-                    Navigate(Routes.PathOf(element.NavigateTo));
+                    Navigate(Routes.LocationOf(element.NavigateTo));
                 }
             }
         }

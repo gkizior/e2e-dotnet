@@ -646,7 +646,7 @@ public sealed partial class WebEngine : IEngine
 
         internal IBrowserContext LiveContext => RequireContext();
 
-        public string Route => Routes.PathOf(Page.Url);
+        public string Route => Routes.LocationOf(Page.Url);
 
         public Task OpenAsync(string url, CancellationToken cancellationToken) => RunAsync("navigation", cancellationToken, async () =>
         {

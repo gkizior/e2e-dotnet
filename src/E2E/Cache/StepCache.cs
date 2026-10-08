@@ -387,12 +387,22 @@ internal static class CacheKeys
             return value;
         }
 
-        foreach (var pair in parameters)
-        {
-            if (pair.Value is UniqueValue unique && unique.Value.Length > 0 && value.Contains(unique.Value, StringComparison.Ordinal))
+        // Each value is looked for as typed and form-encoded, as a URL spells it. The longer text goes first,
+        // so a value that contains another is replaced whole.
+        var spellings = parameters
+            .Where(pair => pair.Value is UniqueValue { Value.Length: > 0 })
+            .SelectMany(pair =>
             {
-                value = value.Replace(unique.Value, "\u0001" + pair.Key + "\u0001", StringComparison.Ordinal);
-            }
+                var text = ((UniqueValue)pair.Value!).Value;
+                var form = FormEncode(text);
+                return form == text
+                    ? [(text, "\u0001" + pair.Key + "\u0001")]
+                    : new[] { (text, "\u0001" + pair.Key + "\u0001"), (form, "\u0001" + pair.Key + FormSuffix + "\u0001") };
+            })
+            .OrderByDescending(spelling => spelling.Item1.Length);
+        foreach (var (text, slot) in spellings)
+        {
+            value = value.Replace(text, slot, StringComparison.Ordinal);
         }
 
         return value;
@@ -409,11 +419,38 @@ internal static class CacheKeys
         {
             if (pair.Value is UniqueValue unique)
             {
-                value = value.Replace("\u0001" + pair.Key + "\u0001", unique.Value, StringComparison.Ordinal);
+                value = value
+                    .Replace("\u0001" + pair.Key + FormSuffix + "\u0001", FormEncode(unique.Value), StringComparison.Ordinal)
+                    .Replace("\u0001" + pair.Key + "\u0001", unique.Value, StringComparison.Ordinal);
             }
         }
 
         return value;
+    }
+
+    private const string FormSuffix = "|form";
+
+    /// <summary>The value as a form submission writes it: <c>+</c> for a space, and everything but letters, digits and <c>*-._</c> percent-encoded.</summary>
+    private static string FormEncode(string value)
+    {
+        var builder = new StringBuilder();
+        foreach (var octet in Encoding.UTF8.GetBytes(value))
+        {
+            if (octet is (>= (byte)'a' and <= (byte)'z') or (>= (byte)'A' and <= (byte)'Z') or (>= (byte)'0' and <= (byte)'9') or (byte)'*' or (byte)'-' or (byte)'.' or (byte)'_')
+            {
+                builder.Append((char)octet);
+            }
+            else if (octet == (byte)' ')
+            {
+                builder.Append('+');
+            }
+            else
+            {
+                builder.Append('%').Append(octet.ToString("X2", CultureInfo.InvariantCulture));
+            }
+        }
+
+        return builder.ToString();
     }
 
     public static bool Collides(IReadOnlyDictionary<string, object?>? parameters)

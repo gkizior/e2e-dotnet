@@ -280,7 +280,7 @@ public sealed class StepTraceSessionTests
         Assert.Equal("/storage", entry.EndRoute);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/119: a unique() value a URL spells form-encoded is not templated")]
+    [Fact]
     public async Task Records_nothing_when_a_unique_value_is_spelled_by_another_param_and_says_so_in_the_step_detail()
     {
         static DocumentWorld World() => new DocumentWorld()
@@ -314,7 +314,7 @@ public sealed class StepTraceSessionTests
         Assert.Null(clean.Cache?.NotRecorded);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/118: cache routes drop the query")]
+    [Fact]
     public async Task Records_the_new_screen_as_anchors_for_a_step_that_moved_to_another_pathname()
     {
         var directory = CoreTests.TempCache();
@@ -327,7 +327,7 @@ public sealed class StepTraceSessionTests
         Assert.Equal("/customers?ref=nav", entry.EndRoute);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/118: cache routes do not read a minted id as a placeholder")]
+    [Fact]
     public async Task Self_finalizes_on_a_created_records_page_whose_minted_id_differs_from_the_recording()
     {
         var directory = CoreTests.TempCache();
