@@ -119,8 +119,22 @@ public static class OAuthProviders
         ICredentialStore? store = null,
         CancellationToken cancellationToken = default)
     {
-        var provider = Get(providerId);
+        return await LoginAsync(Get(providerId), callbacks, options, store, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<OAuthCredentials> LoginAsync(
+        IOAuthProvider provider,
+        OAuthLoginCallbacks callbacks,
+        OAuthLoginOptions? options,
+        ICredentialStore? store,
+        CancellationToken cancellationToken)
+    {
         store ??= CredentialStores.Default();
+        if (store is EnvironmentCredentialStore environment)
+        {
+            environment.AssertWritable();
+        }
+
         var credentials = await provider.LoginAsync(callbacks, options ?? new OAuthLoginOptions(), cancellationToken).ConfigureAwait(false);
         await store.SetAsync(provider.Id, credentials, cancellationToken).ConfigureAwait(false);
         return credentials;

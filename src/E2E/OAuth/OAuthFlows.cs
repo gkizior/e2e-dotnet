@@ -206,7 +206,18 @@ internal static class DeviceFlow
         Func<DeviceAuthorization, string>? instructions,
         CancellationToken cancellationToken)
     {
-        var authorization = await start(cancellationToken).ConfigureAwait(false);
+        ThrowIfCancelled(cancellationToken);
+        DeviceAuthorization authorization;
+        try
+        {
+            authorization = await start(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OAuthException(OAuthException.Cancelled, "the login was cancelled", ex);
+        }
+
+        ThrowIfCancelled(cancellationToken);
         callbacks.OnAuth(new OAuthAuthInfo(
             authorization.VerificationUriComplete ?? authorization.VerificationUri,
             instructions?.Invoke(authorization) ?? "Open " + authorization.VerificationUri + " on any device and enter the code " + authorization.UserCode + ".",
@@ -226,11 +237,18 @@ internal static class DeviceFlow
                 throw new OAuthException(OAuthException.Cancelled, "the login was cancelled", ex);
             }
 
-            var result = await poll(authorization, cancellationToken).ConfigureAwait(false);
-            if (cancellationToken.IsCancellationRequested)
+            DevicePoll<T> result;
+            try
             {
-                throw new OAuthException(OAuthException.Cancelled, "the login was cancelled");
+                result = await poll(authorization, cancellationToken).ConfigureAwait(false);
             }
+            catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new OAuthException(OAuthException.Cancelled, "the login was cancelled", ex);
+            }
+
+            // A grant that lands after the user cancelled is not a login.
+            ThrowIfCancelled(cancellationToken);
 
             switch (result.Status)
             {
@@ -247,6 +265,15 @@ internal static class DeviceFlow
         }
 
         throw new OAuthException(OAuthException.Timeout, "the device code expired before the login finished; run the login again");
+    }
+
+    /// <summary>Keeps interrupted device requests and late grants under the login cancellation code.</summary>
+    private static void ThrowIfCancelled(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            throw new OAuthException(OAuthException.Cancelled, "the login was cancelled");
+        }
     }
 
     /// <summary>The standard device flow. The poll reads the body before the status, since vendors disagree on the status for "pending".</summary>

@@ -242,6 +242,12 @@ public sealed class EnvironmentCredentialStore : ICredentialStore
         return Task.FromResult(_entries.TryGetValue(providerId, out var entry) ? OAuthCredentials.FromJson(entry) : null);
     }
 
+    /// <summary>Throws <see cref="OAuthException.Misconfigured"/>: this store never takes a write. Lets a login fail before it starts.</summary>
+    internal void AssertWritable()
+    {
+        throw ReadOnly();
+    }
+
     public Task SetAsync(string providerId, OAuthCredentials credentials, CancellationToken cancellationToken = default)
     {
         throw ReadOnly();
