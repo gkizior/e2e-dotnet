@@ -4,6 +4,7 @@
 
 using System.Text.Json;
 using E2E.Engine;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Playwright;
 
 namespace E2E.Tests.AttemptSession;
@@ -102,7 +103,9 @@ public sealed class AttemptSessionTests
             Connect = new WebConnectOptions { CdpEndpoint = _ => Task.FromResult("provisioned") },
         })
         {
+            CreatePlaywright = FakeRemote.Playwright,
             ConnectCdp = ConnectAsync,
+            Clock = new FakeTimeProvider(),
         };
         await using var owner = await engine.StartAsync(Start(), None);
         await owner.OpenAsync(Url, None);
@@ -194,8 +197,9 @@ public sealed class AttemptSessionTests
         browser.Pages.Add(page.Page);
         _connections.Add(browser.Browser);
         CancellationToken? resolverToken = null;
+        var clock = new FakeTimeProvider();
         var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var engine = Engine(reconnect: token =>
+        var engine = Engine(clock: clock, reconnect: token =>
         {
             resolverToken = token;
             requested.TrySetResult();
@@ -216,6 +220,8 @@ public sealed class AttemptSessionTests
         }
         else
         {
+            // The deadline timer starts before the resolver runs, so this fires it.
+            clock.Advance(TimeSpan.FromMilliseconds(30));
             Assert.Equal(code, (await Assert.ThrowsAsync<EngineException>(() => result)).Code);
         }
 
@@ -267,7 +273,7 @@ public sealed class AttemptSessionTests
         var page = FakeTarget.Create("page");
         recovered.Pages.Add(page.Page);
         _connections.AddRange([original.Browser, recovered.Browser]);
-        var clock = new FakeClock();
+        var clock = new FakeTimeProvider();
         await using var first = await Engine(clock: clock, reconnect: _ =>
         {
             clock.Advance(TimeSpan.FromMilliseconds(40));
@@ -296,7 +302,10 @@ public sealed class AttemptSessionTests
         Assert.True(condition());
     }
 
-    /// <summary>Creates a separate owner whose engine remembers the remote contexts its attempts used. <paramref name="followWindow"/> is <c>viewport: null</c>.</summary>
+    /// <summary>
+    /// Creates a separate owner whose engine remembers the remote contexts its attempts used. <paramref name="followWindow"/> is <c>viewport: null</c>.
+    /// Time moves only when a test advances <paramref name="clock"/>, so a budget never runs out because the machine is slow.
+    /// </summary>
     private WebEngine Engine(
         bool followWindow = false,
         Func<CancellationToken, Task<string>>? provision = null,
@@ -313,8 +322,9 @@ public sealed class AttemptSessionTests
             },
         })
         {
+            CreatePlaywright = FakeRemote.Playwright,
             ConnectCdp = ConnectAsync,
-            Clock = clock ?? TimeProvider.System,
+            Clock = clock ?? new FakeTimeProvider(),
         };
     }
 

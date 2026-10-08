@@ -255,6 +255,9 @@ public sealed partial class WebEngine : IEngine
     /// <summary>Attaches to a CDP endpoint; tests replace it to stand in for the remote browser.</summary>
     internal Func<IPlaywright, string, TimeSpan, CancellationToken, Task<IBrowser>> ConnectCdp { get; init; } = BrowserConnection.ConnectCdpAsync;
 
+    /// <summary>Starts the Playwright driver; tests replace it so a fake remote needs no driver process.</summary>
+    internal Func<Task<IPlaywright>> CreatePlaywright { get; init; } = Playwright.CreateAsync;
+
     /// <summary>The clock operation budgets read; tests replace it to control elapsed time.</summary>
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
@@ -280,7 +283,7 @@ public sealed partial class WebEngine : IEngine
                 await EnsureChromiumAsync(!_headless, cancellationToken).ConfigureAwait(false);
             }
 
-            var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
+            var playwright = await CreatePlaywright().ConfigureAwait(false);
             var app = Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
             var seams = new SessionSeams(Clock, ConnectCdp);
             if (_options.Connect is { ReconnectEndpoint: { } reconnect } persistent)

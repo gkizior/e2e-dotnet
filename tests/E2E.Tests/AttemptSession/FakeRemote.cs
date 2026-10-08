@@ -88,6 +88,14 @@ internal sealed class FakeRemote
 
     public static FakeRemote Create(string? identity = null, Task<JsonElement?>? response = null) => new(identity, response);
 
+    /// <summary>Stands in for the Playwright driver, which a fake remote never talks to.</summary>
+    public static Task<IPlaywright> Playwright()
+    {
+        var (playwright, fake) = Fake<IPlaywright>.New();
+        fake.Members["Dispose"] = _ => null;
+        return Task.FromResult(playwright);
+    }
+
     public static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
     /// <summary>Drops the transport, as the engine sees it.</summary>
@@ -149,29 +157,4 @@ internal sealed class FakeTarget
 #pragma warning restore SA1401, CA1051
 
     public static FakeTarget Create(string id, Task<JsonElement?>? response = null) => new(id, response);
-}
-
-/// <summary>A clock that moves only when a test advances it; its timers never fire.</summary>
-internal sealed class FakeClock : TimeProvider
-{
-    private long _now;
-
-    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-
-    public override long GetTimestamp() => Interlocked.Read(ref _now);
-
-    public void Advance(TimeSpan by) => Interlocked.Add(ref _now, by.Ticks);
-
-    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) => new NeverTimer();
-
-    private sealed class NeverTimer : ITimer
-    {
-        public bool Change(TimeSpan dueTime, TimeSpan period) => true;
-
-        public void Dispose()
-        {
-        }
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
 }
