@@ -1960,6 +1960,10 @@ internal sealed class AttemptScope
             KeepCache = true;
             throw;
         }
+        catch (EngineException ex) when (AppNotOpen.Is(ex))
+        {
+            throw AppNotOpen.ForAgent(ex);
+        }
     }
 
     public async Task<T> Track<T>(Task<T> call)
@@ -1972,6 +1976,10 @@ internal sealed class AttemptScope
         {
             KeepCache = true;
             throw;
+        }
+        catch (EngineException ex) when (AppNotOpen.Is(ex))
+        {
+            throw AppNotOpen.ForAgent(ex);
         }
     }
 

@@ -57,23 +57,23 @@ public sealed class Browser
 
     /// <summary>Reloads the current document.</summary>
     public Task ReloadAsync(CancellationToken cancellationToken = default) =>
-        Require("reload").ReloadAsync(Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => Require("reload").ReloadAsync(Token(cancellationToken)));
 
     /// <summary>Navigates the history back once.</summary>
     public Task BackAsync(CancellationToken cancellationToken = default) =>
-        Require("back").BackAsync(Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => Require("back").BackAsync(Token(cancellationToken)));
 
     /// <summary>Navigates the history forward once.</summary>
     public Task ForwardAsync(CancellationToken cancellationToken = default) =>
-        Require("forward").ForwardAsync(Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => Require("forward").ForwardAsync(Token(cancellationToken)));
 
     /// <summary>Returns the current URL.</summary>
     public Task<string> UrlAsync(CancellationToken cancellationToken = default) =>
-        Require("url").GetUrlAsync(Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => Require("url").GetUrlAsync(Token(cancellationToken)));
 
     /// <summary>Returns the current title. A page that does not answer within the action timeout fails with <c>OPERATION_TIMEOUT</c>.</summary>
     public Task<string> TitleAsync(CancellationToken cancellationToken = default) =>
-        Require("title").GetTitleAsync(Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => Require("title").GetTitleAsync(Token(cancellationToken)));
 
     /// <summary>
     /// Waits until the current URL equals <paramref name="url"/>, resolved
@@ -271,7 +271,7 @@ public sealed class Browser
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(expression);
         var session = Require("evaluate");
-        var result = await session.EvaluateAsync(expression, arg, hasArg, Token(cancellationToken)).ConfigureAwait(false);
+        var result = await AppNotOpen.GuardAsync(() => session.EvaluateAsync(expression, arg, hasArg, Token(cancellationToken))).ConfigureAwait(false);
         if (result is not JsonElement element || element.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
         {
             return default;
@@ -333,7 +333,7 @@ public sealed class Browser
         var clock = Stopwatch.StartNew();
         while (true)
         {
-            var current = await session.GetUrlAsync(token).ConfigureAwait(false);
+            var current = await AppNotOpen.GuardAsync(() => session.GetUrlAsync(token)).ConfigureAwait(false);
             if (matches(current))
             {
                 return;
@@ -487,14 +487,14 @@ public sealed class BrowserKeyboard
     public Task PressAsync(string key, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(key);
-        return _browser.Require("keyboard.press").KeyboardPressAsync(key, _browser.Token(cancellationToken));
+        return AppNotOpen.GuardAsync(() => _browser.Require("keyboard.press").KeyboardPressAsync(key, _browser.Token(cancellationToken)));
     }
 
     /// <summary>Types plain text.</summary>
     public Task TypeAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(text);
-        return _browser.Require("keyboard.type").KeyboardTypeAsync(text, _browser.Token(cancellationToken));
+        return AppNotOpen.GuardAsync(() => _browser.Require("keyboard.type").KeyboardTypeAsync(text, _browser.Token(cancellationToken)));
     }
 }
 
@@ -512,16 +512,16 @@ public sealed class BrowserMouse
     }
 
     public Task MoveAsync(float x, float y, CancellationToken cancellationToken = default) =>
-        _browser.Require("mouse.move").MouseMoveAsync(x, y, _browser.Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => _browser.Require("mouse.move").MouseMoveAsync(x, y, _browser.Token(cancellationToken)));
 
     public Task WheelAsync(float deltaX, float deltaY, CancellationToken cancellationToken = default) =>
-        _browser.Require("mouse.wheel").MouseWheelAsync(deltaX, deltaY, _browser.Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => _browser.Require("mouse.wheel").MouseWheelAsync(deltaX, deltaY, _browser.Token(cancellationToken)));
 
     /// <summary>Presses the primary button.</summary>
     public Task DownAsync(CancellationToken cancellationToken = default) =>
-        _browser.Require("mouse.down").MouseDownAsync(_browser.Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => _browser.Require("mouse.down").MouseDownAsync(_browser.Token(cancellationToken)));
 
     /// <summary>Releases the primary button.</summary>
     public Task UpAsync(CancellationToken cancellationToken = default) =>
-        _browser.Require("mouse.up").MouseUpAsync(_browser.Token(cancellationToken));
+        AppNotOpen.GuardAsync(() => _browser.Require("mouse.up").MouseUpAsync(_browser.Token(cancellationToken)));
 }

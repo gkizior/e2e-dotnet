@@ -279,7 +279,7 @@ public sealed class WebEngineLifecycleTests
         Assert.Equal(["Email", "First name"], fields);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/122: observing before any open returns the blank page")]
+    [Fact]
     public async Task Reports_an_unopened_page_as_INVALID_STATE_never_as_a_missing_node()
     {
         using var site = await FixtureApp.StartAsync();
@@ -290,7 +290,7 @@ public sealed class WebEngineLifecycleTests
         Assert.Equal("INVALID_STATE", error.Code);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/123: OpenAsync waits out a cancelled token")]
+    [Fact]
     public async Task Cancels_an_in_flight_operation_when_its_signal_aborts_instead_of_waiting_out_Playwright()
     {
         using var site = await FixtureApp.StartAsync();

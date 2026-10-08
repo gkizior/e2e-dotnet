@@ -31,7 +31,7 @@ public sealed class EngineErrorTests
         var cause = new System.TimeoutException(
             "Timeout 5000ms exceeded.\nCall log:\n  - waiting for element to be visible, enabled and stable\n  - element is not enabled");
 
-        var error = WebErrors.ClassifyAction(cause, new LocatorAction.Tap());
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(cause, new LocatorAction.Tap()));
 
         Assert.Equal("NOT_ACTIONABLE", error.Code);
         Assert.False(error.Retryable);
@@ -46,7 +46,7 @@ public sealed class EngineErrorTests
         var cause = new System.TimeoutException(
             "Timeout 5000ms exceeded.\nCall log:\n  - performing click action\n  - click action done\n  - waiting for scheduled navigations to finish");
 
-        var error = WebErrors.ClassifyAction(cause, new LocatorAction.Tap());
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(cause, new LocatorAction.Tap()));
 
         Assert.Equal("ACTION_MAY_HAVE_COMMITTED", error.Code);
         Assert.False(error.Retryable);
@@ -55,7 +55,7 @@ public sealed class EngineErrorTests
     [Fact]
     public void A_detached_element_is_a_retryable_stale_node()
     {
-        var error = WebErrors.ClassifyAction(new PlaywrightException("Element is not attached to the DOM"), new LocatorAction.Check());
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(new PlaywrightException("Element is not attached to the DOM"), new LocatorAction.Check()));
 
         Assert.Equal("NODE_STALE", error.Code);
         Assert.True(error.Retryable);
@@ -64,7 +64,7 @@ public sealed class EngineErrorTests
     [Fact]
     public void A_field_that_does_not_take_text_is_not_actionable()
     {
-        var error = WebErrors.ClassifyAction(new PlaywrightException("Error: Element is not an <input>, <textarea> or [contenteditable] element"), new LocatorAction.Fill("x"));
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(new PlaywrightException("Error: Element is not an <input>, <textarea> or [contenteditable] element"), new LocatorAction.Fill("x")));
 
         Assert.Equal("NOT_ACTIONABLE", error.Code);
     }
@@ -72,7 +72,7 @@ public sealed class EngineErrorTests
     [Fact]
     public void A_sensitive_fill_redacts_its_value_and_drops_the_cause()
     {
-        var error = WebErrors.ClassifyAction(new PlaywrightException("fill(\"hunter2\") failed"), new LocatorAction.Fill("hunter2", Sensitive: true));
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(new PlaywrightException("fill(\"hunter2\") failed"), new LocatorAction.Fill("hunter2", Sensitive: true)));
 
         Assert.Equal("ENGINE_FAILURE", error.Code);
         Assert.DoesNotContain("hunter2", error.Message, StringComparison.Ordinal);

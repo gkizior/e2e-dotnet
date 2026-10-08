@@ -108,30 +108,13 @@ public sealed class Screen
 
     internal async Task<Observation> ObserveAsync(CancellationToken cancellationToken)
     {
-        try
-        {
-            return await _observe(cancellationToken == default ? _cancellation() : cancellationToken).ConfigureAwait(false);
-        }
-        catch (EngineException ex) when (ex.Code == EngineErrorCodes.InvalidState)
-        {
-            throw AppNotOpen(ex);
-        }
+        return await AppNotOpen.GuardAsync(() => _observe(cancellationToken == default ? _cancellation() : cancellationToken)).ConfigureAwait(false);
     }
 
     internal async Task PerformAsync(SemanticNode node, LocatorAction action, CancellationToken cancellationToken)
     {
-        try
-        {
-            await _perform(node, action, cancellationToken == default ? _cancellation() : cancellationToken).ConfigureAwait(false);
-        }
-        catch (EngineException ex) when (ex.Code == EngineErrorCodes.InvalidState)
-        {
-            throw AppNotOpen(ex);
-        }
+        await AppNotOpen.GuardAsync(() => _perform(node, action, cancellationToken == default ? _cancellation() : cancellationToken)).ConfigureAwait(false);
     }
-
-    // An engine with no open page reports INVALID_STATE; to the test that means no app is open.
-    private static TestException AppNotOpen(EngineException ex) => new("APP_NOT_OPEN", ex.Message, ex);
 
     internal CancellationToken Token(CancellationToken cancellationToken)
     {

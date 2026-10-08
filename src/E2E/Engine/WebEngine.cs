@@ -666,6 +666,10 @@ public sealed partial class WebEngine : IEngine
                     Timeout = budget.PlaywrightTimeout,
                 })).ConfigureAwait(false);
             }
+            catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new EngineException(EngineErrorCodes.Cancelled, "navigate to " + url + " cancelled", retryable: false, ex);
+            }
             catch (Exception ex) when (WebErrors.IsPlaywright(ex))
             {
                 throw WebErrors.Translate(ex, "navigate to " + url);
@@ -2118,12 +2122,17 @@ internal static partial class WebErrors
     }
 
     /// <summary>Classifies a failed locator action. A timeout after the input was dispatched may have committed.</summary>
-    public static EngineException ClassifyAction(Exception rawCause, LocatorAction action)
+    public static E2EException ClassifyAction(Exception rawCause, LocatorAction action)
     {
         var kind = action.GetType().Name.ToLowerInvariant();
         if (InputCutOff(rawCause, kind) is { } cut)
         {
             return cut;
+        }
+
+        if (rawCause is E2EException classified)
+        {
+            return classified;
         }
 
         var sensitive = action is LocatorAction.Fill { Sensitive: true };

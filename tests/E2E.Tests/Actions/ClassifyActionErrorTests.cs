@@ -34,7 +34,7 @@ public sealed class ClassifyActionErrorTests
 
     private static readonly LocatorAction Tap = new LocatorAction.Tap();
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/107: ClassifyAction reclassifies an already classified error")]
+    [Fact]
     public void Passes_classified_errors_through_untouched_whatever_their_class()
     {
         var engine = new EngineException(EngineErrorCodes.NodeStale, "gone", retryable: true);
@@ -52,7 +52,7 @@ public sealed class ClassifyActionErrorTests
     [InlineData("Target page, context or browser has been closed", "ENGINE_FAILURE", false)]
     public void Maps_text_to_code(string text, string code, bool retryable)
     {
-        var error = WebErrors.ClassifyAction(new PlaywrightException(text), Tap);
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(new PlaywrightException(text), Tap));
 
         Assert.Equal(code, error.Code);
         Assert.Equal(retryable, error.Retryable);
@@ -61,7 +61,7 @@ public sealed class ClassifyActionErrorTests
     [Fact]
     public void Maps_a_timeout_whose_log_ends_before_the_dispatch_to_NOT_ACTIONABLE()
     {
-        var error = WebErrors.ClassifyAction(PwTimeout(PreDispatchLog), Tap);
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(PwTimeout(PreDispatchLog), Tap));
 
         Assert.Equal("NOT_ACTIONABLE", error.Code);
         Assert.False(error.Retryable);
@@ -107,7 +107,7 @@ public sealed class ClassifyActionErrorTests
     [Fact]
     public void Maps_a_timeout_whose_log_reached_the_dispatch_to_ACTION_MAY_HAVE_COMMITTED()
     {
-        var error = WebErrors.ClassifyAction(PwTimeout(PostDispatchLog), Tap);
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(PwTimeout(PostDispatchLog), Tap));
 
         Assert.Equal("ACTION_MAY_HAVE_COMMITTED", error.Code);
         Assert.False(error.Retryable);
@@ -127,7 +127,7 @@ public sealed class ClassifyActionErrorTests
     {
         var cut = new EngineException(EngineErrorCodes.OperationTimeout, "tap timed out", retryable: false);
 
-        var error = WebErrors.ClassifyAction(cut, Tap);
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(cut, Tap));
 
         Assert.Equal("ACTION_MAY_HAVE_COMMITTED", error.Code);
         Assert.False(error.Retryable);
@@ -148,7 +148,7 @@ public sealed class ClassifyActionErrorTests
         const string secret = "hunter2-plaintext";
         var raw = new PlaywrightException($"locator.fill(\"{secret}\"): Element is not an <input>, <textarea> or [contenteditable] element");
 
-        var error = WebErrors.ClassifyAction(raw, new LocatorAction.Fill(secret, Sensitive: true));
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(raw, new LocatorAction.Fill(secret, Sensitive: true)));
 
         Assert.Equal("NOT_ACTIONABLE", error.Code);
         Assert.DoesNotContain(secret, error.Message, StringComparison.Ordinal);
@@ -161,7 +161,7 @@ public sealed class ClassifyActionErrorTests
     {
         var raw = new PlaywrightException("Element is not an <input>");
 
-        var error = WebErrors.ClassifyAction(raw, new LocatorAction.Fill("gamma", Sensitive: false));
+        var error = Assert.IsType<EngineException>(WebErrors.ClassifyAction(raw, new LocatorAction.Fill("gamma", Sensitive: false)));
 
         Assert.Same(raw, error.InnerException);
     }
