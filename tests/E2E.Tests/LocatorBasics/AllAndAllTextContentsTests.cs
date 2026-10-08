@@ -47,7 +47,7 @@ public sealed class AllAndAllTextContentsTests
         Assert.Equal([""], await screen.GetByRole("listitem").AllTextContentsAsync());
     }
 
-    [Fact(Skip = "Gap: the port's allTextContents reads a secure field's text; upstream denies it with POLICY_DENIED, like textContent.")]
+    [Fact]
     public async Task Denies_allTextContents_when_a_match_is_a_secure_field_like_textContent()
     {
         var screen = ScreenFixture.Create(Shown, Item("pw", "hunter2", new NodeStates { Secure = true }));

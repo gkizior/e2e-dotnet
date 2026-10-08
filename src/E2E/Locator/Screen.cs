@@ -389,10 +389,14 @@ public sealed class Locator
         return locators;
     }
 
-    /// <summary>Reads the whitespace-normalized rendered text of every current match, without waiting. Empty when nothing matches.</summary>
+    /// <summary>
+    /// Reads the whitespace-normalized rendered text of every current match, without waiting. Empty when nothing matches.
+    /// Fails with <c>POLICY_DENIED</c> when any match is a secure field.
+    /// </summary>
     public async Task<IReadOnlyList<string>> AllTextContentsAsync(CancellationToken cancellationToken = default)
     {
         var matches = await ResolveAsync(_screen.Token(cancellationToken)).ConfigureAwait(false);
+        DenySecureRead(matches);
         return matches.Select(node => TextRules.Normalize(node.Text ?? node.Name ?? "")).ToList();
     }
 
