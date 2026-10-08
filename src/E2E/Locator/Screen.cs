@@ -414,7 +414,7 @@ public sealed class Locator
             token.ThrowIfCancellationRequested();
             var observation = await _screen.ObserveAsync(token).ConfigureAwait(false);
             var matches = LocatorResolver.Resolve(observation, Query, includeHidden);
-            if (matches.Count > 1 && state is not WaitForState.Detached)
+            if (matches.Count > 1)
             {
                 throw Ambiguous(matches.Count);
             }

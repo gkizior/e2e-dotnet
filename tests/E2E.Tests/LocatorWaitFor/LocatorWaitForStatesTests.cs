@@ -69,7 +69,7 @@ public sealed class LocatorWaitForStatesTests
         Assert.Equal("TIMEOUT", error.Code);
     }
 
-    [Fact(Skip = "Gap: the port's waitFor(detached) keeps waiting on several matches; upstream fails every state at once.")]
+    [Fact]
     public async Task Fails_every_state_at_once_on_several_matches()
     {
         var locator = Changing([Banner, Twin], [Banner, Twin]);
