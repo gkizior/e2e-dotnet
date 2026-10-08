@@ -686,7 +686,7 @@ public sealed class Agent
         {
             var end = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
             if (string.Equals(entry.EndRoute, end.Route, StringComparison.Ordinal)
-                && entry.Appeared.All(appeared => Find(end, appeared.Role, appeared.Name, appeared.TestId, null).Count == 1))
+                && entry.Appeared.All(appeared => Find(end, appeared.Role, appeared.Name, appeared.TestId, null, _scope.Redactor).Count == 1))
             {
                 return true;
             }
@@ -706,7 +706,7 @@ public sealed class Agent
         while (true)
         {
             var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-            var matches = Find(observation, action.Role, action.Name, action.TestId, null);
+            var matches = Find(observation, action.Role, action.Name, action.TestId, null, _scope.Redactor);
             if (matches.Count == 1)
             {
                 return (matches[0], null);
@@ -856,8 +856,8 @@ public sealed class Agent
                     {
                         Kind = "fill",
                         Role = node.Role,
-                        Name = node.Name,
-                        TestId = node.TestId,
+                        Name = Redact(node.Name, _scope.Redactor),
+                        TestId = Redact(node.TestId, _scope.Redactor),
                         Value = CacheKeys.Template(value, parameters),
                     });
                     return ToolOutcome.Ok(await DescribeAsync("filled " + Label(node), token).ConfigureAwait(false));
@@ -866,12 +866,12 @@ public sealed class Agent
                 case "press":
                     var key = Args.String(call.Arguments, "key") ?? "Enter";
                     await _scope.Session.PerformAsync(node, new LocatorAction.Press(key), token).ConfigureAwait(false);
-                    actions.Add(new RecordedAction { Kind = "press", Role = node.Role, Name = node.Name, TestId = node.TestId, Key = key });
+                    actions.Add(new RecordedAction { Kind = "press", Role = node.Role, Name = Redact(node.Name, _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor), Key = key });
                     return ToolOutcome.Ok(await DescribeAsync("pressed " + key + " on " + Label(node), token).ConfigureAwait(false));
                 case "select":
                     var selected = Args.String(call.Arguments, "value") ?? "";
                     await _scope.Session.PerformAsync(node, new LocatorAction.Select(selected), token).ConfigureAwait(false);
-                    actions.Add(new RecordedAction { Kind = "select", Role = node.Role, Name = node.Name, TestId = node.TestId, Value = selected });
+                    actions.Add(new RecordedAction { Kind = "select", Role = node.Role, Name = Redact(node.Name, _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor), Value = selected });
                     return ToolOutcome.Ok(await DescribeAsync("selected " + selected, token).ConfigureAwait(false));
                 case "check":
                     await _scope.Session.PerformAsync(node, new LocatorAction.Check(), token).ConfigureAwait(false);
@@ -1020,8 +1020,8 @@ public sealed class Agent
         for (var screens = 0; ; screens++)
         {
             var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-            var within = list is null ? null : Single(Find(observation, list.Role, list.Name, list.TestId, null));
-            var found = Reading(within is null ? observation.Roots : within.Children, text);
+            var within = list is null ? null : Single(Find(observation, list.Role, list.Name, list.TestId, null, _scope.Redactor));
+            var found = Reading(within is null ? observation.Roots : within.Children, text, _scope.Redactor);
             if (found is not null)
             {
                 await _scope.Session.PerformAsync(found, new LocatorAction.ScrollIntoView(), token).ConfigureAwait(false);
@@ -1064,8 +1064,8 @@ public sealed class Agent
         }
     }
 
-    // The innermost visible node whose name or text contains the text.
-    private static SemanticNode? Reading(IReadOnlyList<SemanticNode> nodes, string text)
+    // The innermost visible node whose redacted name or text contains the text.
+    private static SemanticNode? Reading(IReadOnlyList<SemanticNode> nodes, string text, Redactor redactor)
     {
         foreach (var node in nodes)
         {
@@ -1074,13 +1074,13 @@ public sealed class Agent
                 continue;
             }
 
-            var inner = Reading(node.Children, text);
+            var inner = Reading(node.Children, text, redactor);
             if (inner is not null)
             {
                 return inner;
             }
 
-            if (TextRules.Matches(node.Name, text, exact: false) || TextRules.Matches(node.Text, text, exact: false))
+            if (TextRules.Matches(Redact(node.Name, redactor), text, exact: false) || TextRules.Matches(Redact(node.Text, redactor), text, exact: false))
             {
                 return node;
             }
@@ -1095,21 +1095,23 @@ public sealed class Agent
     }
 
     // Consecutive identical scrolls fold into one recorded action with a repeat count.
-    private static void RecordScroll(List<RecordedAction> actions, ScrollDirection direction, SemanticNode? list)
+    private void RecordScroll(List<RecordedAction> actions, ScrollDirection direction, SemanticNode? list)
     {
         var way = DirectionName(direction);
+        var scroll = list is null ? new RecordedAction { Kind = "scroll" } : Record(list, "scroll");
         if (actions.Count > 0
             && actions[^1] is { Kind: "scroll" } last
             && string.Equals(last.Direction, way, StringComparison.Ordinal)
-            && string.Equals(last.Role, list?.Role, StringComparison.Ordinal)
-            && string.Equals(last.Name, list?.Name, StringComparison.Ordinal)
-            && string.Equals(last.TestId, list?.TestId, StringComparison.Ordinal))
+            && string.Equals(last.Role, scroll.Role, StringComparison.Ordinal)
+            && string.Equals(last.Name, scroll.Name, StringComparison.Ordinal)
+            && string.Equals(last.TestId, scroll.TestId, StringComparison.Ordinal))
         {
             last.Times = (last.Times ?? 1) + 1;
             return;
         }
 
-        actions.Add(new RecordedAction { Kind = "scroll", Role = list?.Role, Name = list?.Name, TestId = list?.TestId, Direction = way });
+        scroll.Direction = way;
+        actions.Add(scroll);
     }
 
     private static bool HasTarget(JsonElement arguments)
@@ -1185,8 +1187,8 @@ public sealed class Agent
         {
             Kind = "fill",
             Role = node.Role,
-            Name = node.Name,
-            TestId = node.TestId,
+            Name = Redact(node.Name, _scope.Redactor),
+            TestId = Redact(node.TestId, _scope.Redactor),
             Value = "<secret:" + secret.Name + ">",
         });
         return ToolOutcome.Ok(await DescribeAsync("filled secret <secret:" + secret.Name + "> into " + Label(node), token).ConfigureAwait(false));
@@ -1195,7 +1197,7 @@ public sealed class Agent
     private async Task<SemanticNode> ResolveAsync(JsonElement arguments, CancellationToken token)
     {
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-        var matches = Find(observation, Args.String(arguments, "role"), Args.String(arguments, "name"), Args.String(arguments, "testId"), Args.String(arguments, "ref"));
+        var matches = Find(observation, Args.String(arguments, "role"), Args.String(arguments, "name"), Args.String(arguments, "testId"), Args.String(arguments, "ref"), _scope.Redactor);
         if (matches.Count == 0)
         {
             throw new TestException("NOT_FOUND", "No control matched role=" + Args.String(arguments, "role") + " name=" + Args.String(arguments, "name") + ".");
@@ -1209,7 +1211,8 @@ public sealed class Agent
         return matches[0];
     }
 
-    private static List<SemanticNode> Find(Observation observation, string? role, string? name, string? testId, string? reference)
+    // A name or test id is matched in its redacted form, the form the model reads and the cache records.
+    private static List<SemanticNode> Find(Observation observation, string? role, string? name, string? testId, string? reference, Redactor redactor)
     {
         var matches = new List<SemanticNode>();
         foreach (var node in LocatorResolver.Walk(observation.Roots))
@@ -1234,12 +1237,12 @@ public sealed class Agent
                 continue;
             }
 
-            if (name is not null && !TextRules.Matches(node.Name, name, exact: true))
+            if (name is not null && !TextRules.Matches(Redact(node.Name, redactor), name, exact: true))
             {
                 continue;
             }
 
-            if (testId is not null && !string.Equals(node.TestId, testId, StringComparison.Ordinal))
+            if (testId is not null && !string.Equals(Redact(node.TestId, redactor), testId, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -1358,18 +1361,19 @@ public sealed class Agent
             Route = start.Route,
             EndRoute = end.Route,
             Actions = actions.ToList(),
-            Appeared = Appeared(start, end, parameters),
+            Appeared = Appeared(start, end, parameters, _scope.Redactor),
         };
     }
 
-    private static List<RecordedTarget> Appeared(Observation before, Observation after, IReadOnlyDictionary<string, object?>? parameters)
+    // Anchors are read from the redacted names and test ids, so a secret on the screen never reaches the cache.
+    private static List<RecordedTarget> Appeared(Observation before, Observation after, IReadOnlyDictionary<string, object?>? parameters, Redactor redactor)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var node in LocatorResolver.Walk(before.Roots))
         {
             if (!node.States.Hidden && !string.IsNullOrEmpty(node.Name))
             {
-                seen.Add((node.Role ?? "") + "\n" + node.Name + "\n" + node.TestId);
+                seen.Add((node.Role ?? "") + "\n" + redactor.Redact(node.Name) + "\n" + Redact(node.TestId, redactor));
             }
         }
 
@@ -1381,24 +1385,26 @@ public sealed class Agent
                 continue;
             }
 
-            if (ContainsParam(node.Name, parameters))
+            var name = redactor.Redact(node.Name);
+            var testId = Redact(node.TestId, redactor);
+            if (ContainsParam(name, parameters))
             {
                 continue;
             }
 
-            var key = (node.Role ?? "") + "\n" + node.Name + "\n" + node.TestId;
+            var key = (node.Role ?? "") + "\n" + name + "\n" + testId;
             if (!seen.Add(key))
             {
                 continue;
             }
 
             // The replay needs exactly one match, so a repeated control is no anchor.
-            if (Find(after, node.Role, node.Name, node.TestId, null).Count != 1)
+            if (Find(after, node.Role, name, testId, null, redactor).Count != 1)
             {
                 continue;
             }
 
-            appeared.Add(new RecordedTarget { Role = node.Role, Name = node.Name, TestId = node.TestId });
+            appeared.Add(new RecordedTarget { Role = node.Role, Name = name, TestId = testId });
             if (appeared.Count == 8)
             {
                 break;
@@ -1406,6 +1412,11 @@ public sealed class Agent
         }
 
         return appeared;
+    }
+
+    private static string? Redact(string? text, Redactor redactor)
+    {
+        return text is null ? null : redactor.Redact(text);
     }
 
     private static bool ContainsParam(string name, IReadOnlyDictionary<string, object?>? parameters)
@@ -1426,9 +1437,9 @@ public sealed class Agent
         return false;
     }
 
-    private static RecordedAction Record(SemanticNode node, string kind)
+    private RecordedAction Record(SemanticNode node, string kind)
     {
-        return new RecordedAction { Kind = kind, Role = node.Role, Name = node.Name, TestId = node.TestId };
+        return new RecordedAction { Kind = kind, Role = node.Role, Name = Redact(node.Name, _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor) };
     }
 
     private static RecordedAction Detemplate(RecordedAction action, IReadOnlyDictionary<string, object?>? parameters)

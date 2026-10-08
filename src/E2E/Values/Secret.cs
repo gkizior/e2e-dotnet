@@ -8,7 +8,8 @@ using System.Text;
 namespace E2E;
 
 /// <summary>
-/// A value the model must not see. Prompts, transcripts, and reports receive
+/// A value the model must not see. Prompts, transcripts, reports, and the names
+/// and test ids an act records in its replay cache entry receive
 /// <c>&lt;secret:name&gt;</c>. The agent fills the real value itself.
 /// </summary>
 public sealed class Secret

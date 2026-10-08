@@ -1102,14 +1102,14 @@ public sealed class CoreTests
         });
     }
 
-    private static string TempCache()
+    internal static string TempCache()
     {
         return Path.Combine(Path.GetTempPath(), "e2e-tests", Guid.NewGuid().ToString("n"));
     }
 
-    private readonly record struct Attempt(Exception? Error, int ModelCalls, int Replayed, int Missed);
+    internal readonly record struct Attempt(Exception? Error, int ModelCalls, int Replayed, int Missed);
 
-    private static async Task<Attempt> RunAsync(
+    internal static async Task<Attempt> RunAsync(
         Func<TestContext, Task> body,
         DocumentWorld? world = null,
         IAgentModel? model = null,
