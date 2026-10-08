@@ -67,7 +67,7 @@ public sealed class PollConditionTests
         Assert.InRange(watch.Elapsed, Grace + TimeSpan.FromMilliseconds(300), Grace * 3);
     }
 
-    [Fact(Skip = "Gap: the port can issue one more read after the deadline before it decides; upstream decides at the deadline without a read past it.")]
+    [Fact]
     public async Task Negated_a_slow_first_read_counts_toward_a_budget_shorter_than_the_grace_window()
     {
         var issued = new List<TimeSpan>();

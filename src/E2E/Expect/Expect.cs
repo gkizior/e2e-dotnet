@@ -387,17 +387,38 @@ public sealed class LocatorExpect
 
             if (now >= deadline)
             {
-                var name = (_negated ? "not." : "") + matcher;
-                var code = verdict.StrictCount > 1 ? "STRICT_MODE" : "ASSERTION_FAILED";
-                throw new TestException(
-                    code,
-                    "expect(" + _locator.Query.Describe() + ")." + name + " failed: expected " + (_negated ? "not " : "") + describeExpected
-                    + "; observed " + verdict.Observed + " (match count " + Number(matches.Count) + ")");
+                throw Failure(matcher, describeExpected, verdict, matches);
             }
 
             firstSample = false;
-            await Task.Delay(_locator.Screen.PollInterval, token).ConfigureAwait(false);
+            // Rounded up to whole milliseconds, which is what Task.Delay waits, so the capped pause never wakes before the deadline.
+            var remaining = TimeSpan.FromMilliseconds(Math.Ceiling((deadline - now).TotalMilliseconds));
+            await Task.Delay(_negated && remaining < _locator.Screen.PollInterval ? remaining : _locator.Screen.PollInterval, token).ConfigureAwait(false);
+
+            // A read past the deadline has no budget left, so a negation decides at the deadline on what it has seen.
+            now = DateTime.UtcNow;
+            if (_negated && now >= deadline)
+            {
+                if (falseSince is { } since && now - since >= grace)
+                {
+                    _locator.Screen.NotifyVerified();
+                    return;
+                }
+
+                throw Failure(matcher, describeExpected, verdict, matches);
+            }
         }
+    }
+
+    /// <summary>The error a matcher throws at its deadline, built from its last sample.</summary>
+    private TestException Failure(string matcher, string describeExpected, Verdict verdict, IReadOnlyList<SemanticNode> matches)
+    {
+        var name = (_negated ? "not." : "") + matcher;
+        var code = verdict.StrictCount > 1 ? "STRICT_MODE" : "ASSERTION_FAILED";
+        return new TestException(
+            code,
+            "expect(" + _locator.Query.Describe() + ")." + name + " failed: expected " + (_negated ? "not " : "") + describeExpected
+            + "; observed " + verdict.Observed + " (match count " + Number(matches.Count) + ")");
     }
 
     private static bool MatchesPositionally(IReadOnlyList<SemanticNode> nodes, List<TextMatch> patterns, Func<SemanticNode, TextMatch, bool> satisfies)
