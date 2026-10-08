@@ -32,11 +32,18 @@ internal static class ModelHttp
 
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
 
+    /// <summary>The most response body bytes a failure message quotes.</summary>
+    private const int MaxProviderBodyBytes = 1024;
+
+    /// <summary>The most body characters a failure message redacts, far past what it quotes.</summary>
+    private const int MaxRedactedBodyChars = 16 * 1024;
+
     /// <summary>
     /// Sends <paramref name="message"/> and returns the body of a successful answer. A timeout, an unreachable
-    /// host, or an error status fails with <c>MODEL_PROVIDER_FAILED</c>.
+    /// host, or an error status fails with <c>MODEL_PROVIDER_FAILED</c>. The failure names the HTTP status and
+    /// the body, redacted with <paramref name="redactor"/> and cut at 1 KB.
     /// </summary>
-    public static async Task<string> SendAsync(HttpClient http, HttpRequestMessage message, CancellationToken cancellationToken)
+    public static async Task<string> SendAsync(HttpClient http, HttpRequestMessage message, Redactor redactor, CancellationToken cancellationToken)
     {
         ModelEndpoint.AddHeaders(message, RequestHeaders);
         HttpResponseMessage response;
@@ -63,14 +70,49 @@ internal static class ModelHttp
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                var detail = body.Length > 400 ? body[..400] : body;
-                throw new AgentException(
-                    "MODEL_PROVIDER_FAILED",
-                    "The model provider returned " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) + ". " + detail);
+                throw new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed: " + FailureText(response, body, redactor));
             }
 
             return body;
         }
+    }
+
+    /// <summary>
+    /// <c>HTTP 400</c> or <c>HTTP 400: {body}</c>. The body is redacted before it is cut, so no prefix of a
+    /// secret survives the cut. A body past <see cref="MaxRedactedBodyChars"/> is cut first, so a large error
+    /// page does not cost a scan of all of it.
+    /// </summary>
+    private static string FailureText(HttpResponseMessage response, string body, Redactor redactor)
+    {
+        var status = "HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture);
+        var trimmed = body.Trim();
+        var redacted = redactor.Redact(trimmed.Length > MaxRedactedBodyChars ? trimmed[..MaxRedactedBodyChars] : trimmed);
+        if (redacted.Length == 0)
+        {
+            return status;
+        }
+
+        var quoted = CutUtf8(redacted, MaxProviderBodyBytes);
+        return status + ": " + quoted + (quoted.Length < redacted.Length ? "…" : "");
+    }
+
+    /// <summary>The longest prefix of <paramref name="text"/> that fits in <paramref name="maxBytes"/> of UTF-8, never splitting a character.</summary>
+    private static string CutUtf8(string text, int maxBytes)
+    {
+        var bytes = 0;
+        var end = 0;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            bytes += rune.Utf8SequenceLength;
+            if (bytes > maxBytes)
+            {
+                break;
+            }
+
+            end += rune.Utf16SequenceLength;
+        }
+
+        return text[..end];
     }
 
     /// <summary>Parses a provider answer, mapping unreadable JSON to <c>MODEL_OUTPUT_INVALID</c>.</summary>

@@ -47,7 +47,7 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
         ModelEndpoint.Authorize(message, _options.ResolveApiKey(), _options.ApiKeyHeader);
         ModelEndpoint.AddHeaders(message, _options.Headers);
         message.Content = ModelHttp.Json(BuildBody(request));
-        var body = await ModelHttp.SendAsync(_http, message, cancellationToken).ConfigureAwait(false);
+        var body = await ModelHttp.SendAsync(_http, message, request.Redactor, cancellationToken).ConfigureAwait(false);
         return ModelHttp.Parse(body, Parse);
     }
 

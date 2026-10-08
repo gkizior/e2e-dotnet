@@ -44,7 +44,7 @@ public sealed class AnthropicModel : IAgentModel, IDisposable
         message.Headers.TryAddWithoutValidation("anthropic-version", _options.Version);
         ModelEndpoint.AddHeaders(message, _options.Headers);
         message.Content = ModelHttp.Json(BuildBody(request));
-        var body = await ModelHttp.SendAsync(_http, message, cancellationToken).ConfigureAwait(false);
+        var body = await ModelHttp.SendAsync(_http, message, request.Redactor, cancellationToken).ConfigureAwait(false);
         return ModelHttp.Parse(body, Parse);
     }
 

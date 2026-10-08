@@ -1482,6 +1482,7 @@ public sealed class Agent
                 Messages = messages,
                 Tools = tools,
                 ProviderOptions = agent.ProviderOptions,
+                Redactor = _scope.Redactor,
             };
             response = await model.CompleteAsync(request, token).ConfigureAwait(false);
         }

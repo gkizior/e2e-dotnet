@@ -62,7 +62,7 @@ public sealed class BedrockModel : IAgentModel, IDisposable
             SigV4.Sign(message, payload, credentials, region, "bedrock", DateTimeOffset.UtcNow);
         }
 
-        var body = await ModelHttp.SendAsync(_http, message, cancellationToken).ConfigureAwait(false);
+        var body = await ModelHttp.SendAsync(_http, message, request.Redactor, cancellationToken).ConfigureAwait(false);
         return ModelHttp.Parse(body, Parse);
     }
 

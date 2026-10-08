@@ -29,6 +29,9 @@ public sealed class ModelRequest
     /// <see cref="OpenAiCompatibleModel"/> adds the entry under its provider name to the request body.
     /// </summary>
     public IReadOnlyDictionary<string, JsonElement>? ProviderOptions { get; init; }
+
+    /// <summary>Redacts the secrets of the step from a provider failure that quotes the response body.</summary>
+    internal Redactor Redactor { get; init; } = Redactor.None;
 }
 
 public sealed class ModelMessage
