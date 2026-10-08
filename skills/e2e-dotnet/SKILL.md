@@ -91,6 +91,7 @@ Members of `E2ETest`:
   - `WaitForResponseAsync(pattern, timeout?)`: resolves once the headers arrive, with a `WebResponse` (`Url`, `Status`, `Headers`, `TextAsync()`, `JsonAsync<T>()`). `TextAsync` and `JsonAsync` wait for the body (up to the action timeout) and fail with `ACTION_FAILED` when it could not be read. Start it before the step that sends the request, and await it after.
   - `CookiesAsync()`, `SetCookiesAsync([...])`: a target is an http(s) URL, relative to the base URL, or a domain. `SetCookiesAsync` refuses a cookie URL that is not http(s), `about:blank` included, with `POLICY_DENIED`.
   - A `RouteAsync`, `UnrouteAsync`, or `WaitForResponseAsync` pattern is a glob string or a `Regex` matched against the full URL (`*` stays within one path segment, `**` crosses `/`, `?` is one character, `\` escapes the next one).
+  - `AddInitScriptAsync(source | WebInitScript)`, `AddInitScriptAsync(WebInitScript.FromFunction(fn), arg)`: runs before the page's own scripts; call it before `App.OpenAsync`. `arg` is JSON.
 - `Secrets.Get("admin-password")`: a `Secret` from config.
 
 Rules for agent steps:
@@ -128,6 +129,26 @@ protected override IEngine CreateEngine() => new WebEngine(new WebEngineOptions
 - `TimezoneId` is the IANA time zone every attempt runs in. Spell it with its exact case (`Europe/Berlin`, not `europe/berlin`), or it is `INVALID_CONFIG`.
 
 To test without a browser or model, override `CreateEngine()` to return a `DocumentEngine`, and `CreateModel()` to return a scripted `IAgentModel`.
+
+### Run a script before the page
+
+An init script runs in every document before the page's own scripts, in every tab and frame: mock a browser API, seed `Math.random`, or set a flag the app reads at boot. A script is JavaScript source (a string), a file (`WebInitScript.FromPath`, relative to the project root), or a function's JavaScript source (`WebInitScript.FromFunction`). A function cannot close over test variables; pass a JSON `arg` instead. For every test, set `InitScripts` on the engine:
+
+```csharp
+protected override IEngine CreateEngine() => new WebEngine(new WebEngineOptions
+{
+    InitScripts = [WebInitScript.FromPath("tests/init.js")],
+});
+```
+
+For one test, before the page opens:
+
+```csharp
+await Browser.AddInitScriptAsync(WebInitScript.FromFunction("(value) => { Math.random = () => value; }"), 0.5);
+await App.OpenAsync("/raffle");
+```
+
+A script added after the page opened runs from the next navigation or reload. A configured file that cannot be read fails the test with `INVALID_CONFIG`. A bad script or an argument passed with anything but a function fails with `INVALID_ARGUMENT`, and a `Secret` in the argument with `POLICY_DENIED`.
 
 ## Run
 

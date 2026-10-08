@@ -55,6 +55,14 @@ public interface IBrowserSession : IEngineSession
     /// <summary>Sizes the open page, and every page the session opens later in the attempt.</summary>
     Task SetViewportAsync(int width, int height, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Adds page source every document runs before its own, from now on, in
+    /// this context and each one that replaces it. A session that does not
+    /// override it fails with <c>UNSUPPORTED_CAPABILITY</c>.
+    /// </summary>
+    Task AddInitScriptAsync(string source, CancellationToken cancellationToken) =>
+        Task.FromException(new EngineException("UNSUPPORTED_CAPABILITY", "browser.addInitScript is not supported by this engine."));
+
     Task KeyboardTypeAsync(string text, CancellationToken cancellationToken);
 
     Task MouseMoveAsync(float x, float y, CancellationToken cancellationToken);

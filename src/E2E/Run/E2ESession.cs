@@ -68,6 +68,7 @@ public sealed class E2ESession : IAsyncDisposable
             timeout.CancelAfter(options.TestTimeout);
         }
 
+        var projectRoot = Path.GetFullPath(string.IsNullOrEmpty(options.ProjectRoot) ? Directory.GetCurrentDirectory() : options.ProjectRoot);
         IEngineSession engine;
         var launch = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
         try
@@ -78,7 +79,7 @@ public sealed class E2ESession : IAsyncDisposable
             }
 
             engine = await options.Engine.StartAsync(
-                new EngineStartOptions { BaseUrl = options.BaseUrl, ActionTimeout = options.ActionTimeout },
+                new EngineStartOptions { BaseUrl = options.BaseUrl, ActionTimeout = options.ActionTimeout, ProjectRoot = projectRoot },
                 launch.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (launch.IsCancellationRequested && !timeout.IsCancellationRequested)
@@ -124,7 +125,7 @@ public sealed class E2ESession : IAsyncDisposable
             TestFailed = () => softFailures.Any || testFailed(),
         };
         var app = new App(engine, options.BaseUrl, () => timeout.Token);
-        var browser = new Browser(engine, options.Engine.Platform, options.BaseUrl, Path.GetFullPath(string.IsNullOrEmpty(options.ProjectRoot) ? Directory.GetCurrentDirectory() : options.ProjectRoot), options.ActionTimeout, options.AssertionTimeout, () => timeout.Token);
+        var browser = new Browser(engine, options.Engine.Platform, options.BaseUrl, projectRoot, options.ActionTimeout, options.AssertionTimeout, () => timeout.Token);
         var agent = new Agent(scope);
         var screen = new Screen(
             token => engine.ObserveAsync(token),

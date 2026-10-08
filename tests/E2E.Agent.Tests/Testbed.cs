@@ -6,12 +6,14 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 
-namespace E2E.Agent.Tests;
+namespace E2E.Playground;
 
 /// <summary>
-/// The playground pages the agent tests run against, served on a loopback port for the whole
+/// The playground pages the testbed tests run against, served on a loopback port for the whole
 /// test run. A port of upstream's <c>apps/testbed</c> with only the pages these tests use:
-/// the landing page, a todo list kept in localStorage, and a checkout with one planted bug.
+/// the landing page, a todo list kept in localStorage, a checkout with one planted bug, the
+/// browser fixture's own page, and the about page navigation lands on. E2E.NUnit.Tests links
+/// this file for its browser fixture tests.
 /// </summary>
 internal static class Testbed
 {
@@ -20,6 +22,8 @@ internal static class Testbed
         ("/", "Home"),
         ("/todos", "Todos"),
         ("/checkout", "Checkout"),
+        ("/browser", "Browser"),
+        ("/about", "About"),
     ];
 
     private static readonly Dictionary<string, (string Title, string Body)> Pages = new(StringComparer.Ordinal)
@@ -153,6 +157,40 @@ internal static class Testbed
                        });
                      }
                    </script>
+            """),
+
+        // The browser fixture's own surface: navigation with a delay, the viewport
+        // size, the cookies the page sees, and a load counter for reload.
+        ["/browser"] = ("Browser", """
+            <h1>Browser</h1>
+                   <button id="go-about">Go to about, soon</button>
+                   <output aria-label="Viewport"></output>
+                   <output aria-label="Cookies"></output>
+                   <output aria-label="Loads"></output>
+                   <output aria-label="Random"></output>
+                   <script>
+                     document.getElementById('go-about').addEventListener('click', () => {
+                       setTimeout(() => {
+                         location.assign('/about');
+                       }, 400);
+                     });
+                     const viewport = document.querySelector('output[aria-label="Viewport"]');
+                     const report = () => {
+                       viewport.textContent = innerWidth + 'x' + innerHeight;
+                     };
+                     addEventListener('resize', report);
+                     report();
+                     document.querySelector('output[aria-label="Cookies"]').textContent = document.cookie || 'no cookies';
+                     const loads = Number(sessionStorage.getItem('loads') ?? '0') + 1;
+                     sessionStorage.setItem('loads', String(loads));
+                     document.querySelector('output[aria-label="Loads"]').textContent = 'loads: ' + loads;
+                     document.querySelector('output[aria-label="Random"]').textContent = 'random: ' + (Math.random() === 0.5 ? 'seeded' : 'unseeded');
+                   </script>
+            """),
+
+        ["/about"] = ("About page", """
+            <h1>About</h1>
+                   <p>The playground, described.</p>
             """),
     };
 

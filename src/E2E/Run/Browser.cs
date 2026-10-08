@@ -20,6 +20,13 @@ public sealed class Browser
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
 
+    // An init script argument is page source, so a Secret anywhere in it is refused.
+    // Names and nulls are kept as written, as JSON.stringify and EvaluateAsync keep them.
+    private static readonly JsonSerializerOptions InitScriptArgumentOptions = new()
+    {
+        Converters = { new SecretRefusal() },
+    };
+
     private readonly IEngineSession _session;
     private readonly string _platform;
     private readonly string? _baseUrl;
@@ -153,6 +160,27 @@ public sealed class Browser
         return UnrouteCoreAsync(pattern, cancellationToken);
     }
 
+    /// <summary>
+    /// Adds JavaScript source every document runs before the page's own, in
+    /// every tab and frame, from the next navigation on, for the rest of the attempt.
+    /// </summary>
+    public Task AddInitScriptAsync(string script, CancellationToken cancellationToken = default) =>
+        AddInitScriptAsync(WebInitScript.FromSource(script), cancellationToken);
+
+    /// <summary>
+    /// Adds an init script: source, a file of it (<see cref="WebInitScript.FromPath"/>),
+    /// or a function the page calls with no argument (<see cref="WebInitScript.FromFunction"/>).
+    /// </summary>
+    public Task AddInitScriptAsync(WebInitScript script, CancellationToken cancellationToken = default) =>
+        AddInitScriptCoreAsync(script, null, hasArg: false, cancellationToken);
+
+    /// <summary>
+    /// Adds an init script function (<see cref="WebInitScript.FromFunction"/>) the
+    /// page calls with one JSON-safe argument. Only a function takes an argument.
+    /// </summary>
+    public Task AddInitScriptAsync(WebInitScript script, object? arg, CancellationToken cancellationToken = default) =>
+        AddInitScriptCoreAsync(script, arg, hasArg: true, cancellationToken);
+
     /// <summary>Returns the cookies visible to the browser context.</summary>
     public Task<IReadOnlyList<BrowserCookie>> CookiesAsync(CancellationToken cancellationToken = default) =>
         Require("cookies").GetCookiesAsync(Token(cancellationToken));
@@ -209,6 +237,35 @@ public sealed class Browser
 
     internal CancellationToken Token(CancellationToken cancellationToken) =>
         cancellationToken == default ? _token() : cancellationToken;
+
+    private async Task AddInitScriptCoreAsync(WebInitScript script, object? arg, bool hasArg, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(script);
+        if (script.Problem() is { } problem)
+        {
+            throw new TestException("INVALID_ARGUMENT", "browser.addInitScript script " + problem);
+        }
+
+        if (hasArg && script.Function is null)
+        {
+            throw new TestException("INVALID_ARGUMENT", "browser.addInitScript takes an argument only with a function script");
+        }
+
+        string? argument = null;
+        try
+        {
+            argument = hasArg ? JsonSerializer.Serialize(arg, InitScriptArgumentOptions) : null;
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            throw new TestException("INVALID_ARGUMENT", "browser.addInitScript argument is not JSON: " + ex.Message, ex);
+        }
+
+        var session = Require("addInitScript");
+        var token = Token(cancellationToken);
+        var source = await script.ReadAsync(argument, _projectRoot, (message, cause) => new TestException("INVALID_ARGUMENT", "browser.addInitScript " + message, cause), token).ConfigureAwait(false);
+        await session.AddInitScriptAsync(source, token).ConfigureAwait(false);
+    }
 
     private async Task<T?> EvaluateCoreAsync<T>(string expression, object? arg, bool hasArg, CancellationToken cancellationToken)
     {
@@ -289,6 +346,15 @@ public sealed class Browser
 
             await Task.Delay(PollInterval, token).ConfigureAwait(false);
         }
+    }
+
+    private sealed class SecretRefusal : System.Text.Json.Serialization.JsonConverter<Secret>
+    {
+        public override Secret Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            throw new NotSupportedException();
+
+        public override void Write(Utf8JsonWriter writer, Secret value, JsonSerializerOptions options) =>
+            throw new TestException("POLICY_DENIED", "addInitScript argument must not contain a Secret");
     }
 }
 

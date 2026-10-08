@@ -40,6 +40,89 @@ public sealed class WebBasicAuth
     internal string Password { get; }
 }
 
+/// <summary>
+/// A script every document runs before the page's own, in every tab and
+/// frame: JavaScript source, a file of it, or a function source the page
+/// calls. A string converts to source.
+/// </summary>
+public sealed class WebInitScript
+{
+    private WebInitScript(string? source, string? path, string? function)
+    {
+        Source = source;
+        Path = path;
+        Function = function;
+    }
+
+    /// <summary>The JavaScript source, or <see langword="null"/> for a file or a function.</summary>
+    public string? Source { get; }
+
+    /// <summary>The file of JavaScript source, relative to the project root, or <see langword="null"/> for source or a function.</summary>
+    public string? Path { get; }
+
+    /// <summary>
+    /// The source of a function the page calls, such as <c>() =&gt; { ... }</c>,
+    /// or <see langword="null"/> for source or a file. It cannot close over test
+    /// variables; <c>Browser.AddInitScriptAsync</c> passes it one JSON argument.
+    /// </summary>
+    public string? Function { get; }
+
+    public static WebInitScript FromSource(string source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        return new WebInitScript(source, null, null);
+    }
+
+    public static WebInitScript FromPath(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return new WebInitScript(null, path, null);
+    }
+
+    public static WebInitScript FromFunction(string function)
+    {
+        ArgumentNullException.ThrowIfNull(function);
+        return new WebInitScript(null, null, function);
+    }
+
+    public static implicit operator WebInitScript(string source) => FromSource(source);
+
+    /// <summary>Why this script cannot run, or <see langword="null"/>.</summary>
+    internal string? Problem() => Path is { Length: 0 } ? "path must be a non-empty string" : null;
+
+    /// <summary>
+    /// The page source: the source itself, a function called with its JSON
+    /// <paramref name="argument"/> (parsed in the page, since an object literal
+    /// would turn an own <c>__proto__</c> key into the prototype), or the file's
+    /// text with a <c>sourceURL</c>, so a stack trace in the page names it. A
+    /// file that cannot be read throws what <paramref name="fail"/> makes of the problem.
+    /// </summary>
+    internal async Task<string> ReadAsync(string? argument, string projectRoot, Func<string, Exception, Exception> fail, CancellationToken cancellationToken)
+    {
+        if (Source is not null)
+        {
+            return Source;
+        }
+
+        if (Function is not null)
+        {
+            return "(" + Function + "\n)(" + (argument is null ? "" : "JSON.parse(" + System.Text.Json.JsonSerializer.Serialize(argument) + ")") + ");";
+        }
+
+        var file = Path!;
+        try
+        {
+            file = System.IO.Path.GetFullPath(file, projectRoot);
+            return await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false) + "\n//# sourceURL=" + file.ReplaceLineEndings("");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            var cause = ex is FileNotFoundException or DirectoryNotFoundException ? "ENOENT" : ex.Message;
+            throw fail("path cannot be read: " + file + " (" + cause + ")", ex);
+        }
+    }
+}
+
 /// <summary>Attach to a remote Chromium over CDP instead of launching one.</summary>
 public sealed class WebConnectOptions
 {
@@ -93,6 +176,9 @@ public sealed class WebEngineOptions
     /// what <c>Date</c> and <c>Intl</c> resolve local time against. Defaults to the machine's.
     /// </summary>
     public string? TimezoneId { get; init; }
+
+    /// <summary>Scripts every document runs before the page's own, in every tab and frame, in order.</summary>
+    public IReadOnlyList<WebInitScript>? InitScripts { get; init; }
 
     /// <summary>Attach to a remote Chromium over CDP instead of launching a local one.</summary>
     public WebConnectOptions? Connect { get; init; }
@@ -164,6 +250,7 @@ public sealed partial class WebEngine : IEngine
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
+            var initScripts = await ReadInitScriptsAsync(options.ProjectRoot, cancellationToken).ConfigureAwait(false);
             if (_options.Connect is null)
             {
                 await EnsureChromiumAsync(!_headless, cancellationToken).ConfigureAwait(false);
@@ -182,7 +269,7 @@ public sealed partial class WebEngine : IEngine
             }
 
             var app = Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var parsed) ? parsed : null;
-            var session = new WebSession(playwright, browser, options.ActionTimeout, _options, context => InstallSiteHeadersAsync(context, app), url => SiteHeadersFor(url, app));
+            var session = new WebSession(playwright, browser, options.ActionTimeout, _options, initScripts, context => InstallSiteHeadersAsync(context, app), url => SiteHeadersFor(url, app));
             await session.NewContextAsync().ConfigureAwait(false);
             return session;
         }
@@ -274,6 +361,33 @@ public sealed partial class WebEngine : IEngine
         {
             throw new EngineException("INVALID_CONFIG", "timezoneId must be an IANA time zone such as \"Europe/Berlin\", got \"" + timezoneId + "\".");
         }
+
+        for (var index = 0; index < (options.InitScripts?.Count ?? 0); index++)
+        {
+            var script = options.InitScripts![index];
+            if ((script is null ? "must be a string of source, a { path }, or a function, got null" : script.Problem()) is { } problem)
+            {
+                throw new EngineException("INVALID_CONFIG", InitScriptAt(index) + problem + ".");
+            }
+        }
+    }
+
+    private static string InitScriptAt(int index) => "initScripts[" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "] ";
+
+    // The configured init scripts as page source, read before the browser
+    // launches, so a missing file fails the attempt with nothing to close.
+    private async Task<List<string>> ReadInitScriptsAsync(string? projectRoot, CancellationToken cancellationToken)
+    {
+        var sources = new List<string>();
+        var scripts = _options.InitScripts ?? [];
+        for (var index = 0; index < scripts.Count; index++)
+        {
+            var at = InitScriptAt(index);
+            var root = System.IO.Path.GetFullPath(string.IsNullOrEmpty(projectRoot) ? Directory.GetCurrentDirectory() : projectRoot);
+            sources.Add(await scripts[index].ReadAsync(null, root, (message, cause) => new EngineException("INVALID_CONFIG", at + message, cause), cancellationToken).ConfigureAwait(false));
+        }
+
+        return sources;
     }
 
     // Refuses a locale that is not a BCP 47 tag, and one an accept-language
@@ -407,6 +521,9 @@ public sealed partial class WebEngine : IEngine
         // Attempt-scoped routes, registered on the context so they cover every page,
         // and registered again on each context ClearStateAsync opens.
         private readonly List<(Func<string, bool> Matches, Func<IRoute, Task> PlaywrightHandler, Func<IBrowserRoute, Task> Handler)> _routes = [];
+
+        // The attempt's init scripts, configured then added, applied to each context the session opens.
+        private readonly List<string> _initScripts;
         private IBrowserContext? _context;
         private Exception? _pending;
         private IPage? _page;
@@ -414,9 +531,10 @@ public sealed partial class WebEngine : IEngine
         private Dictionary<string, IFrame> _frames = new(StringComparer.Ordinal);
         private int _nextRef = 1;
 
-        public WebSession(IPlaywright playwright, IBrowser browser, TimeSpan actionTimeout, WebEngineOptions options, Func<IBrowserContext, Task> setUpContext, Func<string, IReadOnlyDictionary<string, string>?> siteHeaders)
+        public WebSession(IPlaywright playwright, IBrowser browser, TimeSpan actionTimeout, WebEngineOptions options, List<string> initScripts, Func<IBrowserContext, Task> setUpContext, Func<string, IReadOnlyDictionary<string, string>?> siteHeaders)
         {
             _playwright = playwright;
+            _initScripts = initScripts;
             _browser = browser;
             _options = options;
             _setUpContext = setUpContext;
@@ -730,6 +848,14 @@ public sealed partial class WebEngine : IEngine
             }
         }
 
+        public async Task AddInitScriptAsync(string source, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var context = RequireContext();
+            await context.AddInitScriptAsync(source).ConfigureAwait(false);
+            _initScripts.Add(source);
+        }
+
         public Task KeyboardTypeAsync(string text, CancellationToken cancellationToken)
         {
             return InputAsync(() => Page.Keyboard.TypeAsync(text), "keyboard.type", cancellationToken);
@@ -760,6 +886,11 @@ public sealed partial class WebEngine : IEngine
         {
             var context = await _browser.NewContextAsync(ContextOptions(_options, _viewport)).ConfigureAwait(false);
             await context.AddInitScriptAsync(PageScript.RecordClosedShadowRoots).ConfigureAwait(false);
+            foreach (var script in _initScripts)
+            {
+                await context.AddInitScriptAsync(script).ConfigureAwait(false);
+            }
+
             await _setUpContext(context).ConfigureAwait(false);
             foreach (var (matches, playwrightHandler, _) in _routes)
             {

@@ -27,6 +27,9 @@ public sealed class EngineStartOptions
     public string? BaseUrl { get; init; }
 
     public TimeSpan ActionTimeout { get; init; } = E2EDefaults.ActionTimeout;
+
+    /// <summary>Anchors the files the engine options name, such as an init script's <c>Path</c>. Defaults to the working directory.</summary>
+    public string? ProjectRoot { get; init; }
 }
 
 /// <summary>
