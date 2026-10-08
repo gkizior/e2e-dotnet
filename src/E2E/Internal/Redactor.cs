@@ -69,7 +69,7 @@ internal sealed class Redactor
     /// <summary>A redactor for one value whose name is not known, as an engine sees a sensitive fill.</summary>
     public static Redactor ForValue(string value)
     {
-        return new Redactor([("<secret>", value)]);
+        return new Redactor([("[redacted]", value)]);
     }
 
     public static string Marker(string name) => "<secret:" + name + ">";

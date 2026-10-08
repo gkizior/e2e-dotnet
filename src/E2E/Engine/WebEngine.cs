@@ -2,6 +2,7 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -448,11 +449,13 @@ public sealed partial class WebEngine : IEngine
                     await NewPageAsync(RequireContext()).ConfigureAwait(false);
                 }
 
-                await Page.GotoAsync(url, new PageGotoOptions
+                // The budget is the navigation's: opening the first page does not spend it.
+                var budget = Budget("navigate to " + url, cancellationToken);
+                await budget.WithinAsync(Page.GotoAsync(url, new PageGotoOptions
                 {
                     WaitUntil = WaitUntilState.Load,
-                    Timeout = (float)_actionTimeout.TotalMilliseconds,
-                }).ConfigureAwait(false);
+                    Timeout = budget.PlaywrightTimeout,
+                })).ConfigureAwait(false);
             }
             catch (Exception ex) when (WebErrors.IsPlaywright(ex))
             {
@@ -462,12 +465,12 @@ public sealed partial class WebEngine : IEngine
 
         public async Task<Observation> ObserveAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var budget = Budget("observe", cancellationToken);
             var walk = new FrameWalk();
             List<WebNode> roots;
             try
             {
-                roots = await CollectAsync(Page.MainFrame, walk, cancellationToken).ConfigureAwait(false);
+                roots = await CollectAsync(Page.MainFrame, walk, budget).ConfigureAwait(false);
             }
             catch (Exception ex) when (WebErrors.IsPlaywright(ex))
             {
@@ -480,9 +483,9 @@ public sealed partial class WebEngine : IEngine
 
         public async Task PerformAsync(SemanticNode node, LocatorAction action, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(node);
             ArgumentNullException.ThrowIfNull(action);
+            var budget = Budget(action.GetType().Name.ToLowerInvariant(), cancellationToken);
             var frame = _frames.GetValueOrDefault(node.Ref) ?? Page.MainFrame;
             if (frame.IsDetached)
             {
@@ -492,11 +495,16 @@ public sealed partial class WebEngine : IEngine
             IJSHandle handle;
             try
             {
-                handle = await frame.EvaluateHandleAsync(PageScript.Find, node.Ref).ConfigureAwait(false);
+                handle = await budget.WithinAsync(frame.EvaluateHandleAsync(PageScript.Find, node.Ref)).ConfigureAwait(false);
             }
             catch (Exception ex) when (WebErrors.IsPlaywright(ex))
             {
                 throw WebErrors.NavigationStaleOr(ex, "locate " + node.Ref);
+            }
+            catch (EngineException ex) when (ex.Code == EngineErrorCodes.OperationTimeout)
+            {
+                // As upstream, the deadline cutting off any part of an action is the action's cut-off.
+                throw WebErrors.ClassifyAction(ex, action);
             }
 
             // A frame's handle to a missing ref is a plain JSHandle, which
@@ -509,80 +517,27 @@ public sealed partial class WebEngine : IEngine
             }
 
             await using var disposeElement = element.ConfigureAwait(false);
-            var timeout = (float)_actionTimeout.TotalMilliseconds;
             try
             {
-                switch (action)
-                {
-                    case LocatorAction.Tap:
-                        await element.ClickAsync(new ElementHandleClickOptions { Timeout = timeout }).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.DoubleTap:
-                        await element.DblClickAsync(new ElementHandleDblClickOptions { Timeout = timeout }).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.Fill fill:
-                        await element.FillAsync(fill.Value, new ElementHandleFillOptions { Timeout = timeout }).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.Press press:
-                        await element.PressAsync(press.Key, new ElementHandlePressOptions { Timeout = timeout }).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.PressSequentially typed:
-                        await element.FocusAsync().ConfigureAwait(false);
-                        await Page.Keyboard.TypeAsync(typed.Text, new KeyboardTypeOptions
-                        {
-                            Delay = typed.Delay is TimeSpan delay ? (float)delay.TotalMilliseconds : null,
-                        }).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.Select select:
-                        await element.SelectOptionAsync(select.Value, new ElementHandleSelectOptionOptions { Timeout = timeout }).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.Check:
-                        await SetCheckedAsync(element, true, timeout).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.Uncheck:
-                        await SetCheckedAsync(element, false, timeout).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.Clear:
-                        await element.FillAsync("", new ElementHandleFillOptions { Timeout = timeout }).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.Focus:
-                        await element.FocusAsync().ConfigureAwait(false);
-                        break;
-                    case LocatorAction.ScrollIntoView:
-                        await element.ScrollIntoViewIfNeededAsync(new ElementHandleScrollIntoViewIfNeededOptions { Timeout = timeout }).ConfigureAwait(false);
-                        break;
-                    case LocatorAction.Swipe swipe:
-                        await element.EvaluateAsync(PageScript.ScrollElement, Direction(swipe.Direction)).ConfigureAwait(false);
-                        break;
-                    default:
-                        throw new EngineException(EngineErrorCodes.UnsupportedCapability, "Web engine cannot perform " + action.GetType().Name + ".");
-                }
+                await budget.WithinAsync(DispatchAsync(element, action, budget)).ConfigureAwait(false);
             }
-            catch (Exception ex) when (WebErrors.IsPlaywright(ex))
+            catch (Exception ex) when (WebErrors.IsPlaywright(ex) || ex is EngineException { Code: EngineErrorCodes.OperationTimeout })
             {
                 throw WebErrors.ClassifyAction(ex, action);
             }
         }
 
-        public async Task PressAsync(string key, CancellationToken cancellationToken)
+        public Task PressAsync(string key, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                await Page.Keyboard.PressAsync(key).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (WebErrors.IsPlaywright(ex))
-            {
-                throw WebErrors.Translate(ex, "press " + key);
-            }
+            return InputAsync(() => Page.Keyboard.PressAsync(key), "press " + key, cancellationToken);
         }
 
         public async Task BackAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var budget = Budget("back", cancellationToken);
             try
             {
-                await Page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.Load, Timeout = ActionMs }).ConfigureAwait(false);
+                await budget.WithinAsync(Page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.Load, Timeout = budget.PlaywrightTimeout })).ConfigureAwait(false);
             }
             catch (Exception ex) when (WebErrors.IsPlaywright(ex))
             {
@@ -592,10 +547,10 @@ public sealed partial class WebEngine : IEngine
 
         public async Task ForwardAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var budget = Budget("forward", cancellationToken);
             try
             {
-                await Page.GoForwardAsync(new PageGoForwardOptions { WaitUntil = WaitUntilState.Load, Timeout = ActionMs }).ConfigureAwait(false);
+                await budget.WithinAsync(Page.GoForwardAsync(new PageGoForwardOptions { WaitUntil = WaitUntilState.Load, Timeout = budget.PlaywrightTimeout })).ConfigureAwait(false);
             }
             catch (Exception ex) when (WebErrors.IsPlaywright(ex))
             {
@@ -605,10 +560,10 @@ public sealed partial class WebEngine : IEngine
 
         public async Task ReloadAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var budget = Budget("reload", cancellationToken);
             try
             {
-                await Page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.Load, Timeout = ActionMs }).ConfigureAwait(false);
+                await budget.WithinAsync(Page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.Load, Timeout = budget.PlaywrightTimeout })).ConfigureAwait(false);
             }
             catch (Exception ex) when (WebErrors.IsPlaywright(ex))
             {
@@ -653,18 +608,18 @@ public sealed partial class WebEngine : IEngine
 
         public Task<string> GetTitleAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Page.TitleAsync();
+            return Budget("title", cancellationToken).WithinAsync(Page.TitleAsync());
         }
 
         public async Task<System.Text.Json.JsonElement?> EvaluateAsync(string expression, object? arg, bool hasArg, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var budget = Budget("evaluate", cancellationToken);
             try
             {
-                return hasArg
-                    ? await Page.EvaluateAsync<System.Text.Json.JsonElement?>(expression, arg).ConfigureAwait(false)
-                    : await Page.EvaluateAsync<System.Text.Json.JsonElement?>(expression).ConfigureAwait(false);
+                var call = hasArg
+                    ? Page.EvaluateAsync<System.Text.Json.JsonElement?>(expression, arg)
+                    : Page.EvaluateAsync<System.Text.Json.JsonElement?>(expression);
+                return await budget.WithinAsync(call).ConfigureAwait(false);
             }
             catch (PlaywrightException ex)
             {
@@ -767,42 +722,37 @@ public sealed partial class WebEngine : IEngine
 
         public async Task SetViewportAsync(int width, int height, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var budget = Budget("setViewport", cancellationToken);
             _viewport = new ViewportSize { Width = width, Height = height };
             if (_page is not null)
             {
-                await _page.SetViewportSizeAsync(width, height).ConfigureAwait(false);
+                await budget.WithinAsync(_page.SetViewportSizeAsync(width, height)).ConfigureAwait(false);
             }
         }
 
         public Task KeyboardTypeAsync(string text, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Page.Keyboard.TypeAsync(text);
+            return InputAsync(() => Page.Keyboard.TypeAsync(text), "keyboard.type", cancellationToken);
         }
 
         public Task MouseMoveAsync(float x, float y, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Page.Mouse.MoveAsync(x, y);
+            return InputAsync(() => Page.Mouse.MoveAsync(x, y), "mouse.move", cancellationToken);
         }
 
         public Task MouseWheelAsync(float deltaX, float deltaY, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Page.Mouse.WheelAsync(deltaX, deltaY);
+            return InputAsync(() => Page.Mouse.WheelAsync(deltaX, deltaY), "mouse.wheel", cancellationToken);
         }
 
         public Task MouseDownAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Page.Mouse.DownAsync();
+            return InputAsync(() => Page.Mouse.DownAsync(), "mouse.down", cancellationToken);
         }
 
         public Task MouseUpAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Page.Mouse.UpAsync();
+            return InputAsync(() => Page.Mouse.UpAsync(), "mouse.up", cancellationToken);
         }
 
         /// <summary>Opens a clean context at the current viewport. Its first page opens on the first navigation.</summary>
@@ -821,14 +771,19 @@ public sealed partial class WebEngine : IEngine
 
         public async Task SwipeAsync(ScrollDirection direction, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var budget = Budget("scroll", cancellationToken);
             try
             {
-                await Page.EvaluateAsync(PageScript.ScrollViewport, Direction(direction)).ConfigureAwait(false);
+                await budget.WithinAsync(Page.EvaluateAsync(PageScript.ScrollViewport, Direction(direction))).ConfigureAwait(false);
             }
             catch (Exception ex) when (WebErrors.IsPlaywright(ex))
             {
                 throw WebErrors.NavigationStaleOr(ex, "scroll");
+            }
+            catch (EngineException ex) when (ex.Code == EngineErrorCodes.OperationTimeout)
+            {
+                // As upstream's viewport swipe, a scroll the deadline cut off may have moved the page.
+                throw WebErrors.ClassifyAction(ex, new LocatorAction.Swipe(direction));
             }
         }
 
@@ -853,9 +808,8 @@ public sealed partial class WebEngine : IEngine
         /// node that owns it, sharing one node budget across all of them. A
         /// frame that detaches or navigates mid-read is left empty.
         /// </summary>
-        private async Task<List<WebNode>> CollectAsync(IFrame frame, FrameWalk walk, CancellationToken cancellationToken)
+        private async Task<List<WebNode>> CollectAsync(IFrame frame, FrameWalk walk, OperationBudget budget)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             if (walk.Remaining <= 0)
             {
                 walk.Truncated = true;
@@ -865,7 +819,7 @@ public sealed partial class WebEngine : IEngine
             string json;
             try
             {
-                json = await frame.EvaluateAsync<string>(PageScript.Collect, new { seed = _nextRef, max = walk.Remaining, testIdAttribute = _testIdAttribute }).ConfigureAwait(false);
+                json = await budget.WithinAsync(frame.EvaluateAsync<string>(PageScript.Collect, new { seed = _nextRef, max = walk.Remaining, testIdAttribute = _testIdAttribute })).ConfigureAwait(false);
             }
             catch (PlaywrightException) when (frame != _page?.MainFrame)
             {
@@ -891,14 +845,84 @@ public sealed partial class WebEngine : IEngine
             Index(roots, frame, walk, owners);
             foreach (var child in frame.ChildFrames)
             {
-                var owner = await OwnerOfAsync(child).ConfigureAwait(false);
+                var owner = await budget.WithinAsync(OwnerOfAsync(child)).ConfigureAwait(false);
                 if (owner is not null && owners.TryGetValue(owner, out var node))
                 {
-                    node.Children = await CollectAsync(child, walk, cancellationToken).ConfigureAwait(false);
+                    node.Children = await CollectAsync(child, walk, budget).ConfigureAwait(false);
                 }
             }
 
             return roots;
+        }
+
+        /// <summary>One operation's budget: the action timeout, shared by every page call in the operation.</summary>
+        private OperationBudget Budget(string label, CancellationToken cancellationToken) => new(_actionTimeout, label, cancellationToken);
+
+        /// <summary>Sends one keystroke or pointer event, with no element behind it, within its budget, and classifies its failure.</summary>
+        private async Task InputAsync(Func<Task> input, string label, CancellationToken cancellationToken)
+        {
+            var budget = Budget(label, cancellationToken);
+            try
+            {
+                await budget.WithinAsync(input()).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (WebErrors.IsPlaywright(ex) || ex is EngineException { Code: EngineErrorCodes.OperationTimeout })
+            {
+                throw WebErrors.ClassifyInput(ex, label);
+            }
+        }
+
+        /// <summary>Sends one action to the element, each Playwright call within what is left of the operation's budget.</summary>
+        private async Task DispatchAsync(IElementHandle element, LocatorAction action, OperationBudget budget)
+        {
+            switch (action)
+            {
+                case LocatorAction.Tap:
+                    await element.ClickAsync(new ElementHandleClickOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
+                    break;
+                case LocatorAction.DoubleTap:
+                    await element.DblClickAsync(new ElementHandleDblClickOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
+                    break;
+                case LocatorAction.Fill fill:
+                    await element.FillAsync(fill.Value, new ElementHandleFillOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
+                    break;
+                case LocatorAction.Press press:
+                    await element.PressAsync(press.Key, new ElementHandlePressOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
+                    break;
+                case LocatorAction.PressSequentially typed:
+                    await element.FocusAsync().ConfigureAwait(false);
+
+                    // A focus the deadline cut off must not type later, into whatever holds focus then.
+                    budget.ThrowIfExpired();
+                    await Page.Keyboard.TypeAsync(typed.Text, new KeyboardTypeOptions
+                    {
+                        Delay = typed.Delay is TimeSpan delay ? (float)delay.TotalMilliseconds : null,
+                    }).ConfigureAwait(false);
+                    break;
+                case LocatorAction.Select select:
+                    await element.SelectOptionAsync(select.Value, new ElementHandleSelectOptionOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
+                    break;
+                case LocatorAction.Check:
+                    await SetCheckedAsync(element, true, budget).ConfigureAwait(false);
+                    break;
+                case LocatorAction.Uncheck:
+                    await SetCheckedAsync(element, false, budget).ConfigureAwait(false);
+                    break;
+                case LocatorAction.Clear:
+                    await element.FillAsync("", new ElementHandleFillOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
+                    break;
+                case LocatorAction.Focus:
+                    await element.FocusAsync().ConfigureAwait(false);
+                    break;
+                case LocatorAction.ScrollIntoView:
+                    await element.ScrollIntoViewIfNeededAsync(new ElementHandleScrollIntoViewIfNeededOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
+                    break;
+                case LocatorAction.Swipe swipe:
+                    await element.EvaluateAsync(PageScript.ScrollElement, Direction(swipe.Direction)).ConfigureAwait(false);
+                    break;
+                default:
+                    throw new EngineException(EngineErrorCodes.UnsupportedCapability, "Web engine cannot perform " + action.GetType().Name + ".");
+            }
         }
 
         private static async Task<string?> OwnerOfAsync(IFrame frame)
@@ -1012,7 +1036,7 @@ public sealed partial class WebEngine : IEngine
         /// as it does after a tap. The reads and the click share one element, so the
         /// state before and after the click is one control's.
         /// </summary>
-        private static async Task SetCheckedAsync(IElementHandle element, bool @checked, float timeout)
+        private static async Task SetCheckedAsync(IElementHandle element, bool @checked, OperationBudget budget)
         {
             var verb = @checked ? "check" : "uncheck";
             if (await element.IsCheckedAsync().ConfigureAwait(false) == @checked)
@@ -1025,7 +1049,7 @@ public sealed partial class WebEngine : IEngine
                 throw new EngineException(EngineErrorCodes.NotActionable, "uncheck cannot clear a radio button; select another radio in its group", retryable: false);
             }
 
-            await element.ClickAsync(new ElementHandleClickOptions { Timeout = timeout }).ConfigureAwait(false);
+            await element.ClickAsync(new ElementHandleClickOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
             bool after;
             try
             {
@@ -1263,6 +1287,81 @@ public sealed partial class WebEngine : IEngine
 }
 
 /// <summary>
+/// One web operation's budget, as upstream <c>withOperationDeadline</c>: one deadline
+/// every page call in the operation shares. A call still pending at the deadline is
+/// abandoned as <c>OPERATION_TIMEOUT</c> instead of holding the test until its own
+/// timeout.
+/// </summary>
+internal sealed class OperationBudget
+{
+    /// <summary>
+    /// How much sooner than the deadline Playwright's own timeout fires: its error names
+    /// what blocked an action, or that the input was already dispatched, and this lead
+    /// lets that answer arrive before the deadline does. The deadline is for the calls
+    /// Playwright never answers: an evaluate, which takes no timeout, and input on a page
+    /// whose renderer is stuck in a script. A budget shorter than twice the lead splits
+    /// in half.
+    /// </summary>
+    private const double PlaywrightTimeoutLeadMs = 250;
+
+    private readonly long _startedAt = Stopwatch.GetTimestamp();
+    private readonly TimeSpan _timeout;
+    private readonly string _label;
+    private readonly CancellationToken _cancellationToken;
+
+    public OperationBudget(TimeSpan timeout, string label, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _timeout = timeout;
+        _label = label;
+        _cancellationToken = cancellationToken;
+    }
+
+    /// <summary>The time left before Playwright's own timeout: the one to pass Playwright.</summary>
+    public float PlaywrightTimeout
+    {
+        get
+        {
+            var left = Remaining().TotalMilliseconds;
+            return (float)Math.Ceiling(left - Math.Min(PlaywrightTimeoutLeadMs, left / 2));
+        }
+    }
+
+    /// <summary>Waits for <paramref name="call"/> until the deadline, then abandons it as <c>OPERATION_TIMEOUT</c>.</summary>
+    public async Task WithinAsync(Task call)
+    {
+        try
+        {
+            await call.WaitAsync(Remaining(), _cancellationToken).ConfigureAwait(false);
+        }
+        catch (System.TimeoutException ex) when (ex != call.Exception?.InnerException)
+        {
+            // The deadline ran out, not Playwright's own timeout, which keeps its translation.
+            throw Timeout();
+        }
+    }
+
+    /// <inheritdoc cref="WithinAsync(Task)"/>
+    public async Task<T> WithinAsync<T>(Task<T> call)
+    {
+        await WithinAsync((Task)call).ConfigureAwait(false);
+        return await call.ConfigureAwait(false);
+    }
+
+    /// <summary>Throws <c>OPERATION_TIMEOUT</c> once the deadline has passed, before a call that takes no timeout of its own.</summary>
+    public void ThrowIfExpired() => Remaining();
+
+    private TimeSpan Remaining()
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+        var left = _timeout - Stopwatch.GetElapsedTime(_startedAt);
+        return left > TimeSpan.Zero ? left : throw Timeout();
+    }
+
+    private EngineException Timeout() => new(EngineErrorCodes.OperationTimeout, _label + " timed out", retryable: false);
+}
+
+/// <summary>
 /// Maps Playwright failures to stable engine codes, following upstream <c>@e2e-dev/web</c>
 /// (<c>classifyActionError</c>, <c>translatePwError</c>, and <c>navigationStaleOr</c>).
 /// </summary>
@@ -1312,9 +1411,21 @@ internal static partial class WebErrors
         return Translate(cause, label);
     }
 
+    /// <summary>Classifies the failure of an input call with no element behind it: a keystroke or a pointer event.</summary>
+    public static EngineException ClassifyInput(Exception cause, string label)
+    {
+        return InputCutOff(cause, label) ?? Translate(cause, label);
+    }
+
     /// <summary>Classifies a failed locator action. A timeout after the input was dispatched may have committed.</summary>
     public static EngineException ClassifyAction(Exception rawCause, LocatorAction action)
     {
+        var kind = action.GetType().Name.ToLowerInvariant();
+        if (InputCutOff(rawCause, kind) is { } cut)
+        {
+            return cut;
+        }
+
         var sensitive = action is LocatorAction.Fill { Sensitive: true };
         var text = Message(rawCause);
         if (action is LocatorAction.Fill fill && sensitive && fill.Value.Length > 0)
@@ -1324,10 +1435,13 @@ internal static partial class WebErrors
         }
 
         var cause = sensitive ? null : rawCause;
-        var kind = action.GetType().Name.ToLowerInvariant();
+        // A strict mode violation is a located match that turned ambiguous: stale before any input, so the runner
+        // locates again; possibly committed once the call log shows the input went out.
         if (StrictModePattern().IsMatch(text))
         {
-            return new EngineException(EngineErrorCodes.EngineFailure, text, retryable: false, cause);
+            return PostDispatchPattern().IsMatch(text)
+                ? new EngineException(EngineErrorCodes.ActionMayHaveCommitted, kind + " matched more than one element after its input was dispatched: " + text, retryable: false, cause)
+                : new EngineException(EngineErrorCodes.NodeStale, text, retryable: true, cause);
         }
 
         if (DetachedPattern().IsMatch(text) || NavigationRacePattern().IsMatch(text))
@@ -1353,19 +1467,23 @@ internal static partial class WebErrors
         return new EngineException(EngineErrorCodes.EngineFailure, text, retryable: false, cause);
     }
 
-    // The headline and the last call log line, which names what blocked the action.
+    // An input call the operation deadline cut off: Playwright never answered, so the input may have reached the page and must not be repeated blindly.
+    private static EngineException? InputCutOff(Exception cause, string label)
+    {
+        return cause is EngineException { Code: EngineErrorCodes.OperationTimeout }
+            ? new EngineException(EngineErrorCodes.ActionMayHaveCommitted, label + " timed out before the page answered; its input may have been dispatched", retryable: false, cause)
+            : null;
+    }
+
+    // The headline and the last blocker the call log names; a log without a blocker is kept whole.
     private static string Summary(string text)
     {
-        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (lines.Length == 0)
-        {
-            return text;
-        }
-
-        var last = lines[^1].TrimStart('-', ' ');
-        return lines.Length > 1 && !string.Equals(last, "Call log:", StringComparison.Ordinal)
-            ? lines[0] + " Last: " + last
-            : lines[0];
+        var lines = text.Split('\n');
+        var blocker = lines.Skip(1)
+            .Select(line => line.Trim())
+            .Select(line => line.StartsWith("- ", StringComparison.Ordinal) ? line[2..] : line)
+            .LastOrDefault(line => BlockerPattern().IsMatch(line));
+        return blocker is null ? text : lines[0] + " " + blocker;
     }
 
     [GeneratedRegex(@"\u001b\[\d+(?:;\d+)*m")]
@@ -1380,8 +1498,13 @@ internal static partial class WebErrors
     [GeneratedRegex("Timeout .*exceeded", RegexOptions.IgnoreCase)]
     private static partial Regex TimeoutPattern();
 
-    [GeneratedRegex(@"performing \w+ action|\w+ action done|waiting for scheduled navigations to finish", RegexOptions.IgnoreCase)]
+    // Only whole "- " call log lines count, so a locator or element text quoting these words never does.
+    [GeneratedRegex(@"^\s*- (performing \w+ action|[\w ]+ action done|waiting for scheduled navigations to finish)\s*$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex PostDispatchPattern();
+
+    // A call log line naming what kept a node from being acted on: an element over it, or a state it never reached.
+    [GeneratedRegex("^element is (?:not (?:visible|enabled|stable|editable)|outside of the viewport)$| intercepts pointer events$", RegexOptions.IgnoreCase)]
+    private static partial Regex BlockerPattern();
 
     [GeneratedRegex("not an? <?(input|checkbox|radio|select)|not editable|not checkable", RegexOptions.IgnoreCase)]
     private static partial Regex NotEditablePattern();

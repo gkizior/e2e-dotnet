@@ -155,10 +155,16 @@ An `E2EException` has a `Code`. Read it first.
 | `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | The goal was too large or unclear | Split it into smaller `ActAsync` calls |
 | `LOCATOR_NOT_FOUND`, `STRICT_MODE` | No match, or more than one match | Use the exact accessible name, or `First()`, `Nth(i)`, `Filter(...)` |
 | `APP_NOT_OPEN` | A `Screen` call before `App.OpenAsync()` | Open the app first |
+| `NOT_ACTIONABLE` | The element is covered, disabled, or does not take that input. The message names the last blocker Playwright logged, such as `<div class="toast">…</div> intercepts pointer events` | `Expect` the condition first. Close the overlay the message names |
+| `NODE_STALE` | The element left the page, or Playwright found more than one element (a strict mode violation) before any input was sent. The step looks again | Usually nothing. If it repeats, make the locator match one element |
+| `OPERATION_TIMEOUT` | A navigation or a page read (observe, `Browser.EvaluateAsync`, `Browser.TitleAsync`) did not finish within `actionTimeout`. A page stuck in a script fails here, not at the test timeout | Look for a script that never ends or a request that never answers. Raise `actionTimeout` only for a slow UI |
+| `ACTION_MAY_HAVE_COMMITTED` | An action, scroll, key press, typing, or mouse call timed out, or hit a strict mode violation, after its input may have reached the page. It is never repeated | Check the page state before you retry by hand |
 | `ENVIRONMENT_UNAVAILABLE` with "Chromium is not installed" or "could not install Chromium" | The browser install was skipped or failed | Allow network access for the first run, or install Chromium and set `E2E_SKIP_BROWSER_INSTALL=1` |
 | `APP_UNREACHABLE` | The agent found the app down or not loading | Start the app, or fix `targets[].app.url` |
 | `POLICY_DENIED` | A URL whose scheme is not `http:` or `https:` (`file:`, `view-source:`, `data:`), from `OpenAsync`, the agent's navigate step, or `SetCookiesAsync` | http(s) or `about:blank` only (no `about:blank` cookie) |
 | `REPLAY_STALE` | `cache.strict` is on and a recording no longer matches | Re-run once without `cache.strict` to re-record |
+
+A failed fill of a `Secret` never shows the value. The message reads `[redacted]` in its place, and the Playwright error is dropped.
 
 A replay miss is not a failure. The step runs live and records again. `ActResult.Cache.Reason` says why it missed: `no-entry` (nothing recorded yet), `invalid-entry` (an old or broken file), `target-not-found` (the control's role or name changed), `target-ambiguous`, `wrong-context` (the page or path changed), or `end-mismatch` (the replay ended on a different screen).
 

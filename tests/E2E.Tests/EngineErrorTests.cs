@@ -76,7 +76,7 @@ public sealed class EngineErrorTests
 
         Assert.Equal("ENGINE_FAILURE", error.Code);
         Assert.DoesNotContain("hunter2", error.Message, StringComparison.Ordinal);
-        Assert.Contains("<secret>", error.Message, StringComparison.Ordinal);
+        Assert.Contains("[redacted]", error.Message, StringComparison.Ordinal);
         Assert.Null(error.InnerException);
     }
 

@@ -50,7 +50,7 @@ public sealed class RedactorTests
     {
         var redactor = Redactor.ForValue("correct-horse-battery");
         var message = redactor.RedactFragments("fill(\"CORRECT-HORSE-BAT…\") timed out");
-        Assert.Equal("fill(\"<secret>…\") timed out", message);
+        Assert.Equal("fill(\"[redacted]…\") timed out", message);
     }
 
     [Fact]

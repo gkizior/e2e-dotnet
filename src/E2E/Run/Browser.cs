@@ -64,7 +64,7 @@ public sealed class Browser
     public Task<string> UrlAsync(CancellationToken cancellationToken = default) =>
         Require("url").GetUrlAsync(Token(cancellationToken));
 
-    /// <summary>Returns the current title.</summary>
+    /// <summary>Returns the current title. A page that does not answer within the action timeout fails with <c>OPERATION_TIMEOUT</c>.</summary>
     public Task<string> TitleAsync(CancellationToken cancellationToken = default) =>
         Require("title").GetTitleAsync(Token(cancellationToken));
 
@@ -89,7 +89,8 @@ public sealed class Browser
     /// <summary>
     /// Evaluates trusted test code in the page: an expression, or a function
     /// source that is called. The result must be JSON-safe and is deserialized to
-    /// <typeparamref name="T"/>. A throwing script fails with <c>EVALUATE_FAILED</c>.
+    /// <typeparamref name="T"/>. A throwing script fails with <c>EVALUATE_FAILED</c>, and a
+    /// script that does not finish within the action timeout with <c>OPERATION_TIMEOUT</c>.
     /// </summary>
     public Task<T?> EvaluateAsync<T>(string expression, CancellationToken cancellationToken = default) =>
         EvaluateCoreAsync<T>(expression, null, hasArg: false, cancellationToken);
@@ -403,7 +404,10 @@ public sealed class WebResponse
         JsonSerializer.Deserialize<T>(await TextAsync(cancellationToken).ConfigureAwait(false), JsonDefaults.Options);
 }
 
-/// <summary>Keyboard input for whatever holds focus in the active tab.</summary>
+/// <summary>
+/// Keyboard input for whatever holds focus in the active tab. A call the page does not
+/// answer within the action timeout fails with <c>ACTION_MAY_HAVE_COMMITTED</c>: the input may have reached the page.
+/// </summary>
 public sealed class BrowserKeyboard
 {
     private readonly Browser _browser;
@@ -428,7 +432,10 @@ public sealed class BrowserKeyboard
     }
 }
 
-/// <summary>Pointer input for the active tab, in CSS pixels.</summary>
+/// <summary>
+/// Pointer input for the active tab, in CSS pixels. A call the page does not answer
+/// within the action timeout fails with <c>ACTION_MAY_HAVE_COMMITTED</c>: the input may have reached the page.
+/// </summary>
 public sealed class BrowserMouse
 {
     private readonly Browser _browser;
