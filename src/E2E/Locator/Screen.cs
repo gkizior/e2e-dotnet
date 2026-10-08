@@ -26,7 +26,8 @@ public sealed class Screen
         Action verified,
         TimeSpan actionTimeout,
         TimeSpan assertionTimeout,
-        SoftFailures? softFailures = null)
+        SoftFailures? softFailures = null,
+        TimeProvider? clock = null)
     {
         SoftFailures = softFailures ?? new SoftFailures();
         _observe = observe;
@@ -35,11 +36,14 @@ public sealed class Screen
         _verified = verified;
         ActionTimeout = actionTimeout;
         AssertionTimeout = assertionTimeout;
+        Clock = clock ?? TimeProvider.System;
     }
 
     internal TimeSpan ActionTimeout { get; }
 
     internal TimeSpan AssertionTimeout { get; }
+
+    internal TimeProvider Clock { get; }
 
     internal SoftFailures SoftFailures { get; }
 

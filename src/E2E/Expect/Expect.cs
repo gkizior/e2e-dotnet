@@ -66,6 +66,9 @@ public sealed class LocatorExpect
     /// <summary>How long a negated matcher's condition must stay false before it passes, as upstream.</summary>
     internal static readonly TimeSpan NegationGrace = TimeSpan.FromMilliseconds(1000);
 
+    /// <summary>A read that starts with less than this left of the wait timed out because the wait did, not because the app stopped answering. Upstream's poll tick.</summary>
+    private static readonly TimeSpan CutOffWindow = TimeSpan.FromMilliseconds(100);
+
     private readonly Locator _locator;
     private readonly bool _negated;
 
@@ -337,7 +340,10 @@ public sealed class LocatorExpect
     /// <summary>
     /// Polls until the condition holds, or, negated, until it has been false for <see cref="NegationGrace"/>
     /// in a row (or for the whole budget when that is shorter). A sample that cannot answer resets the
-    /// negation clock: <c>not.toBeChecked</c> on no node is not a pass.
+    /// negation clock: <c>not.toBeChecked</c> on no node is not a pass. A negation holds from the moment the
+    /// read that first saw it was issued, so a slow read counts toward the window. A read the deadline cut off
+    /// (see <see cref="CutOffWindow"/>) after an earlier one completed ends the poll on the last sample: a
+    /// negation passes if it had held long enough by then, anything else fails with that read as its cause.
     /// </summary>
     private async Task PollAsync(
         string matcher,
@@ -353,72 +359,94 @@ public sealed class LocatorExpect
         }
 
         var token = _locator.Screen.Token(cancellationToken);
-        var start = DateTime.UtcNow;
+        var clock = _locator.Screen.Clock;
+        var start = clock.GetUtcNow();
         var deadline = start + (timeout ?? _locator.Screen.AssertionTimeout);
         var grace = deadline - start < NegationGrace ? deadline - start : NegationGrace;
-        DateTime? falseSince = null;
-        var firstSample = true;
-        while (true)
+        var readAt = start;
+        DateTimeOffset? falseSince = null;
+        Verdict? last = null;
+        IReadOnlyList<SemanticNode> lastMatches = [];
+        bool Holds(DateTimeOffset now) => falseSince is { } since && now - since >= grace;
+        try
         {
-            token.ThrowIfCancellationRequested();
-            var matches = await _locator.ResolveAsync(token, includeHidden).ConfigureAwait(false);
-            var verdict = evaluate(matches);
-            var now = DateTime.UtcNow;
-            if (!_negated && verdict.Holds == true)
+            while (true)
             {
-                _locator.Screen.NotifyVerified();
-                return;
-            }
+                token.ThrowIfCancellationRequested();
+                var startedWith = deadline - readAt;
+                IReadOnlyList<SemanticNode> matches;
+                try
+                {
+                    matches = await _locator.ResolveAsync(token, includeHidden).ConfigureAwait(false);
+                }
+                catch (EngineException ex) when (last is not null && ex.Code == EngineErrorCodes.OperationTimeout && startedWith < CutOffWindow)
+                {
+                    if (_negated && Holds(Min(clock.GetUtcNow(), deadline)))
+                    {
+                        _locator.Screen.NotifyVerified();
+                        return;
+                    }
 
-            if (_negated && verdict.Holds == false)
-            {
+                    throw Failure(matcher, describeExpected, last.Value, lastMatches, ex);
+                }
+
+                var verdict = evaluate(matches);
+                last = verdict;
+                lastMatches = matches;
+                if (!_negated && verdict.Holds == true)
+                {
+                    _locator.Screen.NotifyVerified();
+                    return;
+                }
+
                 // False from the first sample means false for the whole budget so far, so the clock starts with the budget.
-                falseSince ??= firstSample ? start : now;
-                if (now - falseSince >= grace)
-                {
-                    _locator.Screen.NotifyVerified();
-                    return;
-                }
-            }
-            else
-            {
-                falseSince = null;
-            }
-
-            if (now >= deadline)
-            {
-                throw Failure(matcher, describeExpected, verdict, matches);
-            }
-
-            firstSample = false;
-            // Rounded up to whole milliseconds, which is what Task.Delay waits, so the capped pause never wakes before the deadline.
-            var remaining = TimeSpan.FromMilliseconds(Math.Ceiling((deadline - now).TotalMilliseconds));
-            await Task.Delay(_negated && remaining < _locator.Screen.PollInterval ? remaining : _locator.Screen.PollInterval, token).ConfigureAwait(false);
-
-            // A read past the deadline has no budget left, so a negation decides at the deadline on what it has seen.
-            now = DateTime.UtcNow;
-            if (_negated && now >= deadline)
-            {
-                if (falseSince is { } since && now - since >= grace)
+                falseSince = _negated && verdict.Holds == false ? falseSince ?? readAt : null;
+                var now = clock.GetUtcNow();
+                if (Holds(now))
                 {
                     _locator.Screen.NotifyVerified();
                     return;
                 }
 
-                throw Failure(matcher, describeExpected, verdict, matches);
+                if (now >= deadline)
+                {
+                    throw Failure(matcher, describeExpected, verdict, matches);
+                }
+
+                // Rounded up to whole milliseconds, which is what Task.Delay waits, so the capped pause never wakes before the deadline.
+                var remaining = TimeSpan.FromMilliseconds(Math.Ceiling((deadline - now).TotalMilliseconds));
+                await Task.Delay(_negated && remaining < _locator.Screen.PollInterval ? remaining : _locator.Screen.PollInterval, clock, token).ConfigureAwait(false);
+
+                // A read past the deadline has no budget left, so a negation decides at the deadline on what it has seen.
+                readAt = clock.GetUtcNow();
+                if (_negated && readAt >= deadline)
+                {
+                    if (Holds(readAt))
+                    {
+                        _locator.Screen.NotifyVerified();
+                        return;
+                    }
+
+                    throw Failure(matcher, describeExpected, verdict, matches);
+                }
             }
+        }
+        catch (OperationCanceledException ex) when (token.IsCancellationRequested)
+        {
+            throw new TestException(EngineErrorCodes.Cancelled, "operation cancelled", ex);
         }
     }
 
+    private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
+
     /// <summary>The error a matcher throws at its deadline, built from its last sample.</summary>
-    private TestException Failure(string matcher, string describeExpected, Verdict verdict, IReadOnlyList<SemanticNode> matches)
+    private TestException Failure(string matcher, string describeExpected, Verdict verdict, IReadOnlyList<SemanticNode> matches, Exception? cause = null)
     {
         var name = (_negated ? "not." : "") + matcher;
         var code = verdict.StrictCount > 1 ? "STRICT_MODE" : "ASSERTION_FAILED";
-        return new TestException(
-            code,
-            "expect(" + _locator.Query.Describe() + ")." + name + " failed: expected " + (_negated ? "not " : "") + describeExpected
-            + "; observed " + verdict.Observed + " (match count " + Number(matches.Count) + ")");
+        var message = "expect(" + _locator.Query.Describe() + ")." + name + " failed: expected " + (_negated ? "not " : "") + describeExpected
+            + "; observed " + verdict.Observed + " (match count " + Number(matches.Count) + ")";
+        return cause is null ? new TestException(code, message) : new TestException(code, message, cause);
     }
 
     private static bool MatchesPositionally(IReadOnlyList<SemanticNode> nodes, List<TextMatch> patterns, Func<SemanticNode, TextMatch, bool> satisfies)

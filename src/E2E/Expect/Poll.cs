@@ -17,6 +17,8 @@ public sealed class PollOptions
 
     /// <summary>Extra line in the timeout error.</summary>
     public string? Message { get; init; }
+
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
 }
 
 /// <summary>
@@ -69,14 +71,15 @@ public sealed class PollExpectation<T>
     {
         var timeout = _options.Timeout ?? DefaultTimeout;
         var interval = _options.Interval ?? DefaultInterval;
-        var started = DateTime.UtcNow;
+        var clock = _options.Clock;
+        var started = clock.GetUtcNow();
         var deadline = started + timeout;
         string? last = null;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var remaining = deadline - DateTime.UtcNow;
-            if (remaining < TimeSpan.Zero)
+            var remaining = deadline - clock.GetUtcNow();
+            if (remaining <= TimeSpan.Zero)
             {
                 break;
             }
@@ -84,7 +87,7 @@ public sealed class PollExpectation<T>
             T value;
             try
             {
-                value = await _read(cancellationToken).WaitAsync(remaining, cancellationToken).ConfigureAwait(false);
+                value = await _read(cancellationToken).WaitAsync(remaining, clock, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -98,7 +101,7 @@ public sealed class PollExpectation<T>
             catch (Exception ex)
             {
                 last = ex.Message;
-                await PauseAsync(deadline, interval, cancellationToken).ConfigureAwait(false);
+                await PauseAsync(deadline, interval, clock, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
@@ -108,7 +111,7 @@ public sealed class PollExpectation<T>
             }
 
             last = describe(value);
-            await PauseAsync(deadline, interval, cancellationToken).ConfigureAwait(false);
+            await PauseAsync(deadline, interval, clock, cancellationToken).ConfigureAwait(false);
         }
 
         var lines = new List<string>
@@ -125,16 +128,16 @@ public sealed class PollExpectation<T>
         throw new TestException("ASSERTION_FAILED", string.Join('\n', lines));
     }
 
-    private static Task PauseAsync(DateTime deadline, TimeSpan interval, CancellationToken cancellationToken)
+    private static Task PauseAsync(DateTimeOffset deadline, TimeSpan interval, TimeProvider clock, CancellationToken cancellationToken)
     {
-        var remaining = deadline - DateTime.UtcNow;
+        var remaining = deadline - clock.GetUtcNow();
         if (remaining <= TimeSpan.Zero)
         {
             return Task.CompletedTask;
         }
 
         // Rounded up to a whole millisecond: a delay under one completes at once, and the loop would spin to the deadline.
-        return Task.Delay(remaining < interval ? TimeSpan.FromMilliseconds(Math.Ceiling(remaining.TotalMilliseconds)) : interval, cancellationToken);
+        return Task.Delay(remaining < interval ? TimeSpan.FromMilliseconds(Math.Ceiling(remaining.TotalMilliseconds)) : interval, clock, cancellationToken);
     }
 
     private static string Format(T value)
