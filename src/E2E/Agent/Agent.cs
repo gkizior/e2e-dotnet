@@ -957,7 +957,7 @@ public sealed class Agent
                     {
                         Kind = "fill",
                         Role = node.Role,
-                        Name = Redact(node.Name, _scope.Redactor),
+                        Name = Redact(LabelOf(node), _scope.Redactor),
                         TestId = Redact(node.TestId, _scope.Redactor),
                         Value = CacheKeys.Template(value, parameters),
                     });
@@ -967,12 +967,12 @@ public sealed class Agent
                 case "press":
                     var key = Args.String(call.Arguments, "key") ?? "Enter";
                     await _scope.Session.PerformAsync(node, new LocatorAction.Press(key), token).ConfigureAwait(false);
-                    actions.Add(new RecordedAction { Kind = "press", Role = node.Role, Name = Redact(node.Name, _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor), Key = key });
+                    actions.Add(new RecordedAction { Kind = "press", Role = node.Role, Name = Redact(LabelOf(node), _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor), Key = key });
                     return ToolOutcome.Ok(await DescribeAsync("pressed " + key + " on " + Label(node), token).ConfigureAwait(false));
                 case "select":
                     var selected = Args.String(call.Arguments, "value") ?? "";
                     await _scope.Session.PerformAsync(node, new LocatorAction.Select(selected), token).ConfigureAwait(false);
-                    actions.Add(new RecordedAction { Kind = "select", Role = node.Role, Name = Redact(node.Name, _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor), Value = selected });
+                    actions.Add(new RecordedAction { Kind = "select", Role = node.Role, Name = Redact(LabelOf(node), _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor), Value = selected });
                     return ToolOutcome.Ok(await DescribeAsync("selected " + selected, token).ConfigureAwait(false));
                 case "check":
                     await _scope.Session.PerformAsync(node, new LocatorAction.Check(), token).ConfigureAwait(false);
@@ -1288,7 +1288,7 @@ public sealed class Agent
         {
             Kind = "fill",
             Role = node.Role,
-            Name = Redact(node.Name, _scope.Redactor),
+            Name = Redact(LabelOf(node), _scope.Redactor),
             TestId = Redact(node.TestId, _scope.Redactor),
             Value = "<secret:" + secret.Name + ">",
         });
@@ -1338,7 +1338,7 @@ public sealed class Agent
                 continue;
             }
 
-            if (name is not null && !TextRules.Matches(Redact(node.Name, redactor), name, exact: true))
+            if (name is not null && !TextRules.Matches(Redact(LabelOf(node), redactor), name, exact: true))
             {
                 continue;
             }
@@ -1546,9 +1546,16 @@ public sealed class Agent
         return false;
     }
 
+    // The name the snapshot shows: the accessible name, else the text of a node that has none.
+    // The model names a target by it, and the cache records it.
+    private static string? LabelOf(SemanticNode node)
+    {
+        return node.Name ?? (string.IsNullOrEmpty(node.Text) ? null : node.Text);
+    }
+
     private RecordedAction Record(SemanticNode node, string kind)
     {
-        return new RecordedAction { Kind = kind, Role = node.Role, Name = Redact(node.Name, _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor) };
+        return new RecordedAction { Kind = kind, Role = node.Role, Name = Redact(LabelOf(node), _scope.Redactor), TestId = Redact(node.TestId, _scope.Redactor) };
     }
 
     private static RecordedAction Detemplate(RecordedAction action, IReadOnlyDictionary<string, object?>? parameters)

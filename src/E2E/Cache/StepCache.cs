@@ -310,7 +310,7 @@ internal static class CacheKeys
     /// Version of the rules that decide whether a recording replays. Bump it when those
     /// rules change, so old entries become misses instead of wrong replays.
     /// </summary>
-    public const string ReplayPolicyVersion = "2";
+    public const string ReplayPolicyVersion = "3";
 
     private static readonly JsonSerializerOptions KeyJson = Json(new LeafConverter<Secret>(Canonical), new LeafConverter<UniqueValue>(Canonical));
 

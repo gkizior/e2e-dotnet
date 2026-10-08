@@ -63,6 +63,16 @@ Members of `E2ETest` in both frameworks:
   echoing its child does not count twice: `GetByText("$42.00")` finds the
   `<strong>` in `<p>Order total: <strong>$42.00</strong></p>`. Text inside a
   control's `<label>` answers with the control.
+- Roles follow HTML-AAM, and `img` aliases `image`. An inline `<svg>` is an
+  `image`. A `<th>` without `scope` beside a data cell with text or children
+  is a `rowheader`; one in a row of header cells, or with `scope="col"`, is a
+  `columnheader`.
+- A role's name is the accessible name, as Playwright computes it. Only
+  content roles (button, link, cell, heading, tab, option, and the like) are
+  named by their text, so `GetByRole("group", "More")` misses a `<details>`.
+  A table is named by its `<caption>`, a fieldset by its `<legend>`, a figure
+  by its `<figcaption>`, and an svg by its `<title>` child, which also names
+  a link or button around it. A node with no name reports `Name` null.
 - `RoleOptions` adds `Checked`, `Disabled`, `Selected`, `Expanded`,
   `Pressed`, and `Level`.
 - Narrow with `Filter(text)` or `Filter(locator)`, and pick with `First()`,

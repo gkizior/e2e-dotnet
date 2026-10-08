@@ -44,6 +44,7 @@ public sealed class SemanticNode
 
     public string? Role { get; init; }
 
+    /// <summary>The accessible name, by the accname rules Playwright follows, or null when the node has none.</summary>
     public string? Name { get; init; }
 
     public string? Text { get; init; }

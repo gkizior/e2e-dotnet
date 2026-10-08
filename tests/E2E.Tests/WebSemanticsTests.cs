@@ -79,7 +79,7 @@ public sealed class WebSemanticsTests
         var observation = await session.ObserveAsync(CancellationToken.None);
         var nodes = Flatten(observation.Roots).ToList();
         var roles = nodes.Select(node => node.Role).ToHashSet();
-        foreach (var role in new[] { "banner", "navigation", "main", "region", "form", "list", "listitem", "table", "rowgroup", "row", "columnheader", "cell", "image", "combobox", "listbox", "option", "dialog", "separator", "progressbar", "slider", "spinbutton", "tab", "contentinfo" })
+        foreach (var role in new[] { "banner", "navigation", "main", "region", "form", "list", "listitem", "table", "rowgroup", "row", "cell", "image", "combobox", "listbox", "option", "dialog", "separator", "progressbar", "slider", "spinbutton", "tab", "contentinfo" })
         {
             Assert.Contains(role, roles);
         }
@@ -288,7 +288,7 @@ public sealed class WebSemanticsTests
         Assert.Contains("More of the page is off screen", text, StringComparison.Ordinal);
     }
 
-    private static IEnumerable<SemanticNode> Flatten(IEnumerable<SemanticNode> nodes)
+    internal static IEnumerable<SemanticNode> Flatten(IEnumerable<SemanticNode> nodes)
     {
         foreach (var node in nodes)
         {
@@ -310,7 +310,7 @@ public sealed class WebSemanticsTests
         return session;
     }
 
-    private static async Task<E2ESession> StartSessionAsync(string url)
+    internal static async Task<E2ESession> StartSessionAsync(string url)
     {
         return await E2ESession.StartAsync(new E2ESessionOptions
         {
@@ -324,7 +324,7 @@ public sealed class WebSemanticsTests
         });
     }
 
-    private static async Task RunAsync(E2ESession session, Func<Task> body)
+    internal static async Task RunAsync(E2ESession session, Func<Task> body)
     {
         await using (session)
         {

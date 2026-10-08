@@ -78,6 +78,9 @@ internal static class PageScript
               case "SELECT": return el.multiple || el.size > 1 ? "listbox" : "combobox";
               case "TEXTAREA": return "textbox";
               case "IMG": return el.getAttribute("alt") === "" ? "presentation" : "image";
+              // An inline icon is a picture whether or not anything names it, as
+              // Playwright reads it; Chrome ignores an unnamed one.
+              case "svg": return "image";
               case "NAV": return "navigation";
               case "MAIN": return "main";
               case "ASIDE": return "complementary";
@@ -103,7 +106,19 @@ internal static class PageScript
               }
               case "TH": {
                 const scope = (el.getAttribute("scope") || "").toLowerCase();
-                return scope === "row" || scope === "rowgroup" ? "rowheader" : "columnheader";
+                if (scope === "row" || scope === "rowgroup") return "rowheader";
+                if (scope === "col" || scope === "colgroup") return "columnheader";
+                const previous = el.previousElementSibling;
+                const next = el.nextElementSibling;
+                if (previous === null && next === null) {
+                  const row = el.parentElement;
+                  const table = row?.tagName === "TR" ? row.closest("table") : null;
+                  return table !== null && table.rows.length <= 1 ? null : "columnheader";
+                }
+                if (previous?.tagName === "TH" && next?.tagName === "TH") return "columnheader";
+                const hasDataNeighbor = [previous, next].some((cell) =>
+                  cell?.tagName === "TD" && ((cell.textContent || "").trim() !== "" || cell.children.length > 0));
+                return hasDataNeighbor ? "rowheader" : "columnheader";
               }
               case "DIALOG": return "dialog";
               case "OUTPUT": return "status";
@@ -126,20 +141,293 @@ internal static class PageScript
             if (el.getAttribute("aria-live")) return "status";
             return null;
           };
-          // accname reads an aria-labelledby reference (2B) before the
-          // element's own aria-label (2C), then its associated labels.
-          const nameOf = (el, role) => {
-            const labelledby = (el.getAttribute("aria-labelledby") || "").trim();
-            if (labelledby) {
-              const text = labelledby.split(/\s+/).map((id) => document.getElementById(id)?.innerText || "").join(" ");
-              if (text.trim()) return cut(text, 256);
+          // The accessible name, by upstream's accname rules. A walk's
+          // inReference is set inside an aria-labelledby traversal, where a
+          // nested reference is not followed (2B); hiddenAllowed when that
+          // traversal began at a hidden target, whose whole subtree counts (2A);
+          // visited holds every element already read, so each contributes once.
+          // accessible is set for an accessible name, which reads CSS generated
+          // content and an embedded control's value, and unset for label text.
+          const nameWalk = (visited, accessible) => ({ inReference: false, hiddenAllowed: false, visited: new Set(visited), accessible });
+          // Icon-font glyphs (private-use code points) read as nothing a person could type; each becomes a space.
+          const iconGlyphs = /\p{Co}/gu;
+          const withoutGlyphs = (name) => {
+            const spaced = name.replace(iconGlyphs, " ");
+            return spaced === name ? name : spaced.replace(/\s+/g, " ").trim();
+          };
+          // A name of icon glyphs alone falls back to the element's title, else to no name.
+          const reportedName = (el, name) => {
+            if (name === null) return null;
+            const shown = withoutGlyphs(name);
+            if (shown !== "" || shown === name) return shown;
+            const title = (el.getAttribute("title") || "").trim();
+            return title === "" ? null : title;
+          };
+          // The text a content value contributes: its strings and attr() values,
+          // or only the alternative text after a "/". Anything else contributes nothing.
+          const contentTextOf = (el, value) => {
+            const tokens = [];
+            const token = /\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[-\w]+\((?:[^()"']|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')*\)|\/|[-\w]+)/gy;
+            let match;
+            let end = 0;
+            while ((match = token.exec(value)) !== null) {
+              tokens.push(match[1]);
+              end = token.lastIndex;
             }
-            const aria = el.getAttribute("aria-label");
-            if (aria && aria.trim()) return cut(aria, 256);
-            if (el.labels && el.labels.length) return cut(el.labels[0].innerText || "", 256);
-            if (role === "textbox" || role === "searchbox") return cut(el.getAttribute("placeholder") || "", 256);
-            if (role) return cut(el.innerText || el.getAttribute("alt") || "", 256);
-            return "";
+            if (value.slice(end).trim() !== "") return null;
+            let text = "";
+            for (const part of tokens.slice(tokens.lastIndexOf("/") + 1)) {
+              const attribute = /^attr\(\s*([-\w]+)\s*\)$/.exec(part);
+              if (attribute !== null) text += el.getAttribute(attribute[1]) ?? "";
+              else if (part.startsWith('"') || part.startsWith("'")) {
+                text += part.slice(1, -1).replace(/\\([0-9a-fA-F]{1,6})\s?|\\(.)/g, (_all, hex, char) =>
+                  hex === undefined ? char : String.fromCodePoint(Number.parseInt(hex, 16)));
+              } else return null;
+            }
+            return text;
+          };
+          // What an element's ::before or ::after adds to a name (accname 2F.ii), spaced like a block when it is not inline.
+          const generatedContentOf = (el, pseudo) => {
+            const style = getComputedStyle(el, pseudo);
+            if (style.display === "none" || style.visibility === "hidden") return "";
+            const value = style.content;
+            if (value === "" || value === "none" || value === "normal") return "";
+            const text = contentTextOf(el, value);
+            if (text === null) return "";
+            return style.display === "inline" ? text : " " + text + " ";
+          };
+          // Nested named-from-content roles walk the same descendants again, so
+          // each element's style, and each pseudo element, is read once.
+          const styles = new Map();
+          const styleOf = (el) => {
+            let style = styles.get(el);
+            if (!style) styles.set(el, style = getComputedStyle(el));
+            return style;
+          };
+          const generated = new Map();
+          const generatedOf = (el, pseudo) => {
+            let entry = generated.get(el);
+            if (!entry) generated.set(el, entry = {});
+            if (!(pseudo in entry)) entry[pseudo] = generatedContentOf(el, pseudo);
+            return entry[pseudo];
+          };
+          // A subtree the name computation drops: aria-hidden, or hidden by style as innerText leaves it out.
+          const isNameHidden = (el, style) =>
+            el.getAttribute("aria-hidden") === "true" || style.display === "none" || style.visibility === "hidden";
+          // alt of an element HTML-AAM names by it: an img or an input type="image".
+          const altOf = (el) => {
+            const named = el instanceof HTMLImageElement || (el instanceof HTMLInputElement && el.type === "image");
+            const alt = named ? el.getAttribute("alt") : null;
+            return alt !== null && alt.trim() !== "" ? alt.trim() : null;
+          };
+          // The <title> child an svg is named by (SVG-AAM), as Playwright reads
+          // it. An svg marked presentation or none takes no name of its own from
+          // it, though the title still names a link or button around it.
+          const svgTitleOf = (el) => {
+            if (!(el instanceof SVGElement)) return null;
+            const title = Array.from(el.children).find((child) => child instanceof SVGTitleElement);
+            const text = (title?.textContent ?? "").replace(/\s+/g, " ").trim();
+            return text === "" ? null : text;
+          };
+          const isPresentational = (el) => {
+            const role = roleOf(el);
+            return role === "presentation" || role === "none";
+          };
+          // A referenced target accname 2A reads whole: hidden itself, or under an aria-hidden ancestor.
+          const isReferenceHidden = (el) => hidden(el) || el.closest("[aria-hidden=\"true\"]") !== null;
+          // An IDREF resolves in the tree scope it is written in.
+          const referencedElementOf = (el, id) => {
+            const root = el.getRootNode();
+            return root instanceof Document || root instanceof DocumentFragment ? root.getElementById(id) : null;
+          };
+          // Each aria-labelledby target's contribution (accname 2B), in attribute
+          // order, unnamed targets dropped; null when their joined text is empty.
+          const referencedNamesOf = (el, walk) => {
+            if (walk.inReference) return null;
+            const ids = (el.getAttribute("aria-labelledby") || "").trim();
+            if (ids === "") return null;
+            const contributions = [];
+            for (const id of ids.split(/\s+/)) {
+              const target = referencedElementOf(el, id);
+              if (target === null) continue;
+              contributions.push(contentNameOf(target, styleOf(target), {
+                inReference: true,
+                hiddenAllowed: isReferenceHidden(target),
+                visited: walk.visited,
+                accessible: walk.accessible,
+              }));
+            }
+            if (contributions.join(" ") === "") return null;
+            return contributions.map((text) => text.replace(/\s+/g, " ").trim()).filter((name) => name !== "");
+          };
+          const isSecureField = (el) => el instanceof HTMLInputElement && (el.type === "password" || el.getAttribute("autocomplete") === "current-password");
+          // Every element under el and every element its aria-owns names, with theirs.
+          const ariaOwnedOf = (el) => {
+            const owned = Array.from(el.querySelectorAll("*"));
+            for (const id of (el.getAttribute("aria-owns") || "").trim().split(/\s+/)) {
+              const target = id === "" ? null : referencedElementOf(el, id);
+              if (target !== null) owned.push(target, ...Array.from(target.querySelectorAll("*")));
+            }
+            return owned;
+          };
+          // What an embedded control contributes to a name computed through
+          // another element (accname 2C): a text field its value, a combobox or
+          // listbox its selected options, a range widget its value. Null for any
+          // other element, and for one its own aria-labelledby names.
+          const embeddedControlNameOf = (el, walk) => {
+            const role = roleOf(el);
+            if (role === null) return null;
+            if (el.id !== "" && (el.getAttribute("aria-labelledby") || "").trim().split(/\s+/).indexOf(el.id) !== -1) return null;
+            if (isSecureField(el)) return "";
+            if (role === "textbox" || role === "searchbox") {
+              return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : el.textContent ?? "";
+            }
+            if (role === "combobox" || role === "listbox") {
+              let selected;
+              if (el instanceof HTMLSelectElement) {
+                selected = Array.from(el.selectedOptions);
+                if (selected.length === 0 && el.options.length > 0) selected.push(el.options[0]);
+              } else {
+                const listbox = role === "combobox" ? ariaOwnedOf(el).find((owned) => roleOf(owned) === "listbox") : el;
+                selected = listbox === undefined
+                  ? []
+                  : ariaOwnedOf(listbox).filter((owned) => owned.getAttribute("aria-selected") === "true" && roleOf(owned) === "option");
+              }
+              if (selected.length === 0 && el instanceof HTMLInputElement) return el.value;
+              return selected.map((option) => contentNameOf(option, styleOf(option), walk)).join(" ");
+            }
+            if (role === "progressbar" || role === "scrollbar" || role === "slider" || role === "spinbutton" || role === "meter") {
+              if (el.hasAttribute("aria-valuetext")) return el.getAttribute("aria-valuetext") ?? "";
+              if (el.hasAttribute("aria-valuenow")) return el.getAttribute("aria-valuenow") ?? "";
+              return el.getAttribute("value") ?? "";
+            }
+            return role === "menu" ? "" : null;
+          };
+          // What one element contributes to a name computed through another, as
+          // an aria-labelledby target (2B) or a descendant read for name from
+          // content (2F): its references, its value as an embedded control, its
+          // aria-label, its alt or svg title, its children, then its title.
+          const contentNameOf = (el, style, walk) => {
+            if (walk.visited.has(el)) return "";
+            walk.visited.add(el);
+            if (!walk.hiddenAllowed && isNameHidden(el, style)) return "";
+            const referenced = referencedNamesOf(el, walk);
+            if (referenced !== null) return referenced.join(" ");
+            const embedded = walk.accessible ? embeddedControlNameOf(el, walk) : null;
+            if (embedded !== null) return embedded;
+            const ariaLabel = el.getAttribute("aria-label");
+            if (ariaLabel !== null && ariaLabel.trim() !== "") return ariaLabel.trim();
+            const alternative = altOf(el) ?? svgTitleOf(el);
+            if (alternative !== null) return alternative;
+            if (nameOpaqueTags.has(el.tagName)) return "";
+            const content = childrenNameOf(el, walk);
+            if (content !== "") return content;
+            const title = el.getAttribute("title");
+            return title === null ? "" : title.trim();
+          };
+          // The children's contributions joined as Playwright's role selector
+          // joins them: a space on each side of a block-level child and of a
+          // <br>, none around an inline one. An accessible name wraps them in
+          // the element's generated content.
+          const childrenNameOf = (el, walk) => {
+            let out = walk.accessible ? generatedOf(el, "::before") : "";
+            for (const child of contentChildrenOf(el)) {
+              if (child.nodeType === 3) {
+                out += child.nodeValue ?? "";
+                continue;
+              }
+              if (!(child instanceof Element)) continue;
+              const style = styleOf(child);
+              const token = contentNameOf(child, style, walk);
+              const block = child.tagName === "BR" || style.display !== "inline";
+              out += block ? " " + token + " " : token;
+            }
+            return walk.accessible ? out + generatedOf(el, "::after") : out;
+          };
+          // A slot reads what is assigned to it; a host reads its light children
+          // (a slotted one skipped, its slot reads it) and then its shadow tree.
+          const contentChildrenOf = (el) => {
+            if (el instanceof HTMLSlotElement) {
+              const assigned = el.assignedNodes();
+              if (assigned.length > 0) return assigned;
+            }
+            const shadow = shadowOf(el);
+            if (shadow === null) return Array.from(el.childNodes);
+            const slotted = new Set();
+            for (const slot of Array.from(shadow.querySelectorAll("slot"))) {
+              for (const node of slot.assignedNodes()) slotted.add(node);
+            }
+            const own = Array.from(el.childNodes).filter((child) => !slotted.has(child));
+            return own.concat(Array.from(shadow.childNodes));
+          };
+          // Text for a name from an element's own content (accname 2F). named is
+          // the element the text names when that is not el (a control read
+          // through its <label>), which never contributes to its own name.
+          const nameTextOf = (el, accessible, named = el) => {
+            if (isNameHidden(el, styleOf(el))) return "";
+            if (nameOpaqueTags.has(el.tagName)) return "";
+            return childrenNameOf(el, nameWalk([el, named], accessible)).replace(/\s+/g, " ").trim();
+          };
+          const nameOpaqueTags = new Set(["TEXTAREA", "SELECT", "INPUT", "SCRIPT", "STYLE"]);
+          // Roles named from their content (accname 2F, the list Playwright's
+          // role selector uses), plus listitem, status, and alert.
+          const nameFromContentRoles = new Set([
+            "button", "cell", "checkbox", "columnheader", "gridcell", "heading", "link", "menuitem", "menuitemcheckbox",
+            "menuitemradio", "option", "radio", "row", "rowheader", "switch", "tab", "tooltip", "treeitem", "listitem", "status", "alert"
+          ]);
+          // HTML-AAM: the child element that names its parent when nothing ARIA does.
+          const namingChildTags = { FIELDSET: "LEGEND", FIGURE: "FIGCAPTION", TABLE: "CAPTION" };
+          const placeholderNamedInputTypes = ["text", "password", "number", "search", "tel", "email", "url"];
+          // The controls a placeholder may name: text-like inputs, textareas, and the textbox and searchbox roles.
+          const isPlaceholderNamed = (el, role) => {
+            if (el instanceof HTMLTextAreaElement) return true;
+            if (el instanceof HTMLInputElement) return placeholderNamedInputTypes.indexOf(el.type) !== -1;
+            return role === "textbox" || role === "searchbox";
+          };
+          const accessibleName = (el, role) => {
+            // accname reads a labelledby reference (2B) before the element's own aria-label (2C).
+            const referenced = referencedNamesOf(el, nameWalk([], true));
+            if (referenced !== null) return referenced.join(" ");
+            const ariaLabel = el.getAttribute("aria-label");
+            if (ariaLabel !== null && ariaLabel.trim() !== "") return ariaLabel.trim();
+            const labels = el.labels ? Array.from(el.labels) : [];
+            if (labels.length > 0) {
+              const joined = labels.map((label) => nameTextOf(label, true, el)).join(" ").trim();
+              if (joined !== "") return joined;
+            }
+            const alternative = altOf(el) ?? (isPresentational(el) ? null : svgTitleOf(el));
+            if (alternative !== null) return alternative;
+            const captionTag = namingChildTags[el.tagName];
+            if (captionTag !== undefined) {
+              const caption = Array.from(el.children).find((child) => child.tagName === captionTag);
+              const text = caption === undefined ? "" : nameTextOf(caption, true);
+              if (text !== "") return text;
+            }
+            if (el instanceof HTMLInputElement && (el.type === "button" || el.type === "submit" || el.type === "reset")) {
+              if (el.value.trim() !== "") return el.value.trim();
+              // HTML-AAM: a submit or reset button with no value reads its default label.
+              if (el.type === "submit") return "Submit";
+              if (el.type === "reset") return "Reset";
+            }
+            if (role !== null && nameFromContentRoles.has(role)) {
+              const text = nameTextOf(el, true);
+              if (text !== "") return text;
+            }
+            const title = el.getAttribute("title");
+            if (title !== null && title.trim() !== "") return title.trim();
+            // HTML-AAM names an unlabeled text control by its placeholder, after the title.
+            if (isPlaceholderNamed(el, role)) {
+              const placeholder = el.getAttribute("placeholder");
+              if (placeholder !== null && placeholder.trim() !== "") return placeholder.trim();
+              const ariaPlaceholder = el.getAttribute("aria-placeholder");
+              if (ariaPlaceholder !== null && ariaPlaceholder.trim() !== "") return ariaPlaceholder.trim();
+            }
+            return null;
+          };
+          // No name is null, as upstream reports it, so the snapshot shows the node's text instead.
+          const nameOf = (el, role) => {
+            const name = reportedName(el, accessibleName(el, role));
+            return name === null ? null : cut(name, 256);
           };
           // The roles aria-disabled applies to (WAI-ARIA 1.2), as Playwright's
           // toBeDisabled reads them.
@@ -282,7 +570,7 @@ internal static class PageScript
               const node = {
                 ref: stamp(el),
                 role,
-                name: isFrame ? cut(el.getAttribute("title") || "", 256) : nameOf(el, role),
+                name: isFrame ? cut(el.getAttribute("title") || "", 256) || null : nameOf(el, role),
                 // A leaf keeps its own text too: a labelled status or button
                 // reads its content, not its label, as upstream's node read
                 // does. A secure field withholds it.
