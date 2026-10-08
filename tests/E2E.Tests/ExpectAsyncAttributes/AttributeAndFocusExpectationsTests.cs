@@ -29,7 +29,7 @@ public sealed class AttributeAndFocusExpectationsTests
         await Expect.That(locator).ToBeFocusedAsync();
     }
 
-    [Fact(Skip = "Gap: the port's GetAttributeAsync reads an attribute of a secure field; upstream denies it with POLICY_DENIED. The matchers already deny it.")]
+    [Fact]
     public async Task Refuses_to_judge_an_attribute_of_a_secure_field_whose_value_attribute_is_withheld_negated_or_not()
     {
         var secure = new SemanticNode

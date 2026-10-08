@@ -258,7 +258,7 @@ public sealed class LocatorExpect
             {
                 if (field.ReadsWithheld)
                 {
-                    DenySecure([node]);
+                    _locator.DenySecureRead([node]);
                 }
 
                 var actual = field.Read(node);
@@ -283,7 +283,7 @@ public sealed class LocatorExpect
             includeHidden: false,
             matches =>
             {
-                DenySecure(matches);
+                _locator.DenySecureRead(matches);
                 var holds = field.Contains ? MatchesSubsequence(matches, patterns, Satisfies) : MatchesPositionally(matches, patterns, Satisfies);
                 return new Verdict(holds, field.Label + " [" + string.Join(", ", matches.Select(node => field.Print(field.Read(node)))) + "]");
             },
@@ -299,7 +299,7 @@ public sealed class LocatorExpect
             timeout,
             node =>
             {
-                DenySecure([node]);
+                _locator.DenySecureRead([node]);
                 if (!node.Attributes.TryGetValue(name, out var attribute))
                 {
                     return new Verdict(false, "attribute \"" + name + "\" absent");
@@ -391,15 +391,6 @@ public sealed class LocatorExpect
 
             firstSample = false;
             await Task.Delay(_locator.Screen.PollInterval, token).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>A secure field's text, value, and attributes are withheld, so reading them is denied rather than read as empty.</summary>
-    private void DenySecure(IReadOnlyList<SemanticNode> nodes)
-    {
-        if (nodes.Any(node => node.States.Secure))
-        {
-            throw new TestException("POLICY_DENIED", "reading values from a secure field is denied: " + _locator.Query.Describe());
         }
     }
 

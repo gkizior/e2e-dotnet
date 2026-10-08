@@ -80,6 +80,19 @@ public sealed class ToHaveValueTests
     }
 
     [Fact]
+    public async Task Denies_text_value_and_attribute_reads_of_a_secure_field_but_answers_state_reads()
+    {
+        var secure = new SemanticNode { Ref = "node-1", Role = "textbox", Name = "Password", States = new NodeStates { Secure = true } };
+        var locator = ScreenFixture.Create(secure).GetByRole("textbox");
+        await Denied(() => locator.TextContentAsync());
+        await Denied(() => locator.InputValueAsync());
+        await Denied(() => locator.GetAttributeAsync("type"));
+        Assert.True(await locator.IsEnabledAsync());
+        Assert.False(await locator.IsCheckedAsync());
+        Assert.True(await locator.IsVisibleAsync());
+    }
+
+    [Fact]
     public async Task Still_reads_a_secure_field_for_state_and_name_matchers()
     {
         var secure = new SemanticNode { Ref = "node-1", Role = "textbox", Name = "Password", States = new NodeStates { Secure = true, Focused = true } };

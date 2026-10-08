@@ -46,7 +46,7 @@ this port. Use the test runner's own output, such as
 | `AUTOMATION_UNSUPPORTED` | The step needs an action the agent's tools lack (hover, drag) | Do that step with `Screen` actions |
 | `ENVIRONMENT_UNAVAILABLE` with "Chromium is not installed" or "could not install Chromium" | The browser install was skipped or failed | Allow network access for the first run, or install Chromium and set `E2E_SKIP_BROWSER_INSTALL=1` |
 | `APP_UNREACHABLE` | The agent found the app down or not loading | Start the app, or fix `targets[].app.url` |
-| `POLICY_DENIED` | A URL whose scheme is not `http:` or `https:` (`file:`, `view-source:`, `data:`), from `OpenAsync`, the agent's navigate step, or `SetCookiesAsync`; a text, value, or attribute expectation on a password field | http(s) or `about:blank` only; assert the outcome, not the value |
+| `POLICY_DENIED` | A URL whose scheme is not `http:` or `https:` (`file:`, `view-source:`, `data:`), from `OpenAsync`, the agent's navigate step, or `SetCookiesAsync`; a read or expectation of a password field's text, value, or attributes | http(s) or `about:blank` only; assert the outcome, not the value |
 | `UNSUPPORTED_CAPABILITY` | A `Browser` member on the document engine, or an action the engine lacks | Use `WebEngine`, or drop the call |
 
 A failed fill of a `Secret` never shows the value. The message reads
