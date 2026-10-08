@@ -79,13 +79,13 @@ public sealed class BillingTests : E2ETest
 
 Members of `E2ETest`:
 
-- `App`: `OpenAsync(path)`, `BackAsync`, `RestartAsync`, `ClearStateAsync`. A path resolves against the target URL.
+- `App`: `OpenAsync(path)`, `BackAsync`, `RestartAsync`, `ClearStateAsync`. A path resolves against the target URL. `OpenAsync` and the agent's navigate step admit only `http:`, `https:`, and the exact `about:blank`; any other scheme (`file:`, `data:`, `javascript:`, `view-source:file:`) is `POLICY_DENIED`.
 - `Agent`: `ActAsync(instruction)` performs a goal. `AssertAsync(statement)` judges the screen once. `WaitForAsync(statement)` judges until true or timeout. `ExtractAsync<T>(instruction)` reads typed data from the screen.
 - `Screen`: `GetByRole(role, name)`, `GetByText`, `GetByLabel`, `GetByPlaceholder`, `GetByTestId`, `GetByDisplayValue`. Text matches are **exact by default**; pass `exact: false` for a substring. A locator has `ClickAsync`, `FillAsync`, `PressAsync`, `SelectOptionAsync`, `CheckAsync`, `First()`, `Last()`, `Nth(i)`, and `Filter(...)`.
 - `Expect.That(locator)`: `ToBeVisibleAsync`, `ToBeHiddenAsync`, `ToContainTextAsync`, `ToHaveTextAsync`, `ToHaveValueAsync`, `ToHaveCountAsync`, `ToBeEnabledAsync`, `ToBeCheckedAsync`, `ToHaveAttributeAsync`, and more. `Expect.Soft` records a failure and continues. `Expect.Poll(read)` retries any value.
 - `Browser`: URL, title, cookies, viewport, and raw keyboard and mouse.
   - `WaitForResponseAsync(pattern, timeout?)`: resolves once the headers arrive, with a `WebResponse` (`Url`, `Status`, `Headers`, `TextAsync()`, `JsonAsync<T>()`). `TextAsync` and `JsonAsync` wait for the body (up to the action timeout) and fail with `ACTION_FAILED` when it could not be read. Start it before the step that sends the request, and await it after.
-  - `CookiesAsync()`, `SetCookiesAsync([...])`: a target is an http(s) URL, relative to the base URL, or a domain.
+  - `CookiesAsync()`, `SetCookiesAsync([...])`: a target is an http(s) URL, relative to the base URL, or a domain. `SetCookiesAsync` refuses a cookie URL that is not http(s), `about:blank` included, with `POLICY_DENIED`.
   - A `WaitForResponseAsync` pattern is a glob string or a `Regex` matched against the full URL (`*` stays within one path segment, `**` crosses `/`, `?` is one character, `\` escapes the next one).
 - `Secrets.Get("admin-password")`: a `Secret` from config.
 
@@ -153,6 +153,7 @@ An `E2EException` has a `Code`. Read it first.
 | `LOCATOR_NOT_FOUND`, `STRICT_MODE` | No match, or more than one match | Use the exact accessible name, or `First()`, `Nth(i)`, `Filter(...)` |
 | `ENVIRONMENT_UNAVAILABLE` with "Chromium is not installed" or "could not install Chromium" | The browser install was skipped or failed | Allow network access for the first run, or install Chromium and set `E2E_SKIP_BROWSER_INSTALL=1` |
 | `APP_UNREACHABLE` | The agent found the app down or not loading | Start the app, or fix `targets[].app.url` |
+| `POLICY_DENIED` | A URL whose scheme is not `http:` or `https:` (`file:`, `view-source:`, `data:`), from `OpenAsync`, the agent's navigate step, or `SetCookiesAsync` | http(s) or `about:blank` only (no `about:blank` cookie) |
 | `REPLAY_STALE` | `cache.strict` is on and a recording no longer matches | Re-run once without `cache.strict` to re-record |
 
 A replay miss is not a failure. The step runs live and records again. `ActResult.Cache.Reason` says why it missed: `no-entry` (nothing recorded yet), `invalid-entry` (an old or broken file), `target-not-found` (the control's role or name changed), `target-ambiguous`, `wrong-context` (the page or path changed), or `end-mismatch` (the replay ended on a different screen).

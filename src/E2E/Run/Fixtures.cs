@@ -27,6 +27,11 @@ public sealed class App
     /// <summary>The target base URL relative URLs resolve against, or null when the test declares none.</summary>
     public string? BaseUrl => _baseUrl;
 
+    /// <summary>
+    /// Opens a path or URL, resolved against the base URL. No URL opens the base URL itself.
+    /// Throws <c>APP_URL_REQUIRED</c> for a relative URL when the test declares no base URL, and <c>POLICY_DENIED</c>
+    /// for a malformed URL or a scheme other than <c>http:</c> or <c>https:</c> (the exact <c>about:blank</c> is admitted).
+    /// </summary>
     public Task OpenAsync(string? url = null, CancellationToken cancellationToken = default)
     {
         return _session.OpenAsync(Routes.Resolve(_baseUrl, url), Token(cancellationToken));

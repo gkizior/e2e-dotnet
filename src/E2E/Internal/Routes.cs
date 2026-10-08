@@ -33,6 +33,21 @@ internal static partial class Routes
 
     public static string Resolve(string? baseUrl, string? url)
     {
+        var resolved = Absolute(baseUrl, url);
+
+        // An allowlist, because a browser wraps and nests schemes (view-source:file:, blob:, filesystem:)
+        // and a list of forbidden ones misses the wrapper. The exact about:blank loads nothing.
+        if (resolved.Scheme is not ("http" or "https") && resolved.AbsoluteUri != "about:blank")
+        {
+            throw new TestException("POLICY_DENIED", "forbidden URL scheme: " + resolved.Scheme + ":");
+        }
+
+        return resolved.AbsoluteUri;
+    }
+
+    /// <summary>Resolves a URL against the base URL without the navigation scheme rule, for comparing URLs.</summary>
+    public static Uri Absolute(string? baseUrl, string? url)
+    {
         // No URL opens the base URL itself, as an empty reference does in WHATWG resolution.
         url = url?.Trim() ?? string.Empty;
         Uri? resolved;
@@ -53,15 +68,10 @@ internal static partial class Routes
 
         if (resolved is null)
         {
-            throw new TestException("POLICY_DENIED", "Malformed URL: " + url);
+            throw new TestException("POLICY_DENIED", "malformed URL: " + url);
         }
 
-        if (resolved.Scheme is "file" or "data" or "javascript")
-        {
-            throw new TestException("POLICY_DENIED", "Forbidden URL scheme: " + resolved.Scheme + ":");
-        }
-
-        return resolved.AbsoluteUri;
+        return resolved;
     }
 
     /// <summary>

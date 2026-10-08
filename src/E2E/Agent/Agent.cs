@@ -570,7 +570,7 @@ public sealed class Agent
                     return ReplayAttempt.Hand("action-budget");
                 }
 
-                await _scope.Session.OpenAsync(action.Url ?? "/", token).ConfigureAwait(false);
+                await _scope.Session.OpenAsync(Routes.Resolve(_scope.BaseUrl, action.Url ?? "/"), token).ConfigureAwait(false);
                 actions.Add(action);
                 started = true;
                 continue;
@@ -798,7 +798,7 @@ public sealed class Agent
         if (string.Equals(call.Name, "navigate", StringComparison.Ordinal))
         {
             var url = Args.String(call.Arguments, "url") ?? "/";
-            await _scope.Session.OpenAsync(url, token).ConfigureAwait(false);
+            await _scope.Session.OpenAsync(Routes.Resolve(_scope.BaseUrl, url), token).ConfigureAwait(false);
             actions.Add(new RecordedAction { Kind = "navigate", Url = url });
             return ToolOutcome.Ok(await DescribeAsync("navigated to " + Routes.PathOf(url), token).ConfigureAwait(false));
         }
@@ -1742,6 +1742,9 @@ internal sealed class AttemptScope
     private readonly Dictionary<string, int> _callIndexes = new(StringComparer.Ordinal);
 
     public required IEngineSession Session { get; init; }
+
+    /// <summary>The base URL a navigate action resolves against, under the same URL rule as <c>app.open</c>.</summary>
+    public string? BaseUrl { get; init; }
 
     /// <summary>The agents by name. <c>default</c> is always present.</summary>
     public required IReadOnlyDictionary<string, ResolvedAgent> Agents { get; init; }

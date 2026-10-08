@@ -72,7 +72,7 @@ public sealed class Browser
     public Task WaitForURLAsync(string url, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(url);
-        var expected = Routes.Resolve(_baseUrl, url);
+        var expected = Routes.Absolute(_baseUrl, url).AbsoluteUri;
         return WaitForURLAsync(current => string.Equals(current, expected, StringComparison.Ordinal), url, timeout, cancellationToken);
     }
 
@@ -118,7 +118,11 @@ public sealed class Browser
     public Task<IReadOnlyList<BrowserCookie>> CookiesAsync(CancellationToken cancellationToken = default) =>
         Require("cookies").GetCookiesAsync(Token(cancellationToken));
 
-    /// <summary>Sets cookies. Each target URL, or the origin a domain cookie is sent to, must pass the URL rule. A relative url resolves against the base URL.</summary>
+    /// <summary>
+    /// Sets cookies. Each target URL, or the origin a domain cookie is sent to, must pass the URL rule. A relative url resolves against the base URL.
+    /// A cookie URL that does not parse, or uses a scheme other than <c>http:</c> or <c>https:</c> (<c>about:blank</c> included),
+    /// is <c>POLICY_DENIED</c>.
+    /// </summary>
     public Task SetCookiesAsync(IReadOnlyList<BrowserCookie> cookies, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(cookies);
@@ -134,8 +138,14 @@ public sealed class Browser
             }
 
             // A url cookie is set on the URL the rule resolved, so a relative one
-            // lands on the base URL the way OpenAsync would.
+            // lands on the base URL the way OpenAsync would. The rule admits
+            // about:blank for navigation, which holds no cookie.
             var target = Routes.Resolve(_baseUrl, cookie.Url ?? scheme + "://" + cookie.Domain!.TrimStart('.'));
+            if (!target.StartsWith("http:", StringComparison.Ordinal) && !target.StartsWith("https:", StringComparison.Ordinal))
+            {
+                throw new TestException("POLICY_DENIED", "cookie URL must be http(s): " + target);
+            }
+
             resolved.Add(cookie.Url is null ? cookie : cookie with { Url = target });
         }
 

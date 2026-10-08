@@ -104,6 +104,7 @@ public sealed class E2ESession : IAsyncDisposable
         var scope = new AttemptScope
         {
             Session = engine,
+            BaseUrl = options.BaseUrl,
             Agents = agents,
             Cache = options.Cache,
             CacheEnabled = cacheOn,
