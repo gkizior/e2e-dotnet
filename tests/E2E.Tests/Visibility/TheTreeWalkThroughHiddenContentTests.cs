@@ -17,8 +17,8 @@ public sealed class TheTreeWalkThroughHiddenContentTests(ChromiumPage chromium) 
             <div style="display:contents;visibility:hidden"><button>Contents hidden</button></div>
             """);
         var nodes = await chromium.CaptureAsync();
-        // The tree lists a hidden node as hidden where upstream leaves it out, so only the shown ones count.
-        Assert.Equal(["Shown child"], nodes.Where(node => node.Role == "button" && !node.Hidden).Select(node => node.Name));
+        // The tree lists a hidden node with its state where upstream leaves it out, so only the shown ones count.
+        Assert.Equal(["Shown child"], nodes.Where(node => node.Role == "button" && !node.Hidden && !node.AriaHidden).Select(node => node.Name));
         var skipping = nodes.Single(node => node.TestId == "skipping");
         Assert.False(skipping.Hidden);
         // The container keeps its box and paints none of its text, which innerText reads empty too.

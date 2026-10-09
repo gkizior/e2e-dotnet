@@ -94,7 +94,8 @@ internal static class PageScript
           // child element or its own text is. Two parts are not in it, since
           // role queries and the agent read the same hidden state as the
           // accessibility tree: a box with no size, which an empty landmark
-          // has, and aria-hidden, which the walk adds though the node paints.
+          // has, and aria-hidden, which the node carries apart from this
+          // since it still paints.
           const hidden = (el, style = getComputedStyle(el)) => {
             if (style.display === "contents") {
               // A host paints its shadow tree, so that counts as its children too.
@@ -108,12 +109,13 @@ internal static class PageScript
             return style.display === "none" || style.visibility !== "visible" || inClosedDetails(el);
           };
           const ariaHidden = (el) => (el.getAttribute("aria-hidden") || "").toLowerCase() === "true";
-          // What hides the element and everything under it: an aria-hidden
-          // subtree, which the accessibility tree drops; display: none, which
-          // no descendant can undo; and content-visibility: hidden, which keeps
-          // the element's own box and renders nothing under it. visibility is
-          // not in it, since a child may set visibility: visible and paint again.
-          const hidesSubtree = (el, style) => ariaHidden(el) || style.display === "none" || style.contentVisibility === "hidden";
+          // What stops the element and everything under it from rendering:
+          // display: none, which no descendant can undo, and content-visibility:
+          // hidden, which keeps the element's own box and renders nothing under
+          // it. visibility is not in it, since a child may set visibility:
+          // visible and paint again; nor is aria-hidden, which only the
+          // accessibility tree drops.
+          const hidesSubtree = (el, style) => style.display === "none" || style.contentVisibility === "hidden";
           const roleOf = (el) => {
             const explicit = (el.getAttribute("role") || "").trim();
             if (explicit) {
@@ -609,15 +611,18 @@ internal static class PageScript
           };
           // A node under an ancestor that hides its subtree is hidden too.
           // parentHidden is that ancestor's verdict, not its own visibility.
-          const walk = (el, into, parentHidden) => {
+          // parentAria is whether an ancestor is aria-hidden: the node paints
+          // and is visible, but the accessibility tree drops it.
+          const walk = (el, into, parentHidden, parentAria) => {
             if (!el || skip.has(el.tagName) || full) return;
             const style = getComputedStyle(el);
-            const isHidden = !!parentHidden || ariaHidden(el) || hidden(el, style);
+            const isHidden = !!parentHidden || hidden(el, style);
+            const isAriaHidden = !!parentAria || ariaHidden(el);
             const childrenHidden = !!parentHidden || hidesSubtree(el, style);
             const role = roleOf(el);
             const testId = el.getAttribute(testIdAttribute);
             const isFrame = el.tagName === "IFRAME";
-            if (isFrame && isHidden) return;
+            if (isFrame && (isHidden || isAriaHidden)) return;
             if (listed(el, role)) {
               const textNode = textOnly(el, role);
               if (textNode ? textCount >= max : count >= max) {
@@ -626,13 +631,13 @@ internal static class PageScript
                   return;
                 }
                 textCut = true;
-                walkChildren(el, into, childrenHidden);
+                walkChildren(el, into, childrenHidden, isAriaHidden);
                 return;
               }
               if (!textNode && offBudget < max && !inView(el)) {
                 if (offCount >= offBudget) {
                   if ((role && leaves.has(role)) || el.tagName === "SELECT") return;
-                  walkChildren(el, into, childrenHidden);
+                  walkChildren(el, into, childrenHidden, isAriaHidden);
                   return;
                 }
                 offCount++;
@@ -665,6 +670,7 @@ internal static class PageScript
                 pressed: el.getAttribute("aria-pressed") === "true",
                 focused: el === focused,
                 hidden: isHidden,
+                ariaHidden: isAriaHidden,
                 secure,
                 frame: isFrame,
                 attributes: attributesOf(el, secure),
@@ -677,24 +683,24 @@ internal static class PageScript
                 // A closed select paints none of its options; they are what it offers.
                 for (const option of Array.from(el.options).slice(0, maxSelectOptions)) {
                   const before = node.children.length;
-                  walk(option, node.children, isHidden);
+                  walk(option, node.children, isHidden, isAriaHidden);
                   if (node.children.length > before) node.children[before].hidden = isHidden;
                 }
                 return;
               }
               if (role && leaves.has(role)) return;
-              walkChildren(el, node.children, childrenHidden);
+              walkChildren(el, node.children, childrenHidden, isAriaHidden);
               return;
             }
-            walkChildren(el, into, childrenHidden);
+            walkChildren(el, into, childrenHidden, isAriaHidden);
           };
           // Light children first, then the shadow tree. Slotted elements are
           // light children and the shadow tree holds only their slots, so
           // nothing is listed twice.
-          const walkChildren = (el, into, parentHidden) => {
-            for (const child of el.children) walk(child, into, parentHidden);
+          const walkChildren = (el, into, parentHidden, parentAria) => {
+            for (const child of el.children) walk(child, into, parentHidden, parentAria);
             const shadow = shadowOf(el);
-            if (shadow) for (const child of shadow.children) walk(child, into, parentHidden);
+            if (shadow) for (const child of shadow.children) walk(child, into, parentHidden, parentAria);
           };
           // innerText applies CSS text-transform, but locators match the DOM
           // text, as Playwright's do. The walk runs with text-transform
@@ -708,7 +714,7 @@ internal static class PageScript
           try {
             truncated = !!document.body && tally(document.body, false) > max;
             if (truncated) offBudget = Math.max(0, max - tally(document.body, true));
-            if (document.body) walk(document.body, roots, false);
+            if (document.body) walk(document.body, roots, false, false);
           } finally {
             document.adoptedStyleSheets = sheets;
           }

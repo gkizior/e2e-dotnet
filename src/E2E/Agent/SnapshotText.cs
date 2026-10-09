@@ -38,7 +38,7 @@ internal static class SnapshotText
     private static bool Write(StringBuilder builder, SemanticNode node, int depth, Redactor redactor)
     {
         var wrote = false;
-        if (!node.States.Hidden)
+        if (!(node.States.Hidden || node.States.AriaHidden))
         {
             builder.AppendLine();
             builder.Append(' ', depth * 2);
@@ -113,7 +113,7 @@ internal static class SnapshotText
 
         foreach (var child in node.Children)
         {
-            wrote |= Write(builder, child, node.States.Hidden ? depth : depth + 1, redactor);
+            wrote |= Write(builder, child, node.States.Hidden || node.States.AriaHidden ? depth : depth + 1, redactor);
         }
 
         return wrote;

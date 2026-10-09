@@ -1217,7 +1217,7 @@ public sealed class Agent
     {
         foreach (var node in nodes)
         {
-            if (node.States.Hidden)
+            if (node.States.Hidden || node.States.AriaHidden)
             {
                 continue;
             }
@@ -1366,7 +1366,7 @@ public sealed class Agent
         var matches = new List<SemanticNode>();
         foreach (var node in LocatorResolver.Walk(observation.Roots))
         {
-            if (node.States.Hidden)
+            if (node.States.Hidden || node.States.AriaHidden)
             {
                 continue;
             }

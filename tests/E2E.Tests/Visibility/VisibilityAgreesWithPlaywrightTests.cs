@@ -61,9 +61,8 @@ public sealed class VisibilityAgreesWithPlaywrightTests(ChromiumPage chromium) :
             ("a display: contents element with bare text", "contents-text", false),
             ("a hidden display: contents element whose child inherits it", "contents-hidden-element", true),
             ("a hidden display: contents element whose child is visible again", "contents-shown-child", false),
-            // Not ported: "an aria-hidden spinner that paints" and "a button under an aria-hidden container".
-            // The tree keeps aria-hidden in its one hidden state, so role queries and the agent skip
-            // those nodes; a separate accessibility-hidden state is needed (COMPATIBILITY.md).
+            ("an aria-hidden spinner that paints", "spinner", false),
+            ("a button under an aria-hidden container", "under-aria-hidden", false),
             ("a content-visibility: hidden element, which keeps its box", "skipping", false),
             ("a button content-visibility: hidden skips", "skipped", true),
             ("a button slotted under a content-visibility: hidden host", "skipped-slotted", true),

@@ -126,8 +126,8 @@ public sealed class RoleMappingTests
         Assert.Null(nodes["bare"].Name);
         Assert.Equal(("image", "Close"), (nodes["titled"].Role, nodes["titled"].Name));
         Assert.Equal(("image", "Labelled"), (nodes["labelled"].Role, nodes["labelled"].Name));
-        // The port lists an aria-hidden node as hidden, where upstream leaves it out of the tree.
-        Assert.True(nodes["decorative"].States.Hidden);
+        // The port lists an aria-hidden node as hidden from the accessibility tree, where upstream leaves it out.
+        Assert.True(nodes["decorative"].States.AriaHidden);
         Assert.Equal(("link", "Home"), (nodes["home"].Role, nodes["home"].Name));
         Assert.DoesNotContain(tree, node => node.Role is "presentation" or "none");
 

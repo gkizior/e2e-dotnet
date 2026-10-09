@@ -120,8 +120,8 @@ public class TextMatchOptions
     /// what renders: <c>display: none</c>, a <c>visibility</c> other than
     /// <c>visible</c>, and content under <c>content-visibility: hidden</c> or a
     /// closed <c>details</c>; a child that sets <c>visibility: visible</c> under a
-    /// hidden parent is visible, and an <c>aria-hidden</c> node reads as hidden.
-    /// Role queries never match hidden nodes, whatever this says.
+    /// hidden parent is visible, and an <c>aria-hidden</c> node that paints is visible.
+    /// Role queries never match hidden or <c>aria-hidden</c> nodes, whatever this says.
     /// </summary>
     public bool Visible { get; init; }
 }

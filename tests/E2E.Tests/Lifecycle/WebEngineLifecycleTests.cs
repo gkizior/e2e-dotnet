@@ -74,8 +74,10 @@ public sealed class WebEngineLifecycleTests
             // A visibility: hidden twin is hidden.
             Assert.Equal(2, await screen.GetByText("Decorative twin").CountAsync());
             Assert.False(await screen.GetByText("Decorative twin", options(true)).IsHiddenAsync());
-            // Not ported: the painted aria-hidden spinner, which upstream's visible query keeps. The tree's
-            // one hidden state keeps aria-hidden in it, for role queries and the agent (COMPATIBILITY.md).
+            // An aria-hidden node still paints, so it is visible.
+            var spinner = screen.GetByText("Decorative spinner", options(true));
+            Assert.Equal("true", await spinner.GetAttributeAsync("aria-hidden"));
+            Assert.False(await spinner.IsHiddenAsync());
 
             // Under an index the predicate runs before nth: first() is the first shown node, not the first node.
             Assert.True(await screen.GetByText("No memories yet").First().IsHiddenAsync());

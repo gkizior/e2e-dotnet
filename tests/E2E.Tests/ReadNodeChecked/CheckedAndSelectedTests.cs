@@ -46,7 +46,7 @@ public sealed class CheckedAndSelectedTests(ChromiumPage chromium) : IClassFixtu
             <div aria-hidden="TRUE"><span id="reference">Label <i style="display:none">whole</i></span></div>
             """);
         var nodes = await chromium.CaptureAsync();
-        Assert.True(Node(nodes, "hidden").Hidden);
+        Assert.True(Node(nodes, "hidden").AriaHidden);
         Assert.Equal("Save", Node(nodes, "save").Name);
         Assert.Equal("Shown", Node(nodes, "shown").Name);
         Assert.Equal("Label whole", Node(nodes, "referenced").Name);

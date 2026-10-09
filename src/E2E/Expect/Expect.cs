@@ -507,6 +507,7 @@ public sealed class LocatorExpect
         Add(states.Expanded, "expanded");
         Add(states.Focused, "focused");
         Add(states.Hidden, "hidden");
+        Add(states.AriaHidden, "aria-hidden");
         Add(states.Secure, "secure");
         Add(states.Selected, "selected");
         Add(states.Pressed, "pressed");

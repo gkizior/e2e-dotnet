@@ -1863,6 +1863,7 @@ public sealed partial class WebEngine : IEngine
                     Expanded = dto.Expanded,
                     Focused = dto.Focused,
                     Hidden = dto.Hidden,
+                    AriaHidden = dto.AriaHidden,
                     Pressed = dto.Pressed,
                     Secure = dto.Secure,
                     Selected = dto.Selected,
@@ -2051,6 +2052,8 @@ public sealed partial class WebEngine : IEngine
         public bool Focused { get; set; }
 
         public bool Hidden { get; set; }
+
+        public bool AriaHidden { get; set; }
 
         public bool Secure { get; set; }
 

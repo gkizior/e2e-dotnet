@@ -87,7 +87,7 @@ internal static class Anchors
             var text = Field(node.Text) is { } read && read != name ? read : null;
             var testId = Field(node.TestId);
             var placeholder = Field(node.Placeholder);
-            if (node.States.Hidden || (name is null && text is null && testId is null && placeholder is null)
+            if (node.States.Hidden || node.States.AriaHidden || (name is null && text is null && testId is null && placeholder is null)
                 || (name is not null && skip(name)) || (text is not null && skip(text)))
             {
                 continue;

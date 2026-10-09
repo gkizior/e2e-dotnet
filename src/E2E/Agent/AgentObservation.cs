@@ -67,9 +67,9 @@ internal static class AgentObservation
     /// <summary>Whether an observation shows a screen in transition: no node, or only an empty document root.</summary>
     public static bool IsTransitional(Observation observation)
     {
-        var visible = observation.Roots.Where(root => !root.States.Hidden).ToList();
+        var visible = observation.Roots.Where(root => !(root.States.Hidden || root.States.AriaHidden)).ToList();
         return visible.Count == 0
-            || (visible.Count == 1 && visible[0].Role is { } role && EmptyRoots.Contains(role) && visible[0].Children.All(child => child.States.Hidden));
+            || (visible.Count == 1 && visible[0].Role is { } role && EmptyRoots.Contains(role) && visible[0].Children.All(child => child.States.Hidden || child.States.AriaHidden));
     }
 
     /// <summary>

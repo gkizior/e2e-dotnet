@@ -88,9 +88,9 @@ Members of `E2ETest` in both frameworks:
   `visibility` other than `visible`, and content under
   `content-visibility: hidden` or a closed `details` are hidden. A child that
   sets `visibility: visible` under a hidden parent is visible, and a
-  `display: contents` element is visible when something under it is. Unlike
-  upstream, an `aria-hidden` node reads as hidden, and a box with no size
-  reads as visible.
+  `display: contents` element is visible when something under it is. An
+  `aria-hidden` node that paints is visible, as upstream, but role queries skip
+  it. Unlike upstream, a box with no size reads as visible.
 - `GetByDisplayValue` never matches a checkbox or radio. An accessible name
   includes an embedded control's value (`<button>Flash the screen
   <input value="3"> times</button>` is "Flash the screen 3 times") and leaves

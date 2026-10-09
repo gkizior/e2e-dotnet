@@ -815,7 +815,7 @@ internal static class LocatorResolver
 
     private static bool RoleMatches(SemanticNode node, LocatorQuery query, bool includeHidden)
     {
-        if (node.Role is null || !string.Equals(node.Role, query.Role, StringComparison.OrdinalIgnoreCase) || (node.States.Hidden && !includeHidden))
+        if (node.Role is null || !string.Equals(node.Role, query.Role, StringComparison.OrdinalIgnoreCase) || ((node.States.Hidden || node.States.AriaHidden) && !includeHidden))
         {
             return false;
         }
