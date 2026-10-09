@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Globalization;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using E2E.Engine;
 using E2E.Internal;
 
@@ -512,7 +514,10 @@ public sealed class LocatorExpect
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
 
-    private static string Quote(string? value) => "\"" + (value ?? "") + "\"";
+    private static readonly JsonSerializerOptions QuoteOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>Prints a value as upstream does with <c>JSON.stringify</c>: quoted, with newlines and quotes escaped.</summary>
+    private static string Quote(string? value) => JsonSerializer.Serialize(value ?? "", QuoteOptions);
 
     /// <summary>One sample's answer: <see cref="Holds"/> is null when the sample cannot answer, such as no node or several.</summary>
     private readonly record struct Verdict(bool? Holds, string Observed, int StrictCount = 0)

@@ -27,7 +27,7 @@ public sealed class ToHaveValueTests
     {
         var locator = ScreenFixture.Create(Textarea).GetByRole("textbox");
         var error = await Fails("ASSERTION_FAILED", () => Expect.That(locator).ToHaveValueAsync("line1 line2"));
-        Assert.True(error.Message.Contains("observed value \"line1\n\nline2  \"", StringComparison.Ordinal), error.Message);
+        Assert.True(error.Message.Contains("observed value \"line1\\n\\nline2  \"", StringComparison.Ordinal), error.Message);
     }
 
     [Theory]

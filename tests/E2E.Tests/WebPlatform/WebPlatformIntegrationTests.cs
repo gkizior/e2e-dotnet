@@ -29,7 +29,7 @@ public sealed class WebPlatformIntegrationTests
         Assert.Equal("APP_NOT_OPEN", error.Code);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/113: the message prints the newlines raw, not escaped")]
+    [Fact]
     public async Task Fails_toHaveValue_on_a_textarea_against_the_raw_value_and_prints_what_it_compared()
     {
         // The web engine reports the value raw, and the matcher neither collapses the newlines to match nor prints a string it never compared.
@@ -55,7 +55,7 @@ public sealed class WebPlatformIntegrationTests
         Assert.Contains("observed attribute \"value\" \"marker-5e0c\"", control.Message, StringComparison.Ordinal);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/112: InputValueAsync returns null instead of POLICY_DENIED")]
+    [Fact]
     public async Task Denies_secure_value_reads_with_POLICY_DENIED()
     {
         var error = Assert.IsType<TestException>(await RunAsync(Scenarios["secure fields refuse value reads"]));
