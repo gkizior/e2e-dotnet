@@ -263,22 +263,29 @@ public sealed class CodexProvider : IOAuthProvider
         return new OAuthCredentials { Access = tokens.AccessToken, Refresh = refresh, Expires = TokenEndpoint.ExpiryFrom(tokens.ExpiresIn), Extra = extra };
     }
 
-    private Task<TokenResponse> ExchangeAsync(string code, string redirectUri, string verifier, CancellationToken cancellationToken)
+    private async Task<TokenResponse> ExchangeAsync(string code, string redirectUri, string verifier, CancellationToken cancellationToken)
     {
-        return TokenEndpoint.RequestAsync(
-            _http,
-            Name,
-            _issuer + "/oauth/token",
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["grant_type"] = "authorization_code",
-                ["code"] = code,
-                ["redirect_uri"] = redirectUri,
-                ["client_id"] = ClientId,
-                ["code_verifier"] = verifier,
-            },
-            OAuthException.FlowFailed,
-            cancellationToken);
+        try
+        {
+            return await TokenEndpoint.RequestAsync(
+                _http,
+                Name,
+                _issuer + "/oauth/token",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["grant_type"] = "authorization_code",
+                    ["code"] = code,
+                    ["redirect_uri"] = redirectUri,
+                    ["client_id"] = ClientId,
+                    ["code_verifier"] = verifier,
+                },
+                OAuthException.FlowFailed,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OAuthException(OAuthException.Cancelled, "the login was cancelled", ex);
+        }
     }
 
     private async Task<TokenResponse> BrowserLoginAsync(OAuthLoginCallbacks callbacks, CancellationToken cancellationToken)

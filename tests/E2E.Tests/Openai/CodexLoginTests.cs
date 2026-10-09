@@ -2,6 +2,7 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Web;
@@ -55,6 +56,55 @@ public sealed class CodexLoginTests
         Assert.Equal(query["redirect_uri"], exchange["redirect_uri"]);
         Assert.Equal((AccessToken, "ref", "acct_123", "eu"), (credentials.Access, credentials.Refresh, credentials.Get("accountId"), credentials.Get("residency")));
         Assert.True(credentials.Expires > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    [Fact]
+    public async Task Cancels_a_held_authorization_code_exchange_after_the_browser_returns()
+    {
+        var issuer = new HeldExchange(_ => (HttpStatusCode.OK, TokenReply));
+        var provider = new CodexProvider(new HttpClient(issuer), issuer: Issuer, callbackPort: FreePort());
+        using var cancellation = new CancellationTokenSource();
+        Task<HttpResponseMessage>? browser = null;
+
+        var pending = provider.LoginAsync(
+            new OAuthLoginCallbacks
+            {
+                OnAuth = info => browser = BrowserReturns(info.Url, new() { ["code"] = "the-code", ["state"] = "$state" }),
+                OnPrompt = (_, _) => Task.FromResult(""),
+            },
+            new OAuthLoginOptions(),
+            cancellation.Token);
+        await issuer.Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await cancellation.CancelAsync();
+
+        var error = await Assert.ThrowsAsync<OAuthException>(() => pending);
+        Assert.Equal(OAuthException.Cancelled, error.Code);
+        Assert.Equal(HttpStatusCode.OK, (await browser!).StatusCode);
+        Assert.Single(issuer.Requests);
+    }
+
+    [Fact]
+    public async Task Cancels_a_held_authorization_code_exchange_after_the_device_code_is_granted()
+    {
+        var issuer = new HeldExchange(request => request.Uri.AbsolutePath switch
+        {
+            "/api/accounts/deviceauth/usercode" => (HttpStatusCode.OK, """{ "device_auth_id": "dev-1", "user_code": "LOCAL", "interval": "0.001" }"""),
+            "/api/accounts/deviceauth/token" => (HttpStatusCode.OK, """{ "authorization_code": "granted-code", "code_verifier": "verifier" }"""),
+            _ => (HttpStatusCode.NotFound, "{}"),
+        });
+        var provider = new CodexProvider(new HttpClient(issuer), issuer: Issuer);
+        using var cancellation = new CancellationTokenSource();
+
+        var pending = provider.LoginAsync(
+            new OAuthLoginCallbacks { OnAuth = _ => { }, OnPrompt = (_, _) => Task.FromResult("") },
+            new OAuthLoginOptions { Device = true },
+            cancellation.Token);
+        await issuer.Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await cancellation.CancelAsync();
+
+        var error = await Assert.ThrowsAsync<OAuthException>(() => pending);
+        Assert.Equal(OAuthException.Cancelled, error.Code);
+        Assert.Equal(3, issuer.Requests.Count);
     }
 
     [Fact]
@@ -214,6 +264,29 @@ public sealed class CodexLoginTests
         var error = await Assert.ThrowsAsync<OAuthException>(() => provider.RefreshAsync(renewed, CancellationToken.None));
         Assert.Equal(OAuthException.LoginRequired, error.Code);
         Assert.Equal("ChatGPT token request failed (400: invalid_grant)", error.Message);
+    }
+
+    /// <summary>Answers like a <see cref="FakeApi"/>, but holds the token exchange until the caller gives up.</summary>
+    private sealed class HeldExchange(Func<FakeApi.Received, (HttpStatusCode Status, string Body)> answer) : HttpMessageHandler
+    {
+        private readonly FakeApi _api = new(answer);
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ConcurrentQueue<FakeApi.Received> Requests => _api.Requests;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.AbsolutePath != "/oauth/token")
+            {
+                return await new HttpMessageInvoker(_api).SendAsync(request, cancellationToken);
+            }
+
+            _api.Requests.Enqueue(new FakeApi.Received(request.RequestUri, new Dictionary<string, string>(), ""));
+            Started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        }
     }
 
     private static int FreePort()
