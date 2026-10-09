@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
-  pull_request:
-    paths:
-      - "docs/**"
-      - "src/**"
-      - "*.md"
-      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
