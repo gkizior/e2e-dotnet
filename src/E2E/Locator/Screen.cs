@@ -223,6 +223,9 @@ public sealed class Locator
         return ActAsync(new LocatorAction.DoubleTap(), options, cancellationToken);
     }
 
+    /// <summary>Alias of <see cref="DoubleTapAsync"/>.</summary>
+    public Task DblClickAsync(ActionOptions? options = null, CancellationToken cancellationToken = default) => DoubleTapAsync(options, cancellationToken);
+
     public Task FillAsync(string value, ActionOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(value);

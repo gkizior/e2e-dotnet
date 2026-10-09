@@ -98,7 +98,7 @@ Members of `E2ETest` in both frameworks:
 
 ### Actions
 
-`ClickAsync` (and `TapAsync`), `DoubleTapAsync`, `FillAsync` (a string or a
+`ClickAsync` (and `TapAsync`), `DoubleTapAsync` (and `DblClickAsync`), `FillAsync` (a string or a
 `Secret`), `PressSequentiallyAsync`, `PressAsync`, `CheckAsync`,
 `UncheckAsync`, `ClearAsync`, `SelectOptionAsync` (a value or label),
 `FocusAsync`, and `ScrollIntoViewAsync`. Each waits up to the action timeout

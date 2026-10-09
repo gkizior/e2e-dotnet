@@ -18,12 +18,13 @@ public sealed class LocatorActionOptionsTests
 
     private static readonly SemanticNode Bin = new() { Ref = "bin", Role = "region", Name = "Bin" };
 
-    /// <summary>The upstream verbs the port has. It has no dblclick, secondaryTap, longPress, hover, setInputFiles, dragTo, or swipe.</summary>
+    /// <summary>The upstream verbs the port has. It has no secondaryTap, longPress, hover, setInputFiles, dragTo, or swipe.</summary>
     private static readonly Dictionary<string, Func<Locator, ActionOptions, Task>> Calls = new()
     {
         ["tap"] = (locator, options) => locator.TapAsync(options),
         ["click"] = (locator, options) => locator.ClickAsync(options),
         ["doubleTap"] = (locator, options) => locator.DoubleTapAsync(options),
+        ["dblclick"] = (locator, options) => locator.DblClickAsync(options),
         ["fill"] = (locator, options) => locator.FillAsync("yes", options),
         ["clear"] = (locator, options) => locator.ClearAsync(options),
         ["press"] = (locator, options) => locator.PressAsync("Enter", options),
