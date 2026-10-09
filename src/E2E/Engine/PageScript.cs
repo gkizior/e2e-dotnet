@@ -869,6 +869,24 @@ internal static class PageScript
         (el) => el[Symbol.for("e2e.observation.ref")] ?? null
         """;
 
+    // Where an iframe element's content box, the box its document's viewport
+    // fills, sits inside its border box: past the border and the padding.
+    public const string FrameInset = """
+        (el) => {
+          const style = getComputedStyle(el);
+          const left = Number.parseFloat(style.paddingLeft) || 0;
+          const top = Number.parseFloat(style.paddingTop) || 0;
+          const right = Number.parseFloat(style.paddingRight) || 0;
+          const bottom = Number.parseFloat(style.paddingBottom) || 0;
+          return {
+            x: el.clientLeft + left,
+            y: el.clientTop + top,
+            width: Math.max(0, el.clientWidth - left - right),
+            height: Math.max(0, el.clientHeight - top - bottom),
+          };
+        }
+        """;
+
     // Context init script that keeps closed shadow roots reachable for
     // Collect. attachShadow is the one way a script makes such a root;
     // declarative closed roots are parsed, not attached, and stay out of reach.

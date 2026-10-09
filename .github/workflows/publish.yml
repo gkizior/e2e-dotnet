@@ -13,6 +13,9 @@ permissions:
 jobs:
   nuget:
     runs-on: ubuntu-latest
+    env:
+      # SixLabors.ImageSharp 4 checks for a license when it builds a Release configuration.
+      SixLaborsLicenseKey: ${{ secrets.IMAGE_SHARP_LICENSE }}
     permissions:
       contents: read
       id-token: write

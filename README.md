@@ -155,6 +155,29 @@ Each secret reads `E2E_SECRET_<NAME>` first, then the config value. `null` means
 
 A fixture overrides any value with the matching property, such as `BaseUrl`, `CacheMode`, or `ActionTimeout`, or replaces the whole config by overriding `Config`.
 
+## Visual comparison
+
+`ToHaveScreenshotAsync` compares what the app shows against a PNG stored next to the test file. It works on the web engine only; `DocumentEngine` fails with `UNSUPPORTED_CAPABILITY`.
+
+```csharp
+await Expect.That(Screen).ToHaveScreenshotAsync("checkout.png");
+await Expect.That(Screen.GetByRole("button", "Pay")).ToHaveScreenshotAsync("pay-button.png");
+await Expect.That(Screen).ToHaveScreenshotAsync("feed.png", new ScreenshotOptions
+{
+    Mask = [Screen.GetByTestId("timestamp")],
+    MaxDiffPixels = 50,
+});
+```
+
+`Expect.That(Screen)` compares the whole viewport. `Expect.That(locator)` compares the box of its one match, scrolled into view first. Without a name the screenshot is named after the test, `my-test-title-1`.
+
+- **Stored at** `<test file>-snapshots/<name>-<target>-<os>.png`, for example `CheckoutTests.cs-snapshots/checkout-web-linux.png`. The test file is the file the call is written in. The OS is `darwin`, `linux`, or `win32`. Commit the files.
+- **Missing.** The first run writes the screenshot and fails. Look at it, commit it, and run again. In CI (`CI` set) nothing is written into the project: the screenshot is attached under `.e2e/results/` at `snapshots/<path in the project>`, so it can be downloaded and committed.
+- **Update.** `E2E_UPDATE_SNAPSHOTS=1 dotnet test` writes each missing or different screenshot and passes. A fixture can also override `UpdateSnapshots`. Screenshots are per OS, so write CI's from a CI job.
+- **Different.** The matcher captures again until one matches or the assertion timeout passes, then fails with the number of differing pixels and three images under `.e2e/results/<test>/attempt-<n>/screenshots/`: `-diff`, `-actual`, and `-expected`.
+- **Options.** `Threshold` (0 to 1, default 0.2), `MaxDiffPixels`, `MaxDiffPixelRatio` (the smaller wins when both are set), `Mask`, `MaskColor` (`#rrggbb`, default `#ff00ff`), and `Timeout`. `.Not` passes once the screen differs from a stored screenshot.
+- **Secrets.** Secure fields are covered in every screenshot. After a test fills a `Secret`, the matcher fails with `POLICY_DENIED`.
+
 ## Coding agents (MCP)
 
 `e2e mcp` serves the project to a coding agent such as Claude Code or Cursor over MCP (stdio). Register it once:

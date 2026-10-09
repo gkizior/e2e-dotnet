@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace E2E;
 
@@ -58,6 +59,10 @@ public sealed class SoftLocatorExpect
     public Task ToHaveAttributeAsync(string name, TimeSpan? timeout = null, CancellationToken cancellationToken = default) => KeepAsync(_expect.ToHaveAttributeAsync(name, timeout, cancellationToken));
 
     public Task ToHaveAttributeAsync(string name, TextMatch value, bool? ignoreCase = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default) => KeepAsync(_expect.ToHaveAttributeAsync(name, value, ignoreCase, timeout, cancellationToken));
+
+    public Task ToHaveScreenshotAsync(string? name = null, ScreenshotOptions? options = null, [CallerFilePath] string? callerFile = null) => KeepAsync(_expect.ToHaveScreenshotAsync(name, options, callerFile));
+
+    public Task ToHaveScreenshotAsync(ScreenshotOptions options, [CallerFilePath] string? callerFile = null) => KeepAsync(_expect.ToHaveScreenshotAsync(options, callerFile));
 
     public Task ToHaveCountAsync(int count, TimeSpan? timeout = null, CancellationToken cancellationToken = default) => KeepAsync(_expect.ToHaveCountAsync(count, timeout, cancellationToken));
 

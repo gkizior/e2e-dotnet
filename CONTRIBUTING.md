@@ -29,6 +29,8 @@ dotnet test
 
 Style is enforced at build time through `.editorconfig` and `Directory.Build.props` (`EnforceCodeStyleInBuild`, `TreatWarningsAsErrors`). C# files use the Apache file header.
 
+Screenshot comparison reads PNGs with SixLabors.ImageSharp 4, which checks for a Six Labors license when it builds. A Debug build prints a warning without one. A Release build fails. Set `SixLaborsLicenseKey` (a key) or `SixLaborsLicenseFile` (the path to a `sixlabors.lic` file) as an environment variable or an MSBuild property. Never commit the key or the file. CI reads the key from the `IMAGE_SHARP_LICENSE` repository secret. A pull request from a fork has no secret, so its Release build fails there. Open the pull request from a branch in this repository, or ask a maintainer.
+
 Do not commit API keys.
 
 ## Release

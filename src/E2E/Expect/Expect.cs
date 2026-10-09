@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using E2E.Engine;
@@ -22,6 +23,13 @@ public static class Expect
     {
         ArgumentNullException.ThrowIfNull(locator);
         return new LocatorExpect(locator, negated: false);
+    }
+
+    /// <summary>Compares the whole screen against a stored screenshot with <see cref="ScreenExpect.ToHaveScreenshotAsync(string?, ScreenshotOptions?, string?)"/>.</summary>
+    public static ScreenExpect That(Screen screen)
+    {
+        ArgumentNullException.ThrowIfNull(screen);
+        return new ScreenExpect(screen, negated: false);
     }
 
     /// <summary>
@@ -82,6 +90,16 @@ public sealed class LocatorExpect
 
     /// <summary>Inverts the matcher. A negated matcher passes after its condition has been false for 1000 ms in a row.</summary>
     public LocatorExpect Not => new(_locator, !_negated);
+
+    /// <summary>
+    /// Waits for the one match to look like its stored screenshot, the box of the node cut from the screen. See <see cref="ScreenExpect.ToHaveScreenshotAsync(string?, ScreenshotOptions?, string?)"/>.
+    /// </summary>
+    public Task ToHaveScreenshotAsync(string? name = null, ScreenshotOptions? options = null, [CallerFilePath] string? callerFile = null)
+        => ScreenshotAssertion.RunAsync(_locator.Screen, _locator, _negated, name, options, callerFile, default);
+
+    /// <inheritdoc cref="ToHaveScreenshotAsync(string?, ScreenshotOptions?, string?)"/>
+    public Task ToHaveScreenshotAsync(ScreenshotOptions options, [CallerFilePath] string? callerFile = null)
+        => ToHaveScreenshotAsync(null, options, callerFile);
 
     /// <summary>Waits for one visible match. <paramref name="visible"/> false waits for hidden or absent, as <see cref="ToBeHiddenAsync"/>.</summary>
     public Task ToBeVisibleAsync(bool visible = true, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
@@ -595,4 +613,32 @@ public sealed class LocatorExpect
 
         public string Print(string actual) => Quote(_normalize ? TextRules.Normalize(actual) : actual);
     }
+}
+
+/// <summary>Matchers on the whole screen: <see cref="ToHaveScreenshotAsync(string?, ScreenshotOptions?, string?)"/>.</summary>
+public sealed class ScreenExpect
+{
+    private readonly Screen _screen;
+    private readonly bool _negated;
+
+    internal ScreenExpect(Screen screen, bool negated)
+    {
+        _screen = screen;
+        _negated = negated;
+    }
+
+    /// <summary>Inverts the matcher: waits for the screen to differ from its stored screenshot.</summary>
+    public ScreenExpect Not => new(_screen, !_negated);
+
+    /// <summary>
+    /// Waits for the screen to look like its stored screenshot, <c>&lt;test file&gt;-snapshots/&lt;name&gt;-&lt;target&gt;-&lt;os&gt;.png</c>
+    /// beside the file this call is in. <paramref name="name"/> defaults to the test's title and a count. A missing screenshot is
+    /// written and fails the call, or, with <c>E2E_UPDATE_SNAPSHOTS=1</c>, written and passed. Only the web engine captures pixels.
+    /// </summary>
+    public Task ToHaveScreenshotAsync(string? name = null, ScreenshotOptions? options = null, [CallerFilePath] string? callerFile = null)
+        => ScreenshotAssertion.RunAsync(_screen, null, _negated, name, options, callerFile, default);
+
+    /// <inheritdoc cref="ToHaveScreenshotAsync(string?, ScreenshotOptions?, string?)"/>
+    public Task ToHaveScreenshotAsync(ScreenshotOptions options, [CallerFilePath] string? callerFile = null)
+        => ToHaveScreenshotAsync(null, options, callerFile);
 }

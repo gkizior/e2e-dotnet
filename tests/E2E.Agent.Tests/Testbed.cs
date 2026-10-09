@@ -12,7 +12,7 @@ namespace E2E.Playground;
 /// The playground pages the testbed tests run against, served on a loopback port for the whole
 /// test run. A port of upstream's <c>apps/testbed</c> with only the pages these tests use:
 /// the landing page, a plans page of copy with inline links and emphasis (unlisted in the nav), a todo list kept in localStorage, a checkout with one planted bug, a profile
-/// form, a page that loads users from <c>/api/users</c>, the browser fixture's own page, and the
+/// form, the swatches page that the screenshot tests compare, a page that loads users from <c>/api/users</c>, the browser fixture's own page, and the
 /// about page navigation lands on. E2E.NUnit.Tests links this file for its browser fixture tests.
 /// </summary>
 internal static class Testbed
@@ -282,6 +282,29 @@ internal static class Testbed
                      document.querySelector('output[aria-label="Loads"]').textContent = 'loads: ' + loads;
                      document.querySelector('output[aria-label="Random"]').textContent = 'random: ' + (Math.random() === 0.5 ? 'seeded' : 'unseeded');
                    </script>
+            """),
+
+        // Solid blocks with no text, so a screenshot of one renders the same on every operating system:
+        // what toHaveScreenshot is tested against, with one stored file per system. The noise block takes
+        // a new color on every load and is only ever compared masked; the far block sits below the fold;
+        // the framed block is measured through the iframe.
+        ["/swatches"] = ("Swatches", """
+            <h1>Swatches</h1>
+                   <div data-testid="palette" style="display:flex;gap:8px;padding:8px;width:max-content;background:#ffffff">
+                     <div style="width:40px;height:40px;background:#d92b2b"></div>
+                     <div style="width:40px;height:40px;background:#2b56d9"></div>
+                     <div data-testid="noise" style="width:40px;height:40px"></div>
+                   </div>
+                   <iframe id="swatch-frame" src="/swatches/frame" title="swatch frame" style="width:120px;height:80px;border:0"></iframe>
+                   <div data-testid="far" style="margin-top:1600px;width:64px;height:24px;background:#16a34a"></div>
+                   <script>
+                     document.querySelector('[data-testid="noise"]').style.background =
+                       '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+                   </script>
+            """),
+
+        ["/swatches/frame"] = ("Swatch frame", """
+            <div data-testid="framed" style="position:fixed;left:10px;top:10px;width:30px;height:20px;background:#9333ea"></div>
             """),
 
         ["/about"] = ("About page", """

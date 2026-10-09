@@ -85,6 +85,18 @@ public abstract class E2EFixture
     /// <summary><c>cache.strict</c>.</summary>
     protected virtual bool CacheStrict => Config.Cache.Strict;
 
+    /// <summary>
+    /// <c>E2E_UPDATE_SNAPSHOTS</c>: when set to <c>1</c>, <c>ToHaveScreenshotAsync</c> writes each stored screenshot it
+    /// finds missing or different, and passes. Override to turn it on in code.
+    /// </summary>
+    protected virtual bool UpdateSnapshots => Environment.GetEnvironmentVariable("E2E_UPDATE_SNAPSHOTS")?.Trim() == "1";
+
+    /// <summary>Where a failed screenshot comparison puts its diff, actual, and expected images. Defaults to <c>.e2e/results</c> under <see cref="ProjectRoot"/>.</summary>
+    protected virtual string? ResultsDirectory => null;
+
+    /// <summary><c>targets[0].name</c>: the target part of a stored screenshot's file name.</summary>
+    protected virtual string TargetName => Config.Target.Name;
+
     protected virtual TimeSpan TestTimeout => Config.Timeout;
 
     protected virtual TimeSpan LaunchTimeout => Config.LaunchTimeout;
@@ -136,6 +148,9 @@ public abstract class E2EFixture
                 Agents = CreateAgents(),
                 BaseUrl = BaseUrl,
                 ProjectRoot = ProjectRoot,
+                TargetName = TargetName,
+                UpdateSnapshots = UpdateSnapshots,
+                ResultsDirectory = ResultsDirectory,
                 Cache = cacheMode == CacheMode.Off ? null : new FileStepCache(CacheDirectory),
                 CacheEnabled = cacheMode != CacheMode.Off,
                 CacheMode = cacheMode,

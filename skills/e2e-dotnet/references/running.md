@@ -21,6 +21,9 @@ Selection, retries, and parallelism are the test framework's: `--filter`
 `[Parallelizable]`, or xUnit v3 traits. There is no `e2e run`, `e2e list`,
 `e2e explore`, `e2e init`, `e2e cache`, or `e2e feedback`.
 
+To rewrite the stored screenshots `ToHaveScreenshotAsync` finds missing or
+different, and pass, set `E2E_UPDATE_SNAPSHOTS=1`.
+
 To watch a run, set `E2E_HEADLESS=0`. A fixture can also pass
 `new WebEngineOptions { Headless = false }` in `CreateEngine()`.
 

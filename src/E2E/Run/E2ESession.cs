@@ -137,6 +137,22 @@ public sealed class E2ESession : IAsyncDisposable
             options.ActionTimeout,
             options.AssertionTimeout,
             softFailures);
+        screen.Screenshots = new ScreenshotStore
+        {
+            ProjectRoot = projectRoot,
+            Suffix = "-" + (string.IsNullOrWhiteSpace(options.TargetName) ? options.Engine.Platform : options.TargetName) + "-" + ScreenshotStore.OperatingSystemName(),
+            Title = options.TestTitle,
+            ResultsDirectory = Path.Combine(
+                Path.GetFullPath(options.ResultsDirectory ?? Path.Combine(projectRoot, ".e2e", "results")),
+                ScreenshotAssertion.Slug(options.TestTitle, 100, "test"),
+                "attempt-" + options.Attempt.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            Update = options.UpdateSnapshots,
+            Ci = options.Ci ?? E2EConfig.IsCi(),
+            ScrollsIntoView = (options.Engine.Capabilities & EngineCapabilities.Scroll) != 0,
+            DirectoryOf = options.SnapshotDirectoryOf ?? (static file => file is null ? null : file + "-snapshots"),
+            Capture = token => engine.ScreenshotAsync(token),
+            WithholdsPixels = () => screen.SecretFilled || scope.Secrets.Count > 0,
+        };
         var context = new TestContext
         {
             App = app,
@@ -428,6 +444,24 @@ public sealed class E2ESessionOptions
     /// verifies acts, so a teardown assertion after a failure does not record them.
     /// </summary>
     public Func<bool>? TestFailed { get; init; }
+
+    /// <summary>The target's name in a stored screenshot's file name. Defaults to the engine's platform.</summary>
+    public string? TargetName { get; init; }
+
+    /// <summary>
+    /// <c>E2E_UPDATE_SNAPSHOTS=1</c>: <c>ToHaveScreenshotAsync</c> writes each stored screenshot it finds missing or
+    /// different, and passes.
+    /// </summary>
+    public bool UpdateSnapshots { get; init; }
+
+    /// <summary>Where a failed screenshot comparison puts its diff, actual, and expected images. Defaults to <c>.e2e/results</c> under the project root.</summary>
+    public string? ResultsDirectory { get; init; }
+
+    /// <summary>Where the stored screenshots of the test file a call was made from live. Null keeps them in <c>&lt;test file&gt;-snapshots</c>.</summary>
+    internal Func<string?, string?>? SnapshotDirectoryOf { get; init; }
+
+    /// <summary>Overrides the <c>CI</c> environment variable for <c>ToHaveScreenshotAsync</c>.</summary>
+    internal bool? Ci { get; init; }
 
     /// <summary>1 is the first try. Later attempts do not replay, and still record verified acts.</summary>
     public int Attempt { get; init; } = 1;

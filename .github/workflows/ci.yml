@@ -12,6 +12,9 @@ jobs:
   build:
     name: restore-build-test
     runs-on: ubuntu-latest
+    env:
+      # SixLabors.ImageSharp 4 checks for a license when it builds a Release configuration.
+      SixLaborsLicenseKey: ${{ secrets.IMAGE_SHARP_LICENSE }}
     steps:
       - uses: actions/checkout@v4
         with:

@@ -269,7 +269,8 @@ public sealed partial class WebEngine : IEngine
         | EngineCapabilities.Location
         | EngineCapabilities.Keyboard
         | EngineCapabilities.Scroll
-        | EngineCapabilities.History;
+        | EngineCapabilities.History
+        | EngineCapabilities.Screenshot;
 
     public async Task<IEngineSession> StartAsync(EngineStartOptions options, CancellationToken cancellationToken)
     {
@@ -577,6 +578,9 @@ public sealed partial class WebEngine : IEngine
 
     private sealed class WebSession : IBrowserSession
     {
+        // The fields the page script marks secure.
+        private const string SecureFieldSelector = "input[type=password i], input[autocomplete=current-password]";
+
         private readonly IPlaywright _playwright;
         private readonly TimeSpan _actionTimeout;
         private readonly string _testIdAttribute;
@@ -1012,6 +1016,32 @@ public sealed partial class WebEngine : IEngine
             }
         });
 
+        public Task<EngineScreenshot> ScreenshotAsync(CancellationToken cancellationToken) => RunAsync("screenshot", cancellationToken, async () =>
+        {
+            var budget = Budget("screenshot", cancellationToken);
+            try
+            {
+                var page = Page;
+                // Every secure field of every frame is covered before the image leaves the engine.
+                var masks = page.Frames.Select(frame => frame.Locator(SecureFieldSelector)).ToList();
+                var png = await budget.WithinAsync(page.ScreenshotAsync(new PageScreenshotOptions
+                {
+                    Type = ScreenshotType.Png,
+                    Animations = ScreenshotAnimations.Disabled,
+                    Caret = ScreenshotCaret.Hide,
+                    Mask = masks,
+                    MaskColor = "#000000",
+                    Timeout = budget.PlaywrightTimeout,
+                })).ConfigureAwait(false);
+                var scale = await budget.WithinAsync(page.EvaluateAsync<double>("() => window.devicePixelRatio")).ConfigureAwait(false);
+                return new EngineScreenshot(png, scale > 0 ? scale : 1);
+            }
+            catch (Exception ex) when (WebErrors.IsPlaywright(ex))
+            {
+                throw WebErrors.NavigationStaleOr(ex, "screenshot");
+            }
+        });
+
         public async ValueTask DisposeAsync()
         {
             if (_disposed)
@@ -1085,10 +1115,11 @@ public sealed partial class WebEngine : IEngine
             Index(roots, frame, walk, owners);
             foreach (var child in frame.ChildFrames)
             {
-                var owner = await budget.WithinAsync(OwnerOfAsync(child)).ConfigureAwait(false);
+                var (owner, inset) = await budget.WithinAsync(OwnerOfAsync(child)).ConfigureAwait(false);
                 if (owner is not null && owners.TryGetValue(owner, out var node))
                 {
-                    node.Children = await CollectAsync(child, walk, budget).ConfigureAwait(false);
+                    // The child measured its nodes against its own viewport. Every box in the tree is in the top-level viewport's CSS pixels.
+                    node.Children = PlaceInFrame(await CollectAsync(child, walk, budget).ConfigureAwait(false), node.Rect, inset);
                 }
             }
 
@@ -1223,18 +1254,52 @@ public sealed partial class WebEngine : IEngine
             }
         }
 
-        private static async Task<string?> OwnerOfAsync(IFrame frame)
+        private static async Task<(string? Ref, WebRect? Inset)> OwnerOfAsync(IFrame frame)
         {
             try
             {
                 var element = await frame.FrameElementAsync().ConfigureAwait(false);
                 await using var dispose = element.ConfigureAwait(false);
-                return await element.EvaluateAsync<string?>(PageScript.RefOf).ConfigureAwait(false);
+                var owner = await element.EvaluateAsync<string?>(PageScript.RefOf).ConfigureAwait(false);
+                return (owner, await element.EvaluateAsync<WebRect?>(PageScript.FrameInset).ConfigureAwait(false));
             }
             catch (PlaywrightException)
             {
-                return null;
+                return (null, null);
             }
+        }
+
+        /// <summary>
+        /// Moves a child document's boxes into the top-level viewport's space: shifted by the frame element's content box
+        /// and clipped to it, so a node that overflows its frame claims no point of the page around it. A box left empty
+        /// by the clip, or inside a frame with no box, is dropped. A frame under a CSS transform is not unwound.
+        /// </summary>
+        private static List<WebNode> PlaceInFrame(List<WebNode> nodes, WebRect? border, WebRect? inset)
+        {
+            WebRect? content = border is null || inset is null
+                ? null
+                : new WebRect { X = border.X + inset.X, Y = border.Y + inset.Y, Width = inset.Width, Height = inset.Height };
+            Place(nodes, content);
+            return nodes;
+        }
+
+        private static void Place(List<WebNode>? nodes, WebRect? content)
+        {
+            foreach (var node in nodes ?? [])
+            {
+                node.Rect = content is null || node.Rect is null ? null : Clip(node.Rect, content);
+                Place(node.Children, content);
+                Place(node.Inline, content);
+            }
+        }
+
+        private static WebRect? Clip(WebRect rect, WebRect frame)
+        {
+            var x0 = Math.Max(rect.X + frame.X, frame.X);
+            var y0 = Math.Max(rect.Y + frame.Y, frame.Y);
+            var x1 = Math.Min(rect.X + frame.X + rect.Width, frame.X + frame.Width);
+            var y1 = Math.Min(rect.Y + frame.Y + rect.Height, frame.Y + frame.Height);
+            return x1 > x0 && y1 > y0 ? new WebRect { X = x0, Y = y0, Width = x1 - x0, Height = y1 - y0 } : null;
         }
 
         private static void Index(List<WebNode> nodes, IFrame frame, FrameWalk walk, Dictionary<string, WebNode> owners)

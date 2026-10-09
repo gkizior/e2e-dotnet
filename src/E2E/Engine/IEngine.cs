@@ -19,6 +19,9 @@ public enum EngineCapabilities
 
     /// <summary><see cref="IEngineSession.BackAsync"/>.</summary>
     History = 32,
+
+    /// <summary><see cref="IEngineSession.ScreenshotAsync"/>, which <c>toHaveScreenshot</c> compares.</summary>
+    Screenshot = 64,
 }
 
 /// <summary>Passed to <see cref="IEngine.StartAsync"/> once per test attempt.</summary>
@@ -81,6 +84,17 @@ public interface IEngineSession : IAsyncDisposable
     /// <summary>Discards cookies, storage, and history, and opens a blank document.</summary>
     Task ClearStateAsync(CancellationToken cancellationToken) => Unsupported("app.clearState");
 
+    /// <summary>
+    /// Captures the viewport as a PNG for <c>toHaveScreenshot</c>, with animations stopped, the text caret hidden,
+    /// and every secure field covered before the image leaves the engine. Engines that declare
+    /// <see cref="EngineCapabilities.Screenshot"/> implement it.
+    /// </summary>
+    Task<EngineScreenshot> ScreenshotAsync(CancellationToken cancellationToken) =>
+        Task.FromException<EngineScreenshot>(new EngineException("UNSUPPORTED_CAPABILITY", "toHaveScreenshot is not supported by this engine."));
+
     private static Task Unsupported(string operation) =>
         Task.FromException(new EngineException("UNSUPPORTED_CAPABILITY", operation + " is not supported by this engine."));
 }
+
+/// <summary>A captured viewport: PNG bytes, and how many image pixels one viewport (CSS) pixel takes.</summary>
+public sealed record EngineScreenshot(byte[] Png, double Scale);

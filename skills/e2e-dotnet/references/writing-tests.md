@@ -136,6 +136,19 @@ text query still finds a `visibility: hidden` copy. Check a label with
 `ToHaveCountAsync`, `ToHaveAttributeAsync`, and more. `.Not` inverts a
 matcher.
 
+- `Expect.That(Screen).ToHaveScreenshotAsync("home.png")` compares the whole
+  screen, and `Expect.That(locator).ToHaveScreenshotAsync()` one element's box,
+  against `<test file>-snapshots/<name>-<target>-<os>.png` (web only). Commit the
+  files. The first run writes the file and fails: look at it, commit it, rerun. In
+  CI (`CI` set) nothing is written into the project; the file is attached under
+  `.e2e/results/` at `snapshots/<path>`. `E2E_UPDATE_SNAPSHOTS=1` writes missing
+  and different files and passes, after an intended UI change. Options
+  (`ScreenshotOptions`): `Threshold`, `MaxDiffPixels`, `MaxDiffPixelRatio`, `Mask`
+  (locators painted over, for clocks and other changing content), `MaskColor`,
+  `Timeout`. A failure writes `-expected`, `-actual`, and `-diff` images under
+  `.e2e/results/`. Files are per target and OS (`-web-linux.png`): screenshots
+  written on a Mac never serve Linux CI, so write CI's from a CI job with the
+  update variable.
 - `Expect.Soft(locator)` records a failure and lets the test go on; the
   test fails at its end with every failure listed.
 - `Expect.Poll(read)` retries any value: `ToBeAsync`, `ToSatisfyAsync`, and,

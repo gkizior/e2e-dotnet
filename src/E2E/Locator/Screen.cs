@@ -49,6 +49,14 @@ public sealed class Screen
 
     internal TimeSpan PollInterval { get; } = TimeSpan.FromMilliseconds(50);
 
+    /// <summary>Where <c>ToHaveScreenshotAsync</c> keeps screenshots; null for a screen outside a session.</summary>
+    internal ScreenshotStore? Screenshots { get; set; }
+
+    /// <summary>A secret was filled in this attempt, so the app may show it outside a secure field and pixels are withheld.</summary>
+    internal bool SecretFilled { get; private set; }
+
+    internal void MarkSecretFilled() => SecretFilled = true;
+
     /// <summary>Creates a lazy role query. <c>img</c> is read as <c>image</c>. A role query never matches a hidden node.</summary>
     public Locator GetByRole(string role, TextMatch? name = null, bool exact = true)
     {
@@ -236,6 +244,7 @@ public sealed class Locator
     public Task FillAsync(Secret value, ActionOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(value);
+        _screen.MarkSecretFilled();
         return ActAsync(new LocatorAction.Fill(value.Value, Sensitive: true), options, cancellationToken);
     }
 
