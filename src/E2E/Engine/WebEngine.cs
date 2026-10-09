@@ -1113,7 +1113,7 @@ public sealed partial class WebEngine : IEngine
             var roots = dto.Roots ?? [];
             var owners = new Dictionary<string, WebNode>(StringComparer.Ordinal);
             Index(roots, frame, walk, owners);
-            foreach (var child in frame.ChildFrames)
+            foreach (var child in frame.ChildFrames.ToArray())
             {
                 var (owner, inset) = await budget.WithinAsync(OwnerOfAsync(child)).ConfigureAwait(false);
                 if (owner is not null && owners.TryGetValue(owner, out var node))
