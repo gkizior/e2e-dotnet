@@ -78,6 +78,7 @@ public sealed class ChromiumPage : IAsyncLifetime
                 StringOf(node, "value"),
                 StringOf(node, "testId"),
                 node.GetProperty("hidden").GetBoolean(),
+                node.GetProperty("selected").GetBoolean(),
                 node.GetProperty("attributes").EnumerateObject().ToDictionary(attribute => attribute.Name, attribute => attribute.Value.GetString() ?? "", StringComparer.Ordinal),
                 rect.ValueKind == JsonValueKind.Null
                     ? null
@@ -101,6 +102,7 @@ public sealed record ReadNode(
     string? Value,
     string? TestId,
     bool Hidden,
+    bool Selected,
     IReadOnlyDictionary<string, string> Attributes,
     BoundingBox? Rect)
 {
