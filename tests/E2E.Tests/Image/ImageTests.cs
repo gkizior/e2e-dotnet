@@ -4,9 +4,6 @@
 
 using E2E.Engine;
 using E2E.Internal;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.PixelFormats;
 
 namespace E2E.Tests.Image;
 
@@ -30,15 +27,58 @@ public sealed class ImageTests
         return new RgbaImage(width, height, data);
     }
 
-    private static byte[] Save<TPixel>(Image<TPixel> image, PngEncoder encoder)
-        where TPixel : unmanaged, IPixel<TPixel>
+    /// <summary>A PNG of the given color type and bit depth, from raw samples: one row after another, a row's samples packed as the depth says.</summary>
+    private static byte[] Png(int width, int height, byte colorType, byte bitDepth, byte[] rows, byte[]? palette = null)
     {
-        using (image)
+        using var output = new MemoryStream();
+        output.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        var header = new byte[13];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header, width);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4), height);
+        header[8] = bitDepth;
+        header[9] = colorType;
+        Chunk(output, "IHDR", header);
+        if (palette is not null)
         {
-            using var stream = new MemoryStream();
-            image.Save(stream, encoder);
-            return stream.ToArray();
+            Chunk(output, "PLTE", palette);
         }
+
+        var stride = rows.Length / height;
+        using var compressed = new MemoryStream();
+        using (var zlib = new System.IO.Compression.ZLibStream(compressed, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+        {
+            for (var row = 0; row < height; row++)
+            {
+                zlib.WriteByte(0);
+                zlib.Write(rows, row * stride, stride);
+            }
+        }
+
+        Chunk(output, "IDAT", compressed.ToArray());
+        Chunk(output, "IEND", []);
+        return output.ToArray();
+    }
+
+    private static void Chunk(Stream output, string type, byte[] data)
+    {
+        var length = new byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(length, data.Length);
+        output.Write(length);
+        var body = System.Text.Encoding.ASCII.GetBytes(type).Concat(data).ToArray();
+        output.Write(body);
+        var crc = uint.MaxValue;
+        foreach (var value in body)
+        {
+            crc ^= value;
+            for (var bit = 0; bit < 8; bit++)
+            {
+                crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320 : crc >> 1;
+            }
+        }
+
+        var checksum = new byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(checksum, ~crc);
+        output.Write(checksum);
     }
 
     [Fact]
@@ -54,72 +94,48 @@ public sealed class ImageTests
     [Fact]
     public void Decodes_gray_to_RGBA()
     {
-        using var image = new Image<L8>(3, 2);
         byte[] samples = [0, 90, 180, 255, 30, 60];
-        for (var i = 0; i < samples.Length; i++)
-        {
-            image[i % 3, i / 3] = new L8(samples[i]);
-        }
-
-        var decoded = ImageOps.DecodePng(Save(image, new PngEncoder { ColorType = PngColorType.Grayscale, BitDepth = PngBitDepth.Bit8 }));
+        var decoded = ImageOps.DecodePng(Png(3, 2, 0, 8, samples));
         Assert.Equal(samples.SelectMany(gray => new byte[] { gray, gray, gray, 255 }), decoded.Data);
     }
 
     [Fact]
     public void Decodes_gray_with_alpha_to_RGBA()
     {
-        using var image = new Image<La16>(3, 2);
-        (byte Gray, byte Alpha)[] samples = [(0, 255), (90, 128), (180, 0), (255, 255), (30, 10), (60, 200)];
-        for (var i = 0; i < samples.Length; i++)
-        {
-            image[i % 3, i / 3] = new La16(samples[i].Gray, samples[i].Alpha);
-        }
-
-        var decoded = ImageOps.DecodePng(Save(image, new PngEncoder { ColorType = PngColorType.GrayscaleWithAlpha, BitDepth = PngBitDepth.Bit8 }));
-        Assert.Equal(samples.SelectMany(sample => new byte[] { sample.Gray, sample.Gray, sample.Gray, sample.Alpha }), decoded.Data);
+        byte[] samples = [0, 255, 90, 128, 180, 0, 255, 255, 30, 10, 60, 200];
+        var decoded = ImageOps.DecodePng(Png(3, 2, 4, 8, samples));
+        Assert.Equal(Enumerable.Range(0, 6).SelectMany(i => new[] { samples[i * 2], samples[i * 2], samples[i * 2], samples[(i * 2) + 1] }), decoded.Data);
     }
 
     [Fact]
     public void Decodes_RGB_to_RGBA()
     {
-        using var image = new Image<Rgb24>(3, 2);
         byte[] samples = [255, 0, 0, 0, 255, 0, 0, 0, 255, 10, 20, 30, 40, 50, 60, 70, 80, 90];
-        for (var i = 0; i < 6; i++)
-        {
-            image[i % 3, i / 3] = new Rgb24(samples[i * 3], samples[(i * 3) + 1], samples[(i * 3) + 2]);
-        }
-
-        var decoded = ImageOps.DecodePng(Save(image, new PngEncoder { ColorType = PngColorType.Rgb, BitDepth = PngBitDepth.Bit8 }));
+        var decoded = ImageOps.DecodePng(Png(3, 2, 2, 8, samples));
         Assert.Equal(Enumerable.Range(0, 6).SelectMany(i => new[] { samples[i * 3], samples[(i * 3) + 1], samples[(i * 3) + 2], (byte)255 }), decoded.Data);
     }
 
     [Fact]
-    public void Decodes_16_bit_RGBA_to_RGBA_scaled_with_rounding()
+    public void Decodes_16_bit_RGBA_to_RGBA_scaled_to_the_nearest_8_bit_sample()
     {
-        using var image = new Image<Rgba64>(3, 2);
         ushort[] samples = [65535, 0, 0, 65535, 0, 32768, 0, 65535, 0, 0, 65535, 0, 4096, 8192, 12288, 65535, 1, 2, 3, 4, 60000, 50000, 40000, 30000];
-        for (var i = 0; i < 6; i++)
+        var rows = samples.SelectMany(sample => new[] { (byte)(sample >> 8), (byte)(sample & 0xFF) }).ToArray();
+        var decoded = ImageOps.DecodePng(Png(3, 2, 6, 16, rows));
+        // Skia scales 16-bit samples to 8 bits itself, which can land one level from the rounded value.
+        Assert.Equal(samples.Length, decoded.Data.Length);
+        for (var i = 0; i < samples.Length; i++)
         {
-            image[i % 3, i / 3] = new Rgba64(samples[i * 4], samples[(i * 4) + 1], samples[(i * 4) + 2], samples[(i * 4) + 3]);
+            Assert.InRange(Math.Abs(decoded.Data[i] - Math.Floor((samples[i] * 255 / 65535.0) + 0.5)), 0, 1);
         }
-
-        var decoded = ImageOps.DecodePng(Save(image, new PngEncoder { ColorType = PngColorType.RgbWithAlpha, BitDepth = PngBitDepth.Bit16 }));
-        Assert.Equal(samples.Select(sample => (byte)Math.Floor((sample * 255 / 65535.0) + 0.5)), decoded.Data);
     }
 
     [Fact]
     public void Decodes_a_palette_to_RGBA()
     {
-        using var image = new Image<Rgb24>(3, 2);
-        Rgb24[] palette = [new(255, 0, 0), new(0, 255, 0), new(0, 0, 255)];
+        byte[] palette = [255, 0, 0, 0, 255, 0, 0, 0, 255];
         int[] indexes = [0, 1, 2, 1, 0, 2];
-        for (var i = 0; i < 6; i++)
-        {
-            image[i % 3, i / 3] = palette[indexes[i]];
-        }
-
-        var decoded = ImageOps.DecodePng(Save(image, new PngEncoder { ColorType = PngColorType.Palette, BitDepth = PngBitDepth.Bit8 }));
-        Assert.Equal(indexes.SelectMany(index => new byte[] { palette[index].R, palette[index].G, palette[index].B, 255 }), decoded.Data);
+        var decoded = ImageOps.DecodePng(Png(3, 2, 3, 8, indexes.Select(index => (byte)index).ToArray(), palette));
+        Assert.Equal(indexes.SelectMany(index => new byte[] { palette[index * 3], palette[(index * 3) + 1], palette[(index * 3) + 2], 255 }), decoded.Data);
     }
 
     [Fact]

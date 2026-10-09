@@ -60,8 +60,9 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 
 ## Visual comparison
 
-`ToHaveScreenshotAsync` compares the viewport, or one locator's box, against `<test file>-snapshots/<name>-<target>-<os>.png`, with upstream's names, OS suffixes (`darwin`, `linux`, `win32`), tolerance rules, retries until the screen matches or holds still, masks, and failure images. The pixel comparison is upstream's (the pixelmatch threshold and anti-aliasing rules) over PNGs read and written with SixLabors.ImageSharp. The ported testbed PNGs are upstream's. Differences:
+`ToHaveScreenshotAsync` compares the viewport, or one locator's box, against `<test file>-snapshots/<name>-<target>-<os>.png`, with upstream's names, OS suffixes (`darwin`, `linux`, `win32`), tolerance rules, retries until the screen matches or holds still, masks, and failure images. The pixel comparison is upstream's (the pixelmatch threshold and anti-aliasing rules) over PNGs read and written with SkiaSharp. The ported testbed PNGs are upstream's. Differences:
 
+- A 16-bit PNG is scaled to 8 bits by Skia, which can differ from rounding by one level. Chromium writes 8-bit PNGs.
 - Web engine only. `DocumentEngine` throws `UNSUPPORTED_CAPABILITY`; there is no iOS or Android engine, so no status bar is held fixed.
 - The test file is the file the call is compiled in (`[CallerFilePath]`), not a runner's test entry. A call in a helper stores beside the helper. A build that rewrites source paths (`DeterministicSourcePaths`) breaks it.
 - The update flag is `E2E_UPDATE_SNAPSHOTS=1`, or the fixture property `UpdateSnapshots`, in place of `--update-snapshots` (`-u`). There is no CLI flag or config key.
@@ -70,7 +71,6 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - Secure fields are covered by the engine (Playwright masks, in every frame) and by painting the observed secure nodes. Upstream counts masked regions against secure nodes before it keeps the image.
 - The name is a `string?` and the options a `ScreenshotOptions` object, so an unknown option and a non-locator mask cannot be written.
 - Locator boxes inside an iframe are in the top-level viewport (past the frame's border and padding), where they used to be relative to the frame, as upstream's change for this feature does.
-- ImageSharp 4 needs a Six Labors license at build time (the Split License is Apache 2.0 for open source projects and transitive use). A Release build fails without one. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Defaults
 

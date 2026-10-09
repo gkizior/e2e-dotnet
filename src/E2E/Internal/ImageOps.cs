@@ -3,10 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using E2E.Engine;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.PixelFormats;
+using SkiaSharp;
 
 namespace E2E.Internal;
 
@@ -38,19 +35,29 @@ internal static class ImageOps
     /// <summary>Decodes PNG bytes to 8-bit RGBA: any color type, at 8 or 16 bits or with a palette. Throws on anything that is not a PNG.</summary>
     public static RgbaImage DecodePng(byte[] bytes)
     {
-        using var image = PngDecoder.Instance.Decode<Rgba32>(new PngDecoderOptions(), new MemoryStream(bytes));
-        var data = new byte[image.Width * image.Height * 4];
-        image.CopyPixelDataTo(data);
-        return new RgbaImage(image.Width, image.Height, data);
+        using var codec = SKCodec.Create(new MemoryStream(bytes));
+        if (codec is null || codec.EncodedFormat != SKEncodedImageFormat.Png)
+        {
+            throw new InvalidDataException("not a PNG");
+        }
+
+        var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var bitmap = new SKBitmap(info);
+        if (codec.GetPixels(info, bitmap.GetPixels()) != SKCodecResult.Success)
+        {
+            throw new InvalidDataException("the PNG is cut short or could not be decoded");
+        }
+
+        return new RgbaImage(info.Width, info.Height, bitmap.GetPixelSpan().ToArray());
     }
 
     /// <summary>Encodes an image as PNG bytes.</summary>
     public static byte[] EncodePng(RgbaImage image)
     {
-        using var pixels = Image.LoadPixelData<Rgba32>(image.Data, image.Width, image.Height);
-        using var stream = new MemoryStream();
-        pixels.Save(stream, new PngEncoder { ColorType = PngColorType.RgbWithAlpha, BitDepth = PngBitDepth.Bit8 });
-        return stream.ToArray();
+        var info = new SKImageInfo(image.Width, image.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var pixels = SKImage.FromPixelCopy(info, image.Data);
+        using var data = pixels?.Encode(SKEncodedImageFormat.Png, 100) ?? throw new InvalidOperationException("the image could not be encoded as a PNG");
+        return data.ToArray();
     }
 
     /// <summary>Resamples an image to <paramref name="width"/> by <paramref name="height"/> with a box filter; the input itself when it already has that size.</summary>
