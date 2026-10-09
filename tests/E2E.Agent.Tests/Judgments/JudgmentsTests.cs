@@ -74,6 +74,17 @@ public sealed class JudgmentsTests : E2ETest
     }
 
     [Test]
+    public async Task Assert_reads_a_sentence_whole_across_its_inline_link_and_emphasis()
+    {
+        await App.OpenAsync("/plans");
+        await Expect.That(Screen.GetByText("Read the release notes for what changed this week.", exact: false)).ToBeVisibleAsync();
+        await Expect.That(Screen.GetByRole("link", "release notes")).ToBeVisibleAsync();
+        await Expect.That(Screen.GetByText("Plans start at $12 per seat, billed annually, and include the e2e CLI.")).ToBeVisibleAsync();
+        await Agent.AssertAsync(
+            "the page says \"Read the release notes for what changed this week.\" and \"Plans start at $12 per seat, billed annually, and include the e2e CLI.\"");
+    }
+
+    [Test]
     public async Task WaitFor_polls_until_the_loaded_users_appear()
     {
         await App.OpenAsync("/network");

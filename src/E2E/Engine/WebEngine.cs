@@ -1248,6 +1248,7 @@ public sealed partial class WebEngine : IEngine
                 }
 
                 Index(node.Children ?? [], frame, walk, owners);
+                Index(node.Inline ?? [], frame, walk, owners);
             }
         }
 
@@ -1850,6 +1851,7 @@ public sealed partial class WebEngine : IEngine
                 Role = dto.Role,
                 Name = dto.Name,
                 Text = dto.Text,
+                InlineNodes = dto.Inline?.Select(inline => ToNode(inline, testIdAttribute)).ToList() ?? [],
                 OwnText = dto.OwnText,
                 Value = dto.Secure ? null : dto.Value,
                 TestId = dto.TestId,
@@ -2065,6 +2067,8 @@ public sealed partial class WebEngine : IEngine
         public Dictionary<string, string>? Attributes { get; set; }
 
         public WebRect? Rect { get; set; }
+
+        public List<WebNode>? Inline { get; set; }
 
         public List<WebNode>? Children { get; set; }
     }

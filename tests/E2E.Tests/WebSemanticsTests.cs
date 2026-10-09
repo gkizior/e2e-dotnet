@@ -179,15 +179,15 @@ public sealed class WebSemanticsTests
     }
 
     [Fact]
-    public async Task Chromium_lists_a_container_with_only_its_own_direct_text()
+    public async Task Chromium_lists_a_container_with_its_text_read_as_a_line()
     {
         using var site = await TinySite.StartAsync("<!DOCTYPE html><html><body><ul><li data-testid=\"item\">Order <strong>$42.00</strong> due</li></ul></body></html>");
         await using var session = await OpenAsync(site.Url, new WebEngineOptions { Headless = true });
         var nodes = Flatten((await session.ObserveAsync(CancellationToken.None)).Roots).ToList();
         var item = Assert.Single(nodes, node => node.TestId == "item");
-        Assert.Equal("Order due", item.OwnText);
+        Assert.Equal("Order $42.00 due", item.OwnText);
         Assert.Equal("Order $42.00 due", item.Text);
-        Assert.Contains(nodes, node => node.Text == "$42.00");
+        Assert.DoesNotContain(nodes, node => node.Text == "$42.00");
     }
 
     [Fact]

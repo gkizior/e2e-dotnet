@@ -35,6 +35,7 @@ internal static class PageScript
           const leaves = new Set(["button", "link", "textbox", "checkbox", "radio", "searchbox", "heading", "status", "image", "tab",
             "option", "menuitem", "menuitemcheckbox", "menuitemradio", "switch", "slider", "spinbutton", "progressbar", "meter", "separator", "iframe"]);
           const maxSelectOptions = 60;
+          const textLimit = 512;
           let count = 0;
           let textCount = 0;
           let textCut = false;
@@ -555,6 +556,104 @@ internal static class PageScript
             directTexts.set(el, out);
             return out;
           };
+          const memoized = (read) => {
+            const answers = new Map();
+            return (el) => {
+              if (!answers.has(el)) answers.set(el, read(el));
+              return answers.get(el);
+            };
+          };
+          // Elements whose content is not text in a line: a form control's
+          // options or value, a picture, a frame, a drawn surface. Like a line
+          // break, each separates the words around it.
+          const lineBreaking = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG", "MATH", "CANVAS", "VIDEO", "AUDIO",
+            "IFRAME", "IMG", "INPUT", "SELECT", "TEXTAREA", "BR"]);
+          // Render visibility as the walk reads it: hidden, or a box with no
+          // size, which shows no words.
+          const invisible = (el, style) => {
+            if (hidden(el, style)) return true;
+            if (style.display === "contents") return false;
+            const box = el.getBoundingClientRect();
+            return !(box.width > 0 && box.height > 0);
+          };
+          // True for a box laid out in its parent's line, or for display:
+          // contents, which lays out none of its own.
+          const isInlineLevel = (style) =>
+            style.display.startsWith("inline") || style.display.startsWith("ruby") || style.display === "contents";
+          // True when an element's text flows in its parent's line: a visible
+          // inline-level box. A slot has no box and shows the nodes assigned to
+          // it, so only its visibility counts: a hidden one hides the text they
+          // inherit it with, and a child that shows itself again is listed on
+          // its own.
+          const flowsInLine = memoized((el) => {
+            if (lineBreaking.has(el.tagName.toUpperCase())) return false;
+            const style = styleOf(el);
+            if (hidesSubtree(el, style)) return false;
+            if (el instanceof HTMLSlotElement ? style.visibility !== "visible" : invisible(el, style)) return false;
+            return isInlineLevel(style);
+          });
+          // The nodes an element renders in its place: a shadow host's shadow
+          // tree, a slot's assigned nodes or else its fallback content, any
+          // other element's children.
+          const renderedChildrenOf = (el) => {
+            const shadow = shadowOf(el);
+            if (shadow) return [...shadow.childNodes];
+            if (el instanceof HTMLSlotElement) {
+              const assigned = el.assignedNodes();
+              if (assigned.length > 0) return assigned;
+            }
+            return [...el.childNodes];
+          };
+          // An element's rendered text with each inline descendant's text in
+          // place. Anything else in the line reads as a space, except a hidden
+          // inline element (a <wbr>, a zero-size span), which shows nothing.
+          const lineRunOf = (el) => {
+            let out = "";
+            for (const child of renderedChildrenOf(el)) {
+              if (child.nodeType === Node.TEXT_NODE) out += child.nodeValue ?? "";
+              if (child.nodeType !== Node.ELEMENT_NODE) continue;
+              if (flowsInLine(child)) {
+                out += lineRunOf(child);
+                continue;
+              }
+              const style = styleOf(child);
+              if (hidesSubtree(child, style)) continue;
+              if (lineBreaking.has(child.tagName.toUpperCase()) || !isInlineLevel(style) || !invisible(child, style)) out += " ";
+            }
+            return out;
+          };
+          // True when an element with no role still says it can be acted on:
+          // focusable through tabindex, a click handler set as an attribute or
+          // a property, or an <a> with no href, which an app wires up by
+          // script. Such an element stays listed inside a line, so it keeps an
+          // id to act on. A handler added with addEventListener leaves nothing
+          // the page can read.
+          const offersAction = memoized((el) => {
+            const tabindex = el.getAttribute("tabindex");
+            if (tabindex !== null && /^\s*[-+]?\d/.test(tabindex)) return true;
+            if (el.tagName === "A" || el.hasAttribute("onclick")) return true;
+            return el instanceof HTMLElement && el.onclick !== null;
+          });
+          // True when an element reads its own line: it has text of its own,
+          // or it offers an action inside an ancestor's line, where its words
+          // are what a person aims at.
+          const ownsLine = (el) => directTextOf(el) !== "" || (offersAction(el) && isReadInLine(el));
+          // The text an element owns, read as a person reads its line: its own
+          // text with every inline descendant's text in place, so a link in a
+          // sentence stays a node of its own while the sentence reads whole.
+          // Block-level descendants are nodes of their own and only separate
+          // words. An element with no text of its own owns none.
+          const lineTextOf = memoized((el) => ownsLine(el) ? lineRunOf(el).replace(/\s+/g, " ").trim() : "");
+          // True when an element's text is already read in an ancestor's line,
+          // so the element has nothing to add on text alone. A line longer
+          // than the text bound is cut, so its inline descendants stay listed
+          // and nothing past the cut is lost.
+          const isReadInLine = memoized((el) => {
+            const parent = el.assignedSlot ?? parentOrHostOf(el);
+            if (parent === null || !flowsInLine(el)) return false;
+            if (!ownsLine(parent)) return isReadInLine(parent);
+            return lineTextOf(parent).length <= textLimit && !invisible(parent, styleOf(parent)) && !namesControl(parent);
+          });
           // The elements that reference each id from aria-labelledby, read once
           // per walk. nameOf resolves those ids in the document, so this does too.
           let labelledBy = null;
@@ -586,12 +685,26 @@ internal static class PageScript
           // not listed: that element carries it as its name, so a text query
           // answers with it, and a fill acts on the control a label names. An
           // SVG element has no innerText to read, so it is not listed by text.
-          const ownsText = (el) => el instanceof HTMLElement && directTextOf(el) !== "" && !namesControl(el);
+          const ownsText = (el) => el instanceof HTMLElement && !namesControl(el) &&
+            (offersAction(el) && isReadInLine(el) ? lineTextOf(el) !== "" : directTextOf(el) !== "" && !isReadInLine(el));
           const hasRole = (role) => !!role && role !== "presentation" && role !== "none";
           const listed = (el, role) => hasRole(role) || !!el.getAttribute(testIdAttribute) || ownsText(el);
           // A node listed for its text alone. It draws on its own allowance, so
           // a page full of text cannot push controls out of the snapshot.
           const textOnly = (el, role) => !hasRole(role) && !el.getAttribute(testIdAttribute);
+          // The inline elements read in the element's line that have no node of
+          // their own, as bare nodes of text under it, so a text query still
+          // finds a word the line carries, as Playwright's text engine does.
+          // They stay out of the tree the agent reads.
+          const inlineNodesOf = (parent, isHidden) => {
+            const out = [];
+            for (const child of renderedChildrenOf(parent)) {
+              if (child.nodeType !== Node.ELEMENT_NODE || !flowsInLine(child) || listed(child, roleOf(child))) continue;
+              const text = cut(lineRunOf(child), Infinity);
+              if (text) out.push({ ref: stamp(child), text, hidden: isHidden, rect: rectOf(child), children: inlineNodesOf(child, isHidden) });
+            }
+            return out;
+          };
           // How many nodes the walk would list, or only those on screen. Text-only nodes are not counted.
           const tally = (el, visible) => {
             if (!el || skip.has(el.tagName)) return 0;
@@ -658,8 +771,9 @@ internal static class PageScript
                 // what a text query matches.
                 text: secure ? "" : cut((isHidden || el.tagName === "TEXTAREA" ? el.textContent : el.innerText) || "", 512),
                 // A node that lists its children shows the snapshot only the
-                // text it owns, since they carry theirs.
-                ownText: secure || !ownsChildren ? null : cut(directTextOf(el), 512),
+                // text it owns, read as a line: its inline words stay in place.
+                ownText: secure || !ownsChildren ? null : cut(lineTextOf(el), textLimit),
+                inline: secure || !ownsChildren || lineTextOf(el) === "" ? null : inlineNodesOf(el, isHidden),
                 value: secure || !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) ? null : String(el.value ?? ""),
                 testId,
                 placeholder: el.getAttribute("placeholder"),

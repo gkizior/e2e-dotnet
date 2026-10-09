@@ -11,7 +11,7 @@ namespace E2E.Playground;
 /// <summary>
 /// The playground pages the testbed tests run against, served on a loopback port for the whole
 /// test run. A port of upstream's <c>apps/testbed</c> with only the pages these tests use:
-/// the landing page, a todo list kept in localStorage, a checkout with one planted bug, a profile
+/// the landing page, a plans page of copy with inline links and emphasis (unlisted in the nav), a todo list kept in localStorage, a checkout with one planted bug, a profile
 /// form, a page that loads users from <c>/api/users</c>, the browser fixture's own page, and the
 /// about page navigation lands on. E2E.NUnit.Tests links this file for its browser fixture tests.
 /// </summary>
@@ -33,6 +33,13 @@ internal static class Testbed
         ["/"] = ("Playground", """
             <h1>Playground</h1>
                    <p>A tiny app exercised by the e2e dogfood suite.</p>
+            """),
+
+        // Copy with inline links and emphasis, unlisted in the nav.
+        ["/plans"] = ("Plans", """
+            <h1>Plans</h1>
+                   <p>We ship every week. Read the <a href="/release-notes">release notes</a> for what changed this week.</p>
+                   <p>Plans start at <strong>$12</strong> per seat, billed <em>annually</em>, and include the <code>e2e</code> CLI.</p>
             """),
 
         ["/todos"] = ("Todos", """
