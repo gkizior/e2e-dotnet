@@ -19,7 +19,8 @@ namespace E2E.NUnit;
 /// after a failure verifies nothing.
 /// Each <c>Expect.Soft</c> failure is recorded on the NUnit result, as inside
 /// <c>Assert.EnterMultipleScope</c>, so the test fails when its body ends and
-/// lists every soft failure.
+/// lists every soft failure. A soft failure outranks a skip: <c>Assert.Ignore</c> or
+/// <c>Assert.Inconclusive</c> after one fails the test, and the skip reason stays in the message.
 /// Settings come from <see cref="E2EFixture"/>.
 /// </summary>
 public abstract class E2ETest : E2EFixture
@@ -54,6 +55,7 @@ public abstract class E2ETest : E2EFixture
             return;
         }
 
+        FailSkippedAfterSoftFailure();
         var current = global::NUnit.Framework.TestContext.CurrentContext;
         try
         {
@@ -62,6 +64,23 @@ public abstract class E2ETest : E2EFixture
         finally
         {
             await session.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    // NUnit reports a test that skipped itself as skipped, whatever it recorded before.
+    // A failed Expect.Soft before the skip fails the test, as upstream does.
+    private static void FailSkippedAfterSoftFailure()
+    {
+        var result = TestExecutionContext.CurrentContext.CurrentResult;
+        if (result.ResultState.Status is not (TestStatus.Skipped or TestStatus.Inconclusive))
+        {
+            return;
+        }
+
+        if (result.AssertionResults.Any(assertion => assertion.Status == AssertionStatus.Failed))
+        {
+            // NUnit's message already lists the soft failures and the skip reason.
+            result.SetResult(ResultState.Failure, result.Message, result.StackTrace);
         }
     }
 

@@ -91,7 +91,8 @@ public abstract class E2ETest : E2EFixture, IAsyncLifetime
     // a model outage or a stale replay, so the cache still keeps its entries then.
     private static Exception? ErrorForCache(TestResultState? state, TestException? soft)
     {
-        if (state?.Result == TestResult.Passed)
+        // A soft failure outranks a skip: xUnit fails the test at dispose, so the cache sees a failure.
+        if (state?.Result is TestResult.Passed || (soft is not null && state?.Result is TestResult.Skipped))
         {
             return soft;
         }
