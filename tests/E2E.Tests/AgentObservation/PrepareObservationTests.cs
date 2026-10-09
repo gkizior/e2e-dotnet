@@ -77,9 +77,9 @@ public sealed class PrepareObservationTests
                 new SemanticNode { Ref = "n3", Role = "textbox", Name = "hunter2", Value = "hunter2" },
             ],
         };
-        var text = SnapshotText.Render(new Observation { Route = "/", Roots = [tree] }, Redactor.For([Secret.Create("member", "hunter2")]));
+        var text = SnapshotText.Render(new Observation { Route = "/reset?token=hunter2", Roots = [tree] }, Redactor.For([Secret.Create("member", "hunter2")]));
         Assert.DoesNotContain("hunter2", text, StringComparison.Ordinal);
-        Assert.Contains("<secret:member>", text, StringComparison.Ordinal);
+        Assert.Contains("Screen (/reset?token=<secret:member>):", text, StringComparison.Ordinal);
     }
 
     [Fact]

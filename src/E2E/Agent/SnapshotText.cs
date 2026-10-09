@@ -13,7 +13,7 @@ internal static class SnapshotText
     public static string Render(Observation observation, Redactor redactor)
     {
         var builder = new StringBuilder();
-        builder.Append("Screen (").Append(observation.Route).Append("):");
+        builder.Append("Screen (").Append(redactor.Redact(observation.Route)).Append("):");
         var any = false;
         foreach (var root in observation.Roots)
         {
