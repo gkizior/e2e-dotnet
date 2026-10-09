@@ -100,7 +100,8 @@ public sealed class E2ESession : IAsyncDisposable
             launch.Dispose();
         }
 
-        // A later attempt never replays but still records, so the attempt number does not turn the cache off.
+        // Outside strict mode, a later attempt never replays but still records, so the attempt number does not turn the cache off.
+        // Strict mode treats the store as the reviewed source of truth: every attempt replays, and nothing is written or evicted.
         var cacheOn = options.CacheEnabled && options.CacheMode != CacheMode.Off && options.Cache is not null;
         var softFailures = new SoftFailures(options.OnSoftFailure);
         var testFailed = options.TestFailed ?? (static () => false);
@@ -111,7 +112,8 @@ public sealed class E2ESession : IAsyncDisposable
             Agents = agents,
             Cache = options.Cache,
             CacheEnabled = cacheOn,
-            CacheWrite = cacheOn && options.CacheMode == CacheMode.ReadWrite,
+            CacheWrite = cacheOn && options.CacheMode == CacheMode.ReadWrite && !options.CacheStrict,
+            ReplayEligible = options.CacheStrict || options.Attempt == 1,
             CacheStrict = options.CacheStrict,
             CleanupTimeout = options.CleanupTimeout,
             TestTitle = options.TestTitle,
@@ -275,7 +277,7 @@ public sealed class E2ESession : IAsyncDisposable
             return;
         }
 
-        // A stale recording under strict mode stays in place, so the next strict run fails the same way until someone re-records it.
+        // A model outage says nothing about the recording, so it stays. Strict mode never reaches here: it writes nothing.
         var preserve = AttemptScope.KeepsCache(error) || _scope.KeepCache;
         Flush(_scope.Cache, _scope.Acts, preserve);
     }
@@ -341,7 +343,7 @@ public sealed class E2ESession : IAsyncDisposable
     }
 }
 
-/// <summary>How to open one <see cref="E2ESession"/>. Retries set <see cref="Attempt"/> above 1 so the cache records but does not replay.</summary>
+/// <summary>How to open one <see cref="E2ESession"/>. Retries set <see cref="Attempt"/> above 1 so the cache records but does not replay, except under <see cref="CacheStrict"/>, where every attempt replays.</summary>
 public sealed class E2ESessionOptions
 {
     public required IEngine Engine { get; init; }
@@ -385,6 +387,7 @@ public sealed class E2ESessionOptions
     /// <summary>
     /// When true, a recording that no longer matches fails the act with <c>REPLAY_STALE</c>. So does a
     /// <c>no-entry</c> miss while a <see cref="FileStepCache"/> holds a recording of the same step under another key.
+    /// Retries replay too, and the session never writes or deletes a recording, whatever <see cref="CacheMode"/> says.
     /// </summary>
     public bool CacheStrict { get; init; }
 

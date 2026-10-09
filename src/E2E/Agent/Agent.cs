@@ -104,7 +104,7 @@ public sealed class Agent
         CacheInfo? info = null;
         var handoff = false;
         var actionsAtEndMismatch = -1;
-        if (_scope.CacheEnabled && _scope.Attempt == 1 && _scope.Cache is not null)
+        if (_scope.CacheEnabled && _scope.ReplayEligible && _scope.Cache is not null)
         {
             var replay = await TryReplayAsync(pending, start, actions, budget, options?.Params, token).ConfigureAwait(false);
             info = new CacheInfo { Mode = replay.Info!.Mode, Reason = replay.Info.Reason, ReplayedActions = actions.Count, TotalActions = pending.RecordedActions };
@@ -138,7 +138,7 @@ public sealed class Agent
         }
         else if (_scope.CacheEnabled && _scope.Cache is not null)
         {
-            // A retry records like any attempt but never replays.
+            // Outside strict mode, a retry records like any attempt but never replays.
             _scope.Missed++;
             info = ReplayAttempt.Miss("retry").Info;
         }
@@ -2008,6 +2008,9 @@ internal sealed class AttemptScope
     public bool CacheWrite { get; init; }
 
     public bool CacheStrict { get; init; }
+
+    /// <summary>Whether this attempt may replay: a first attempt, or any attempt under strict mode.</summary>
+    public bool ReplayEligible { get; init; }
 
     public TimeSpan CleanupTimeout { get; init; } = E2EDefaults.CleanupTimeout;
 

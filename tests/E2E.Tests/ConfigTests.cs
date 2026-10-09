@@ -254,7 +254,8 @@ public sealed class ConfigTests
     public async Task Strict_mode_fails_a_stale_recording()
     {
         var directory = TempCache();
-        await using (var session = await StartAsync(directory, CacheMode.ReadWrite, strict: true, "Upgrade to Pro", () => { }))
+        // A strict run never writes, so the recording comes from a lenient one.
+        await using (var session = await StartAsync(directory, CacheMode.ReadWrite, strict: false, "Upgrade to Pro", () => { }))
         {
             await UpgradeAsync(session);
             session.Complete();
@@ -304,7 +305,7 @@ public sealed class ConfigTests
         await session.Agent.AssertAsync("the invoice preview shows a prorated amount");
     }
 
-    internal static Task<E2ESession> StartAsync(string directory, CacheMode mode, bool strict, string button, Action onAct, string title = "billing > upgrades", string? context = null)
+    internal static Task<E2ESession> StartAsync(string directory, CacheMode mode, bool strict, string button, Action onAct, string title = "billing > upgrades", string? context = null, int attempt = 1)
     {
         return E2ESession.StartAsync(new E2ESessionOptions
         {
@@ -328,6 +329,7 @@ public sealed class ConfigTests
             Cache = new FileStepCache(directory),
             CacheMode = mode,
             CacheStrict = strict,
+            Attempt = attempt,
             ActionTimeout = TimeSpan.FromMilliseconds(300),
             TestTitle = title,
             AgentContext = context,
