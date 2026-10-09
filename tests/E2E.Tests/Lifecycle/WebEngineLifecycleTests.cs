@@ -133,7 +133,7 @@ public sealed class WebEngineLifecycleTests
         });
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/124: hasText keeps inputs, and a display-value scope is not refused")]
+    [Fact]
     public async Task Selects_positionally_among_display_value_matches_and_keeps_composition_honest()
     {
         using var site = await FixtureApp.StartAsync();

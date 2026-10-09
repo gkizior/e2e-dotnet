@@ -44,7 +44,7 @@ public sealed class LocatorExpressionsTests
         Assert.False(_screen.GetByTestId("card").Query.Visible);
     }
 
-    [Fact(Skip = "https://github.com/hardkoded/e2e-dotnet/issues/127: a description leaves out visible: true")]
+    [Fact]
     public void Describes_a_visible_query_so_an_ambiguity_message_shows_the_predicate()
     {
         Assert.Equal("getByText(\"Pro\", visible: true)", _screen.GetByText("Pro", new TextMatchOptions { Visible = true }).Query.Describe());

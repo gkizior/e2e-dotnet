@@ -651,8 +651,8 @@ internal static class PageScript
                 // does. Any other node carries only its own direct text, since
                 // the elements under it are listed with theirs. A secure field
                 // withholds it. innerText is empty for a node that does not
-                // render; its DOM text is what a text query matches.
-                text: secure ? "" : cut(ownsChildren ? directTextOf(el) : (isHidden ? el.textContent : el.innerText) || "", 512),
+                // render, and for a textarea; its DOM text is what a text query matches.
+                text: secure ? "" : cut(ownsChildren ? directTextOf(el) : (isHidden || el.tagName === "TEXTAREA" ? el.textContent : el.innerText) || "", 512),
                 value: secure || !("value" in el) || el.tagName === "OPTION" ? null : String(el.value ?? ""),
                 testId,
                 placeholder: el.getAttribute("placeholder"),
