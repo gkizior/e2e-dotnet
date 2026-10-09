@@ -101,6 +101,53 @@ public sealed class ThroughTheLocatorTargetTests
     }
 
     [Fact]
+    public async Task Waits_for_a_controlled_checkbox_that_commits_its_state_after_a_timer()
+    {
+        await RunWithScreenAsync(
+            """
+            <label><input type="checkbox" id="box"
+              onclick="const box = this; const next = box.checked; event.preventDefault();
+                setTimeout(() => { box.checked = next; }, 300)">Notify</label>
+            """,
+            async session =>
+            {
+                await session.Screen.GetByRole("checkbox", "Notify").CheckAsync();
+                Assert.True(await session.Browser.EvaluateAsync<bool>("() => document.getElementById('box').checked"));
+            });
+    }
+
+    [Fact]
+    public async Task Waits_for_a_switch_whose_aria_checked_flips_after_a_timer()
+    {
+        await RunWithScreenAsync(
+            """
+            <button role="switch" id="toggle" aria-checked="true"
+              onclick="setTimeout(() => this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true')), 300)">Wi-Fi</button>
+            """,
+            async session =>
+            {
+                await session.Screen.GetByRole("switch", "Wi-Fi").UncheckAsync();
+                Assert.Equal("false", await session.Browser.EvaluateAsync<string>("() => document.getElementById('toggle').getAttribute('aria-checked')"));
+            });
+    }
+
+    [Fact]
+    public async Task Fails_a_rejected_click_on_a_control_a_later_re_render_replaces()
+    {
+        await RunWithScreenAsync(
+            """
+            <div id="terms"><label><input type="checkbox" id="box" onclick="event.preventDefault();
+              setTimeout(() => { document.getElementById('terms').innerHTML = '<label><input type=checkbox id=box>Agree</label>'; }, 300)">Agree</label></div>
+            """,
+            async session =>
+            {
+                var error = await Assert.ThrowsAsync<EngineException>(() => session.Screen.GetByRole("checkbox", "Agree").CheckAsync());
+                Assert.Equal("NOT_ACTIONABLE", error.Code);
+                Assert.Equal("check clicked the control but its checked state did not change before the control was replaced", error.Message);
+            });
+    }
+
+    [Fact]
     public async Task Fails_a_click_that_left_the_control_as_it_was()
     {
         await RunWithScreenAsync(

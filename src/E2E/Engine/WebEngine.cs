@@ -1763,15 +1763,22 @@ public sealed partial class WebEngine : IEngine
             }
         }
 
+        /// <summary>How often a check or uncheck reads the control's state after the click.</summary>
+        private static readonly TimeSpan CheckPollInterval = TimeSpan.FromMilliseconds(100);
+
         /// <summary>
         /// Sets a checkbox, switch, or radio to <paramref name="checked"/> with one click, as
-        /// Playwright's <c>check</c> does, apart from the read after the click: a control
-        /// that is gone by then (an app that swaps a picked radio for its selected
-        /// view, or navigates on change) took the click, so the action is done, where
-        /// Playwright reports it detached as if the click never happened. Whatever
-        /// took its place is not read: the next observation or assertion shows it,
-        /// as it does after a tap. The reads and the click share one element, so the
-        /// state before and after the click is one control's.
+        /// Playwright's <c>check</c> does, apart from the reads after the click. Playwright
+        /// reads the state once; here it is polled until just before the operation's deadline, so a
+        /// control that commits its new state after an await or a timer passes, and one that
+        /// never changes fails at the deadline. A control that is gone by the first read (an
+        /// app that swaps a picked radio for its selected view, or navigates on change) took
+        /// the click, so the action is done, where Playwright reports it detached as if the
+        /// click never happened. One that goes later, still in its old state, may have been
+        /// replaced for any reason, so it fails rather than passing on a click the app
+        /// rejected. Whatever took its place is not read: the next observation or assertion
+        /// shows it, as it does after a tap. The reads and the click share one element, so
+        /// the state before and after the click is one control's.
         /// </summary>
         private static async Task SetCheckedAsync(IElementHandle element, bool @checked, OperationBudget budget)
         {
@@ -1787,19 +1794,40 @@ public sealed partial class WebEngine : IEngine
             }
 
             await element.ClickAsync(new ElementHandleClickOptions { Timeout = budget.PlaywrightTimeout }).ConfigureAwait(false);
-            bool after;
-            try
+            EngineException Unchanged(string detail = "") =>
+                new(EngineErrorCodes.NotActionable, verb + " clicked the control but its checked state did not change" + detail, retryable: false);
+            var firstRead = true;
+            while (true)
             {
-                after = await element.IsCheckedAsync().ConfigureAwait(false);
-            }
-            catch (PlaywrightException ex) when (WebErrors.IsDetached(ex) || WebErrors.IsNavigationRace(ex))
-            {
-                return;
-            }
+                try
+                {
+                    if (await element.IsCheckedAsync().ConfigureAwait(false) == @checked)
+                    {
+                        return;
+                    }
+                }
+                catch (PlaywrightException ex) when (WebErrors.IsDetached(ex) || WebErrors.IsNavigationRace(ex))
+                {
+                    if (firstRead)
+                    {
+                        return;
+                    }
 
-            if (after != @checked)
-            {
-                throw new EngineException(EngineErrorCodes.NotActionable, verb + " clicked the control but its checked state did not change", retryable: false);
+                    throw Unchanged(" before the control was replaced");
+                }
+
+                firstRead = false;
+
+                // No sleep runs past the poll window, so the last read starts at its end and never sees a state that arrived later.
+                var left = budget.PollWindowLeft;
+                if (left <= TimeSpan.Zero)
+                {
+                    throw Unchanged();
+                }
+
+                // Rounded up to whole milliseconds, which is what Task.Delay waits, so the capped pause never wakes before the window ends.
+                var wait = TimeSpan.FromMilliseconds(Math.Ceiling(left.TotalMilliseconds));
+                await budget.DelayAsync(wait < CheckPollInterval ? wait : CheckPollInterval).ConfigureAwait(false);
             }
         }
 
@@ -2118,6 +2146,26 @@ internal sealed class OperationBudget
 
     /// <summary>Throws <c>OPERATION_TIMEOUT</c> once the deadline has passed, before a call that takes no timeout of its own.</summary>
     public void ThrowIfExpired() => Remaining();
+
+    /// <summary>
+    /// The time left to poll in, zero once it has run out. It ends the lead before the
+    /// deadline, as <see cref="PlaywrightTimeout"/> does, so a poll fails with its own
+    /// answer instead of racing the deadline that abandons it. Unlike the other members, it
+    /// does not throw at the deadline.
+    /// </summary>
+    public TimeSpan PollWindowLeft
+    {
+        get
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            var lead = TimeSpan.FromMilliseconds(Math.Min(PlaywrightTimeoutLeadMs, _timeout.TotalMilliseconds / 4));
+            var left = _timeout - lead - _clock.GetElapsedTime(_startedAt);
+            return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+        }
+    }
+
+    /// <summary>Sleeps on the budget's clock, ending early when the operation is cancelled.</summary>
+    public Task DelayAsync(TimeSpan delay) => Task.Delay(delay, _clock, _cancellationToken);
 
     private TimeSpan Remaining()
     {

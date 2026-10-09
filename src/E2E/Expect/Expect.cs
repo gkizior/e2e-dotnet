@@ -416,8 +416,9 @@ public sealed class LocatorExpect
                 }
 
                 // Rounded up to whole milliseconds, which is what Task.Delay waits, so the capped pause never wakes before the deadline.
+                // No sleep runs past the deadline, so the last read starts at it and never sees a state that arrived later.
                 var remaining = TimeSpan.FromMilliseconds(Math.Ceiling((deadline - now).TotalMilliseconds));
-                await Task.Delay(_negated && remaining < _locator.Screen.PollInterval ? remaining : _locator.Screen.PollInterval, clock, token).ConfigureAwait(false);
+                await Task.Delay(remaining < _locator.Screen.PollInterval ? remaining : _locator.Screen.PollInterval, clock, token).ConfigureAwait(false);
 
                 // A read past the deadline has no budget left, so a negation decides at the deadline on what it has seen.
                 readAt = clock.GetUtcNow();

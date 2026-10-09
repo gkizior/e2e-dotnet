@@ -32,6 +32,22 @@ public sealed class PollConditionTests
     }
 
     [Fact]
+    public async Task Takes_its_last_read_at_the_deadline_not_a_poll_tick_past_it()
+    {
+        // 330 ms is not a multiple of the 50 ms sample: the state arrives just after it.
+        var budget = TimeSpan.FromMilliseconds(330);
+        var readsAt = new List<double>();
+        var screen = Over(_ =>
+        {
+            readsAt.Add(_time.Elapsed.TotalMilliseconds);
+            return Task.FromResult<SemanticNode[]>(_time.Elapsed > budget ? [Shown] : []);
+        });
+        var error = await Assert.ThrowsAsync<TestException>(() => Drive(Expect.That(screen.GetByRole("status")).ToBeVisibleAsync(timeout: budget)));
+        Assert.Equal("ASSERTION_FAILED", error.Code);
+        Assert.Equal([0, 50, 100, 150, 200, 250, 300, 330], readsAt);
+    }
+
+    [Fact]
     public async Task Negated_a_budget_shorter_than_the_grace_window_is_still_satisfiable()
     {
         var screen = Scripted(_ => []);

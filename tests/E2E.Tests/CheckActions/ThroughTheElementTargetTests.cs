@@ -101,6 +101,54 @@ public sealed class ThroughTheElementTargetTests
     }
 
     [Fact]
+    public async Task Waits_for_a_controlled_checkbox_that_commits_its_state_after_a_timer()
+    {
+        await RunAsync(
+            """
+            <label><input type="checkbox" id="box"
+              onclick="const box = this; const next = box.checked; event.preventDefault();
+                setTimeout(() => { box.checked = next; }, 300)">Notify</label>
+            """,
+            async session =>
+            {
+                await session.PerformAsync(await FindAsync(session, "checkbox", "Notify"), new LocatorAction.Check(), CancellationToken.None);
+                Assert.True(await EvaluateAsync<bool>(session, "() => document.getElementById('box').checked"));
+            });
+    }
+
+    [Fact]
+    public async Task Waits_for_a_switch_whose_aria_checked_flips_after_a_timer()
+    {
+        await RunAsync(
+            """
+            <button role="switch" id="toggle" aria-checked="true"
+              onclick="setTimeout(() => this.setAttribute('aria-checked', String(this.getAttribute('aria-checked') !== 'true')), 300)">Wi-Fi</button>
+            """,
+            async session =>
+            {
+                await session.PerformAsync(await FindAsync(session, "switch", "Wi-Fi"), new LocatorAction.Uncheck(), CancellationToken.None);
+                Assert.Equal("false", await EvaluateAsync<string>(session, "() => document.getElementById('toggle').getAttribute('aria-checked')"));
+            });
+    }
+
+    [Fact]
+    public async Task Fails_a_rejected_click_on_a_control_a_later_re_render_replaces()
+    {
+        await RunAsync(
+            """
+            <div id="terms"><label><input type="checkbox" id="box" onclick="event.preventDefault();
+              setTimeout(() => { document.getElementById('terms').innerHTML = '<label><input type=checkbox id=box>Agree</label>'; }, 300)">Agree</label></div>
+            """,
+            async session =>
+            {
+                var box = await FindAsync(session, "checkbox", "Agree");
+                var error = await Assert.ThrowsAsync<EngineException>(() => session.PerformAsync(box, new LocatorAction.Check(), CancellationToken.None));
+                Assert.Equal("NOT_ACTIONABLE", error.Code);
+                Assert.Equal("check clicked the control but its checked state did not change before the control was replaced", error.Message);
+            });
+    }
+
+    [Fact]
     public async Task Fails_a_click_that_left_the_control_as_it_was()
     {
         await RunAsync(
