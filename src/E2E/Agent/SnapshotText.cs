@@ -45,8 +45,10 @@ internal static class SnapshotText
             builder.Append("- ");
             builder.Append(node.Role ?? "text");
             // A node with no accessible name, such as one listed for its text
-            // or its test id, shows its text. A named node shows its text too, when it differs.
-            var name = Clean(redactor.Redact((string.IsNullOrEmpty(node.Name) ? node.Text : node.Name) ?? ""));
+            // or its test id, shows the text it owns, so a container does not repeat its children's.
+            // A named node shows its text too, when it differs.
+            var shown = node.OwnText ?? node.Text;
+            var name = Clean(redactor.Redact((string.IsNullOrEmpty(node.Name) ? shown : node.Name) ?? ""));
             if (name.Length > 0)
             {
                 builder.Append(" \"").Append(name).Append('"');
@@ -54,7 +56,7 @@ internal static class SnapshotText
 
             if (!string.IsNullOrEmpty(node.Name))
             {
-                var text = Clean(redactor.Redact(node.Text ?? ""));
+                var text = Clean(redactor.Redact(shown ?? ""));
                 if (text.Length > 0 && text != name)
                 {
                     builder.Append(" text=\"").Append(text).Append('"');

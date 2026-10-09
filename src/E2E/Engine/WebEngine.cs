@@ -1850,6 +1850,7 @@ public sealed partial class WebEngine : IEngine
                 Role = dto.Role,
                 Name = dto.Name,
                 Text = dto.Text,
+                OwnText = dto.OwnText,
                 Value = dto.Secure ? null : dto.Value,
                 TestId = dto.TestId,
                 TestIdAttribute = dto.TestId is null ? null : testIdAttribute,
@@ -2028,6 +2029,8 @@ public sealed partial class WebEngine : IEngine
         public string? Name { get; set; }
 
         public string? Text { get; set; }
+
+        public string? OwnText { get; set; }
 
         public string? Value { get; set; }
 

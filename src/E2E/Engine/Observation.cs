@@ -51,7 +51,14 @@ public sealed class SemanticNode
     /// <summary>The accessible name, by the accname rules Playwright follows, or null when the node has none.</summary>
     public string? Name { get; init; }
 
+    /// <summary>The rendered text, which locator reads and text queries use.</summary>
     public string? Text { get; init; }
+
+    /// <summary>
+    /// The text the node owns directly, without its listed children's, which the snapshot shows.
+    /// Null when the node has no split: <see cref="Text"/> then reads whole.
+    /// </summary>
+    public string? OwnText { get; init; }
 
     public string? Value { get; init; }
 

@@ -290,8 +290,7 @@ public sealed class Locator
     }
 
     /// <summary>
-    /// Reads whitespace-normalized text once: the node's text, not its label. On the web a button, link, or heading
-    /// reads its rendered text (<c>innerText</c>); a node that lists its children reads only its own direct text.
+    /// Reads whitespace-normalized text once: the node's rendered text (<c>innerText</c> on the web), not its label.
     /// Does not retry and does not verify an earlier <c>act</c>. Fails with <c>POLICY_DENIED</c> on a secure field.
     /// </summary>
     public async Task<string?> TextContentAsync(CancellationToken cancellationToken = default)

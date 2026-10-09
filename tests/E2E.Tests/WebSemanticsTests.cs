@@ -184,8 +184,32 @@ public sealed class WebSemanticsTests
         using var site = await TinySite.StartAsync("<!DOCTYPE html><html><body><ul><li data-testid=\"item\">Order <strong>$42.00</strong> due</li></ul></body></html>");
         await using var session = await OpenAsync(site.Url, new WebEngineOptions { Headless = true });
         var nodes = Flatten((await session.ObserveAsync(CancellationToken.None)).Roots).ToList();
-        Assert.Equal("Order due", Assert.Single(nodes, node => node.TestId == "item").Text);
+        var item = Assert.Single(nodes, node => node.TestId == "item");
+        Assert.Equal("Order due", item.OwnText);
+        Assert.Equal("Order $42.00 due", item.Text);
         Assert.Contains(nodes, node => node.Text == "$42.00");
+    }
+
+    [Fact]
+    public async Task Chromium_shows_a_container_without_a_name_only_its_own_text_in_the_snapshot()
+    {
+        using var site = await TinySite.StartAsync("<!DOCTYPE html><html><body><div data-testid=\"wrap\"><span>hello</span></div></body></html>");
+        await using var session = await OpenAsync(site.Url, new WebEngineOptions { Headless = true });
+        var text = SnapshotText.Render(await session.ObserveAsync(CancellationToken.None), Redactor.None);
+        Assert.Equal(1, text.Split("hello").Length - 1);
+    }
+
+    [Fact]
+    public async Task Chromium_reads_the_whole_text_of_a_container_with_TextContentAsync()
+    {
+        using var site = await TinySite.StartAsync("<!DOCTYPE html><html><body><ul><li data-testid=\"item\">Order <strong>$42.00</strong> due</li></ul><div data-testid=\"wrap\"><span>hello</span></div></body></html>");
+        var session = await StartSessionAsync(site.Url);
+        await RunAsync(session, async () =>
+        {
+            await session.App.OpenAsync("/");
+            Assert.Equal("Order $42.00 due", await session.Screen.GetByTestId("item").TextContentAsync());
+            Assert.Equal("hello", await session.Screen.GetByTestId("wrap").TextContentAsync());
+        });
     }
 
     [Fact]
