@@ -34,6 +34,9 @@ internal static class PageScript
           const skip = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
           const leaves = new Set(["button", "link", "textbox", "checkbox", "radio", "searchbox", "heading", "status", "image", "tab",
             "option", "menuitem", "menuitemcheckbox", "menuitemradio", "switch", "slider", "spinbutton", "progressbar", "meter", "separator", "iframe"]);
+          // Port only: upstream has no leaf set, since its walk lists every child. An
+          // editing host lists its children (the editor's document, and the editors nested in it).
+          const isLeaf = (el, role) => !!role && leaves.has(role) && !isEditingHost(el);
           const maxSelectOptions = 60;
           const textLimit = 512;
           let count = 0;
@@ -67,6 +70,16 @@ internal static class PageScript
             const r = box.getBoundingClientRect();
             return r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
           };
+          // Tags a contenteditable never makes an editing host: a drawn or embedded
+          // surface, a void element, and a native control with a value of its own.
+          // Named and shaped as upstream's OPAQUE_TAGS and NON_HOST_TAGS in read-semantics.ts. Upstream
+          // reads the focused element once per observation (focusedElement); this script's `focused` is that.
+          const OPAQUE_TAGS = ["svg", "math", "canvas", "video", "audio"];
+          const NON_HOST_TAGS = [...OPAQUE_TAGS, "iframe", "img", "hr", "br", "wbr", "area", "a", "button", "input", "textarea", "select"];
+          const isEditingHost = (el) => el instanceof HTMLElement && el.isContentEditable && NON_HOST_TAGS.indexOf(el.tagName.toLowerCase()) === -1
+            && !(el.parentElement instanceof HTMLElement && el.parentElement.isContentEditable)
+            // Port only: a document in designMode makes <html> editable, and the page is not a control.
+            && el !== el.ownerDocument.documentElement;
           const cut = (value, limit) => {
             const text = (value || "").replace(/\s+/g, " ").trim();
             return text.length > limit ? text.slice(0, limit) : text;
@@ -117,12 +130,22 @@ internal static class PageScript
           // visible and paint again; nor is aria-hidden, which only the
           // accessibility tree drops.
           const hidesSubtree = (el, style) => style.display === "none" || style.contentVisibility === "hidden";
+          // Port only: upstream has no paragraph role, so it needs no test for content inside a host.
+          const inEditingHost = (el) => {
+            if (el.parentElement?.closest("[contenteditable]") == null) return false;
+            for (let parent = el.parentElement; parent !== null; parent = parent.parentElement) {
+              if (isEditingHost(parent)) return true;
+            }
+            return false;
+          };
           const roleOf = (el) => {
             const explicit = (el.getAttribute("role") || "").trim();
             if (explicit) {
               const first = explicit.split(/\s+/)[0];
               return first === "img" ? "image" : first;
             }
+            // Ahead of the tag: an editor's host is the control, whatever landmark or structure its tag would otherwise be.
+            if (isEditingHost(el)) return "textbox";
             const tag = el.tagName;
             switch (tag) {
               case "A": return el.hasAttribute("href") ? "link" : null;
@@ -174,7 +197,7 @@ internal static class PageScript
               }
               case "DIALOG": return "dialog";
               case "OUTPUT": return "status";
-              case "P": return "paragraph";
+              case "P": return inEditingHost(el) ? null : "paragraph";
               case "IFRAME": return "iframe";
               case "INPUT": {
                 const type = (el.getAttribute("type") || "text").toLowerCase();
@@ -441,6 +464,19 @@ internal static class PageScript
             if (el instanceof HTMLInputElement) return placeholderNamedInputTypes.indexOf(el.type) !== -1;
             return role === "textbox" || role === "searchbox";
           };
+          // The placeholder a rich-text editor paints from data-placeholder: Quill
+          // sets it on the host; ProseMirror and TipTap set it on the first empty
+          // block and drop it once the document has content, as the painted hint goes.
+          const editorPlaceholderOf = (host) => {
+            const own = host.getAttribute("data-placeholder");
+            if (own !== null && own.trim() !== "") return own.trim();
+            for (const block of host.querySelectorAll("[data-placeholder]")) {
+              if ((block.textContent || "").trim() !== "") continue;
+              const placeholder = block.getAttribute("data-placeholder");
+              if (placeholder !== null && placeholder.trim() !== "") return placeholder.trim();
+            }
+            return null;
+          };
           const accessibleName = (el, role) => {
             // accname reads a labelledby reference (2B) before the element's own aria-label (2C).
             const referenced = referencedNamesOf(el, nameWalk([], true));
@@ -478,6 +514,7 @@ internal static class PageScript
               if (placeholder !== null && placeholder.trim() !== "") return placeholder.trim();
               const ariaPlaceholder = el.getAttribute("aria-placeholder");
               if (ariaPlaceholder !== null && ariaPlaceholder.trim() !== "") return ariaPlaceholder.trim();
+              if (isEditingHost(el)) return editorPlaceholderOf(el);
             }
             return null;
           };
@@ -586,7 +623,7 @@ internal static class PageScript
           // inherit it with, and a child that shows itself again is listed on
           // its own.
           const flowsInLine = memoized((el) => {
-            if (lineBreaking.has(el.tagName.toUpperCase())) return false;
+            if (lineBreaking.has(el.tagName.toUpperCase()) || isEditingHost(el)) return false;
             const style = styleOf(el);
             if (hidesSubtree(el, style)) return false;
             if (el instanceof HTMLSlotElement ? style.visibility !== "visible" : invisible(el, style)) return false;
@@ -725,7 +762,7 @@ internal static class PageScript
               const counted = !visible || inView(el);
               if (counted) n++;
               if (el.tagName === "SELECT") return counted ? n + Math.min(el.options.length, maxSelectOptions) : n;
-              if (role && leaves.has(role)) return n;
+              if (isLeaf(el, role)) return n;
             }
             for (const child of el.children) n += tally(child, visible);
             const shadow = shadowOf(el);
@@ -759,7 +796,7 @@ internal static class PageScript
               }
               if (!textNode && offBudget < max && !inView(el)) {
                 if (offCount >= offBudget) {
-                  if ((role && leaves.has(role)) || el.tagName === "SELECT") return;
+                  if (isLeaf(el, role) || el.tagName === "SELECT") return;
                   walkChildren(el, into, childrenHidden, isAriaHidden);
                   return;
                 }
@@ -767,9 +804,22 @@ internal static class PageScript
               }
               if (textNode) textCount++;
               else count++;
+              // An editor's document is its value, as a textarea's text is: kept as
+              // rendered, spaces and newlines included. An empty editor renders
+              // <p><br></p>, which innerText reads as a newline, so a document with no
+              // text nodes, or with only markup whitespace that renders as that one
+              // newline, is an empty value; typed spaces are text nodes and stay. The
+              // zero-width no-break space Slate and Quill pad an empty line with
+              // renders nothing, so it is no text either.
+              let editorValue = null;
+              if (isEditingHost(el)) {
+                const rendered = el.innerText.replace(/\uFEFF/g, "");
+                const text = (el.textContent || "").replace(/\uFEFF/g, "");
+                editorValue = text === "" || (text.trim() === "" && rendered === "\n") ? "" : rendered;
+              }
               const type = (el.getAttribute("type") || "").toLowerCase();
               const secure = type === "password" || el.getAttribute("autocomplete") === "current-password";
-              const ownsChildren = !(role && leaves.has(role)) && el.tagName !== "SELECT" && !isFrame;
+              const ownsChildren = !isLeaf(el, role) && el.tagName !== "SELECT" && !isFrame;
               const node = {
                 ref: stamp(el),
                 role,
@@ -784,7 +834,7 @@ internal static class PageScript
                 // text it owns, read as a line: its inline words stay in place.
                 ownText: secure || !ownsChildren ? null : cut(lineTextOf(el), textLimit),
                 inline: secure || !ownsChildren || lineTextOf(el) === "" ? null : inlineNodesOf(el, isHidden),
-                value: secure || !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) ? null : String(el.value ?? ""),
+                value: secure ? null : el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? String(el.value ?? "") : editorValue,
                 testId,
                 placeholder: el.getAttribute("placeholder"),
                 inputPurpose: secure ? "password" : null,
@@ -814,7 +864,7 @@ internal static class PageScript
                 }
                 return;
               }
-              if (role && leaves.has(role)) return;
+              if (isLeaf(el, role)) return;
               walkChildren(el, node.children, childrenHidden, isAriaHidden);
               return;
             }

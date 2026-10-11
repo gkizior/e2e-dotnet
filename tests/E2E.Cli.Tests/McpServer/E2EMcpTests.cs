@@ -231,7 +231,7 @@ public sealed class E2EMcpTests : IClassFixture<E2EMcpTests.Served>
         Assert.False(opened.IsError, opened.Text);
         Assert.Contains("Secrets: \"adminPassword\", \"apiKey\"", opened.Text, StringComparison.Ordinal);
 
-        // type_secret fills only a secret field, so the value goes in as text: every output still shows a configured value by its name.
+        // The value goes in as text, not through type_secret: every output still shows a configured value by its name.
         var observed = await _served.CallAsync("observe");
         var filled = await _served.CallAsync("type", new() { ["target"] = ServedCli.RefOf(observed.Text, "textbox \"Focus target\""), ["text"] = Served.ApiKey });
         Assert.False(filled.IsError, filled.Text);

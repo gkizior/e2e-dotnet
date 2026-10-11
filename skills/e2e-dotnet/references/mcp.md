@@ -71,7 +71,7 @@ config declares a `secrets` entry.
 | `observe` | The whole current screen |
 | `tap`, `double_tap`, `check`, `uncheck`, `clear` `{target}` | Act on one node |
 | `type {target, text}` | Replace the text in a field |
-| `type_secret {target, secret}` | Fill a configured secret into a password or secret field by name; you never see the value |
+| `type_secret {target, secret}` | Fill a configured secret into an editable field by name; you never see the value |
 | `press {key, target?}` | Press a key on a node, or on whatever has focus |
 | `select {target, value}` | Choose an option |
 | `scroll {direction, times?, target?}`, `scroll_to {target?, text?, direction?}` | Move the viewport, or page to a node |

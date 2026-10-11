@@ -266,7 +266,7 @@ internal sealed class SessionCatalog
     {
         return new CatalogTool
         {
-            Description = "Fill a configured secret into a password or secret field by its name. You never see the value: every output shows the secret as <secret:name>. After a fill, screenshot withholds pixels.",
+            Description = "Fill a configured secret into an editable field by its name. You never see the value: every output shows the secret as <secret:name>. After a fill, screenshot withholds pixels.",
             InputSchema = Schema(Target, ("secret", Property("string", "The secret's name from the config"), true)),
             Execute = async (args, token) =>
             {

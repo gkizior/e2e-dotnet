@@ -111,7 +111,7 @@ internal static class AgentTools
         Tool("tap", "Activate a control.", Target),
         Tool("double_tap", "Double-click a control. Use it only when a tap does nothing, such as a label that opens an editor on a double-click.", Target),
         Tool("fill", "Replace the text in a field.", WithValue(Target, "value")),
-        Tool("fill_secret", "Type a declared secret into a password or secret field. Pass the secret name, never the value.", WithValue(Target, "secret")),
+        Tool("fill_secret", "Type a declared secret into an editable field. A password secret needs a password field. Pass the secret name, never the value.", WithValue(Target, "secret")),
         Tool("press", "Press a key such as Enter, Escape, or Tab. Omit role and name to press the focused control.", WithValue(Target, "key")),
         Tool("select", "Choose an option in a combobox.", WithValue(Target, "value")),
         Tool("check", "Check a checkbox.", Target),

@@ -18,6 +18,7 @@ public sealed class WebPlatformIntegrationTests
     [InlineData("toHaveAttribute reads the value attribute of plain fields")]
     [InlineData("a viewport set before the first navigation holds through app.open")]
     [InlineData("toHaveURL ignoreCase folds the comparison")]
+    [InlineData("contenteditable hosts are textboxes: reached by label and by role (a bare host too), filled, and read as a value")]
     public async Task Passes(string title)
     {
         Assert.Null(await RunAsync(Scenarios[title]));
@@ -191,6 +192,22 @@ public sealed class WebPlatformIntegrationTests
             Assert.Null(await screen.GetByTestId("items").GetAttributeAsync("constructor"));
             Assert.Null(await screen.GetByTestId("items").GetAttributeAsync("toString"));
             Assert.Null(await screen.GetByTestId("items").GetAttributeAsync("__proto__"));
+        },
+        ["contenteditable hosts are textboxes: reached by label and by role (a bare host too), filled, and read as a value"] = async session =>
+        {
+            await session.App.OpenAsync("/editor");
+            var notes = session.Screen.GetByLabel("Notes");
+            await Expect.That(notes).ToBeVisibleAsync();
+            await notes.FillAsync("Hello");
+            await Expect.That(notes).ToHaveValueAsync("Hello");
+            Assert.Equal("Hello", await notes.InputValueAsync());
+            await Expect.That(session.Screen.GetByTestId("notes")).ToHaveValueAsync("Hello");
+            // Upstream's getByRole runs Playwright's role selector, which knows a textbox only by an explicit role, so it
+            // finds no bare host. The port's getByRole reads the tree, where the bare host is a textbox too.
+            await Expect.That(session.Screen.GetByRole("textbox", "Notes")).ToHaveCountAsync(1);
+            await Expect.That(session.Screen.GetByRole("textbox", "Message")).ToHaveCountAsync(1);
+            await session.Screen.GetByRole("textbox", "Message").FillAsync("Hi");
+            await Expect.That(session.Screen.GetByLabel("Message")).ToHaveValueAsync("Hi");
         },
         ["a textarea value compares raw"] = async session =>
         {

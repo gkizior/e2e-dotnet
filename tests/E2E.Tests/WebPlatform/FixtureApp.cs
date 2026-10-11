@@ -137,6 +137,21 @@ internal static class FixtureApp
         </html>
         """;
 
+    // Rich-text editors: a bare contenteditable host named through aria-labelledby, and one that also carries the explicit role.
+    private const string Editor = """
+        <!doctype html>
+        <html>
+        <head><title>Editor</title></head>
+        <body>
+          <h1>Editor</h1>
+          <span id="notes-label">Notes</span>
+          <div id="notes" contenteditable aria-labelledby="notes-label" data-testid="notes"><p><br></p></div>
+          <span id="message-label">Message</span>
+          <div id="message" contenteditable role="textbox" aria-labelledby="message-label" data-testid="message"><p><br></p></div>
+        </body>
+        </html>
+        """;
+
     public static Task<TinySite> StartAsync()
     {
         return TinySite.StartAsync(context => context.Request.Url!.AbsolutePath switch
@@ -144,6 +159,7 @@ internal static class FixtureApp
             "/" => TinySite.RespondAsync(context, Home),
             "/about" => TinySite.RespondAsync(context, About),
             "/classes" => TinySite.RespondAsync(context, Classes),
+            "/editor" => TinySite.RespondAsync(context, Editor),
             "/value-attributes" => TinySite.RespondAsync(context, ValueAttributes),
             _ => NotFoundAsync(context),
         });
