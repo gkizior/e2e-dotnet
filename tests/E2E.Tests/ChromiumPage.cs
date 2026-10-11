@@ -21,6 +21,12 @@ public sealed class ChromiumPage : IAsyncLifetime
 
     public IPage Page { get; private set; } = null!;
 
+    /// <summary>Whether the last <see cref="CaptureAsync"/> stopped at its node budget.</summary>
+    public bool Truncated { get; private set; }
+
+    /// <summary>How many nodes the last <see cref="CaptureAsync"/> counted against its budget.</summary>
+    public int NodeCount { get; private set; }
+
     public async Task InitializeAsync()
     {
         await WebEngine.EnsureChromiumAsync(headed: false, CancellationToken.None);
@@ -42,13 +48,18 @@ public sealed class ChromiumPage : IAsyncLifetime
         _playwright?.Dispose();
     }
 
-    /// <summary>The port's reader over the page: every node it lists, in document order, keyed by its ref.</summary>
-    public async Task<IReadOnlyList<ReadNode>> CaptureAsync()
+    /// <summary>
+    /// The port's reader over the page: every node it lists, in document order. <paramref name="budget"/> is the
+    /// most nodes the walk counts, as upstream's capture takes it.
+    /// </summary>
+    public async Task<IReadOnlyList<ReadNode>> CaptureAsync(int budget = ObservationLimits.Nodes)
     {
         // The next free ref carries over, as the engine's does, so a ref never names two elements.
-        var json = await Page.EvaluateAsync<string>(PageScript.Collect, new { seed = _nextRef, max = ObservationLimits.Nodes, testIdAttribute = "data-testid" });
+        var json = await Page.EvaluateAsync<string>(PageScript.Collect, new { seed = _nextRef, max = budget, testIdAttribute = "data-testid" });
         using var document = JsonDocument.Parse(json);
         _nextRef = document.RootElement.GetProperty("next").GetInt32();
+        Truncated = document.RootElement.GetProperty("truncated").GetBoolean();
+        NodeCount = document.RootElement.GetProperty("count").GetInt32();
         var nodes = new List<ReadNode>();
         Flatten(document.RootElement.GetProperty("roots"), nodes);
         return nodes;
@@ -80,6 +91,8 @@ public sealed class ChromiumPage : IAsyncLifetime
                 node.GetProperty("hidden").GetBoolean(),
                 node.GetProperty("ariaHidden").GetBoolean(),
                 node.GetProperty("selected").GetBoolean(),
+                node.GetProperty("checked").GetBoolean(),
+                node.GetProperty("disabled").GetBoolean(),
                 node.GetProperty("attributes").EnumerateObject().ToDictionary(attribute => attribute.Name, attribute => attribute.Value.GetString() ?? "", StringComparer.Ordinal),
                 rect.ValueKind == JsonValueKind.Null
                     ? null
@@ -105,6 +118,8 @@ public sealed record ReadNode(
     bool Hidden,
     bool AriaHidden,
     bool Selected,
+    bool Checked,
+    bool Disabled,
     IReadOnlyDictionary<string, string> Attributes,
     BoundingBox? Rect)
 {

@@ -55,6 +55,44 @@ public sealed class CheckedAndSelectedTests(ChromiumPage chromium) : IClassFixtu
         Assert.Equal(1, await chromium.Page.GetByRole(AriaRole.Button, new() { Name = "Label whole", Exact = true }).CountAsync());
     }
 
+    [Fact]
+    public async Task Reads_a_native_checkbox_radio_and_option_from_the_control_even_when_a_stale_aria_attribute_disagrees_as_Playwright_does()
+    {
+        await chromium.Page.SetContentAsync("""
+            <input type="checkbox" data-testid="stale-off" aria-checked="false" checked aria-label="Stale off">
+            <input type="checkbox" data-testid="stale-on" aria-checked="true" aria-label="Stale on">
+            <input type="radio" name="r" data-testid="radio-stale-off" aria-checked="false" checked aria-label="Radio stale off">
+            <input type="radio" name="r2" data-testid="radio-stale-on" aria-checked="true" aria-label="Radio stale on">
+            <input type="checkbox" data-testid="plain-on" checked aria-label="Plain on">
+            <input type="checkbox" data-testid="plain-off" aria-label="Plain off">
+            <div role="checkbox" aria-checked="true" data-testid="aria-on" tabindex="0">Aria on</div>
+            <div role="switch" aria-checked="false" data-testid="aria-off" tabindex="0">Aria off</div>
+            <select data-testid="select" aria-label="Plan" size="3">
+              <option data-testid="option-stale-off" aria-selected="false" selected>Team</option>
+              <option data-testid="option-stale-on" aria-selected="true">Solo</option>
+            </select>
+            <div role="tablist"><button role="tab" aria-selected="true" data-testid="tab">All</button></div>
+            """);
+        var nodes = await chromium.CaptureAsync();
+
+        Assert.True(Node(nodes, "stale-off").Checked);
+        Assert.False(Node(nodes, "stale-on").Checked);
+        Assert.True(Node(nodes, "radio-stale-off").Checked);
+        Assert.False(Node(nodes, "radio-stale-on").Checked);
+        Assert.True(Node(nodes, "plain-on").Checked);
+        Assert.False(Node(nodes, "plain-off").Checked);
+        Assert.True(Node(nodes, "aria-on").Checked);
+        Assert.False(Node(nodes, "aria-off").Checked);
+        Assert.True(Node(nodes, "option-stale-off").Selected);
+        Assert.False(Node(nodes, "option-stale-on").Selected);
+        Assert.True(Node(nodes, "tab").Selected);
+
+        foreach (var testId in new[] { "stale-off", "stale-on", "radio-stale-off", "radio-stale-on", "plain-on", "plain-off", "aria-on", "aria-off" })
+        {
+            Assert.True(Node(nodes, testId).Checked == await chromium.Page.GetByTestId(testId).IsCheckedAsync(), testId);
+        }
+    }
+
     private static ReadNode Node(IReadOnlyList<ReadNode> nodes, string testId)
     {
         return nodes.Single(node => node.TestId == testId);

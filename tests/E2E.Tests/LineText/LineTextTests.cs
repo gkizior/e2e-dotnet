@@ -73,7 +73,7 @@ public sealed class LineTextTests
     }
 
     [Fact]
-    public async Task Separates_words_at_block_children_line_breaks_and_form_controls_and_reads_no_hidden_inline_text()
+    public async Task Separates_words_at_block_children_line_breaks_and_form_controls_and_reads_no_display_none_or_hidden_visibility_inline_text()
     {
         // The label of a control is the control's name, not a node, so the form-control line is a div.
         var nodes = await ObserveAsync("""

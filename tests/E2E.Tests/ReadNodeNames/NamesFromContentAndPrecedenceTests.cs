@@ -65,7 +65,7 @@ public sealed class NamesFromContentAndPrecedenceTests(ChromiumPage chromium) : 
     }
 
     [Fact]
-    public async Task Keeps_an_embedded_controls_value_out_of_label_text_and_a_secure_fields_value_out_of_every_name()
+    public async Task Keeps_an_embedded_controls_value_out_of_the_getByLabel_match_and_a_secure_fields_value_out_of_every_name()
     {
         await chromium.Page.SetContentAsync("""
             <label for="qty">Qty <input value="5"> items</label><input id="qty" data-testid="label-for">
