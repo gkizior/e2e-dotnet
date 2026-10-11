@@ -45,6 +45,9 @@ public sealed class ModelMessage
     public string? ToolCallId { get; init; }
 
     public string? Name { get; init; }
+
+    /// <summary>The reasoning items the model returned with this turn, sent back as they came. Only <see cref="OpenAiResponsesModel"/> reads them.</summary>
+    public IReadOnlyList<JsonElement>? ReasoningItems { get; init; }
 }
 
 public sealed class ModelTool
@@ -79,6 +82,9 @@ public sealed class ModelResponse
     public IReadOnlyList<ModelToolCall> ToolCalls { get; init; } = [];
 
     public ModelUsage? Usage { get; init; }
+
+    /// <summary>The reasoning items of the turn that carry encrypted content, to replay on the next turn. Empty when the model gave none.</summary>
+    public IReadOnlyList<JsonElement> ReasoningItems { get; init; } = [];
 }
 
 /// <summary>Builds the tool calls a <see cref="ScriptedModel"/> (or a test) returns.</summary>

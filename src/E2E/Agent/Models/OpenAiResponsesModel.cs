@@ -60,6 +60,12 @@ public sealed class OpenAiResponsesModel : IAgentModel, IDisposable
         var input = new JsonArray();
         foreach (var message in request.Messages)
         {
+            // With storage off, the reasoning of an earlier turn travels inline, encrypted, ahead of what the turn said and called.
+            foreach (var item in message.ReasoningItems ?? [])
+            {
+                input.Add(Reasoning(item));
+            }
+
             if (message.ToolCalls is { Count: > 0 })
             {
                 if (!string.IsNullOrEmpty(message.Content))
@@ -117,6 +123,12 @@ public sealed class OpenAiResponsesModel : IAgentModel, IDisposable
             ["store"] = false,
         };
 
+        // A reasoning model hands its reasoning back encrypted only when asked. The AI SDK asks every model but the chat ones.
+        if (IsReasoningModel(_options.Model))
+        {
+            payload["include"] = new JsonArray("reasoning.encrypted_content");
+        }
+
         if (_options.PromptCacheHints)
         {
             payload["prompt_cache_key"] = request.System.Length == 0 && _options.SessionId is not null
@@ -126,6 +138,30 @@ public sealed class OpenAiResponsesModel : IAgentModel, IDisposable
 
         ModelHttp.MergeProviderOptions(payload, request, _options.Provider, "model", "input", "tools", "instructions");
         return payload;
+    }
+
+    private static bool IsReasoningModel(string model)
+    {
+        var id = model.Contains('/', StringComparison.Ordinal) ? model[(model.LastIndexOf('/') + 1)..] : model;
+        return !(id.StartsWith("gpt-3", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("gpt-4", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("chatgpt-4o", StringComparison.OrdinalIgnoreCase)
+            || id.StartsWith("gpt-5-chat", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static JsonObject Reasoning(JsonElement item)
+    {
+        var reasoning = new JsonObject { ["type"] = "reasoning" };
+        if (item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+        {
+            reasoning["id"] = id.GetString();
+        }
+
+        reasoning["encrypted_content"] = item.GetProperty("encrypted_content").GetString();
+        reasoning["summary"] = item.TryGetProperty("summary", out var summary) && summary.ValueKind == JsonValueKind.Array
+            ? JsonNode.Parse(summary.GetRawText())
+            : new JsonArray();
+        return reasoning;
     }
 
     private static JsonObject Text(string role, string text)
@@ -150,10 +186,19 @@ public sealed class OpenAiResponsesModel : IAgentModel, IDisposable
 
         var text = new List<string>();
         var calls = new List<ModelToolCall>();
+        var reasoning = new List<JsonElement>();
         foreach (var item in root.GetProperty("output").EnumerateArray())
         {
             var type = item.TryGetProperty("type", out var kind) ? kind.GetString() : null;
-            if (type == "function_call")
+            if (type == "reasoning")
+            {
+                // Without encrypted content the item cannot be replayed: its id means nothing to a backend that stored nothing.
+                if (item.TryGetProperty("encrypted_content", out var encrypted) && encrypted.ValueKind == JsonValueKind.String)
+                {
+                    reasoning.Add(item.Clone());
+                }
+            }
+            else if (type == "function_call")
             {
                 calls.Add(new ModelToolCall
                 {
@@ -184,7 +229,7 @@ public sealed class OpenAiResponsesModel : IAgentModel, IDisposable
             };
         }
 
-        return new ModelResponse { Content = text.Count == 0 ? null : string.Concat(text), ToolCalls = calls, Usage = usage };
+        return new ModelResponse { Content = text.Count == 0 ? null : string.Concat(text), ToolCalls = calls, Usage = usage, ReasoningItems = reasoning };
     }
 }
 
