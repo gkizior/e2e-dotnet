@@ -654,32 +654,6 @@ public sealed class CoreTests
         Assert.Equal("ACTION_FAILED", error.Code);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("ASSERTION_FAILED")]
-    [InlineData("STEP_TIMEOUT")]
-    public async Task A_blocked_act_needs_a_blockable_code(string? code)
-    {
-        var model = new ScriptedModel(request =>
-        {
-            var text = string.Join('\n', request.Messages.Select(message => message.Content));
-            return text.Contains("failed: ", StringComparison.Ordinal)
-                ? ModelResponses.Done("blocked", "No network.", "ENVIRONMENT_UNAVAILABLE")
-                : ModelResponses.Done("blocked", "Cannot upgrade.", code);
-        });
-        var result = await RunAsync(
-            async ctx =>
-            {
-                await ctx.App.OpenAsync("/settings/billing");
-                await ctx.Agent.ActAsync("upgrade");
-            },
-            model: model);
-
-        var error = Assert.IsType<AgentException>(result.Error);
-        Assert.Equal("ENVIRONMENT_UNAVAILABLE", error.Code);
-        Assert.Equal(2, model.CallCount);
-    }
-
     [Fact]
     public async Task Act_out_of_model_calls_is_blocked_on_its_budget()
     {

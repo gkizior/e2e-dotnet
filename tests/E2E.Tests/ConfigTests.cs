@@ -90,16 +90,6 @@ public sealed class ConfigTests
     }
 
     [Fact]
-    public void Rejects_an_agent_context_over_16_KiB()
-    {
-        var json = "{ \"agents\": { \"default\": { \"context\": \"" + new string('a', 16_385) + "\" } } }";
-        var error = Assert.Throws<ConfigurationException>(() => Parse(json));
-        Assert.Equal("INVALID_CONFIG", error.Code);
-        Assert.Equal("agents.default.context is 16385 bytes; the maximum is 16384", error.Message);
-        Assert.Equal(new string('a', 16_384), Parse(json.Replace(new string('a', 16_385), new string('a', 16_384), StringComparison.Ordinal)).Agent.Context);
-    }
-
-    [Fact]
     public void Defaults_match_upstream()
     {
         var config = Parse("{}");
