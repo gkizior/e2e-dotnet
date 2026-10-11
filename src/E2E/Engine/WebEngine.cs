@@ -949,21 +949,56 @@ public sealed partial class WebEngine : IEngine
             return Budget("title", cancellationToken).WithinAsync(Page.TitleAsync());
         });
 
-        public Task<System.Text.Json.JsonElement?> EvaluateAsync(string expression, object? arg, bool hasArg, CancellationToken cancellationToken) => RunAsync("evaluate", cancellationToken, async () =>
+        public Task<System.Text.Json.JsonElement?> EvaluateAsync(string expression, object? arg, bool hasArg, CancellationToken cancellationToken) => RunAsync<System.Text.Json.JsonElement?>("evaluate", cancellationToken, async () =>
         {
             var budget = Budget("evaluate", cancellationToken);
+            System.Text.Json.JsonElement? outcome;
             try
             {
-                var call = hasArg
-                    ? Page.EvaluateAsync<System.Text.Json.JsonElement?>(expression, arg)
-                    : Page.EvaluateAsync<System.Text.Json.JsonElement?>(expression);
-                return await budget.WithinAsync(call).ConfigureAwait(false);
+                outcome = await budget.WithinAsync(Page.EvaluateAsync<System.Text.Json.JsonElement?>(EvaluationBoundary(expression, hasArg), arg)).ConfigureAwait(false);
             }
-            catch (PlaywrightException ex)
+            catch (PlaywrightException ex) when (ex.Message.StartsWith("SyntaxError", StringComparison.Ordinal))
             {
                 throw new TestException("EVALUATE_FAILED", PageMessage(ex), ex);
             }
+            catch (PlaywrightException ex)
+            {
+                // A failure of the browser, not of the page code: the page code's own exceptions come back as a result.
+                throw WebErrors.Translate(ex, "evaluate");
+            }
+            catch (ArgumentException ex)
+            {
+                // Playwright cannot carry a result that is not JSON, such as Infinity or NaN.
+                throw new TestException("INVALID_ARGUMENT", "evaluate argument or result is not JSON: " + ex.Message, ex);
+            }
+
+            var result = outcome!.Value;
+            if (result.GetProperty("ok").GetBoolean())
+            {
+                return result.TryGetProperty("value", out var value) ? value : default(System.Text.Json.JsonElement?);
+            }
+
+            throw new TestException("EVALUATE_FAILED", result.GetProperty("message").GetString()!);
         });
+
+        // One expression: a function it evaluates to is called with the argument, any other value is the result.
+        // The page code runs inside a try, so an exception it throws comes back as data, apart from the browser's own failures.
+        private static string EvaluationBoundary(string expression, bool hasArg) => $$"""
+            async (arg) => {
+              try {
+                return { ok: true, value: await ((result) => typeof result === 'function' ? result({{(hasArg ? "arg" : "")}}) : result)(({{expression}}
+            )) };
+              } catch (cause) {
+                let message;
+                try {
+                  message = typeof cause?.message === 'string' ? cause.message : String(cause);
+                } catch {
+                  message = 'Page evaluation threw an unprintable value';
+                }
+                return { ok: false, message };
+              }
+            }
+            """;
 
         // What the page code threw, without the stack Playwright appends or the "Error: " it prefixes to an Error's message.
         private static string PageMessage(PlaywrightException ex)
@@ -1206,10 +1241,10 @@ public sealed partial class WebEngine : IEngine
                 return [];
             }
 
-            string json;
+            System.Text.Json.JsonElement json;
             try
             {
-                json = await budget.WithinAsync(frame.EvaluateAsync<string>(PageScript.Collect, new { seed = _nextRef, max = walk.Remaining, testIdAttribute = _testIdAttribute })).ConfigureAwait(false);
+                json = await budget.WithinAsync(frame.EvaluateAsync<System.Text.Json.JsonElement>(PageScript.Collect, new { seed = _nextRef, max = walk.Remaining, testIdAttribute = _testIdAttribute })).ConfigureAwait(false);
             }
             catch (PlaywrightException) when (frame != _page?.MainFrame)
             {

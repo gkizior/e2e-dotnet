@@ -37,44 +37,84 @@ public sealed class VisibilityAgreesWithPlaywrightTests(ChromiumPage chromium) :
         </body></html>
         """;
 
+    // Not ported: "a zero-size box with clipped content" (#zero). The tree's one hidden state is also
+    // what role queries skip, so it leaves out a box with no size (see the aria-hidden rows below).
+
     [Fact]
-    public async Task Agrees_with_Playwright_on_each_case()
+    public Task An_SVG_with_visibility_hidden() => AgreesAsync("svg-hidden", true);
+
+    [Fact]
+    public Task A_shown_SVG() => AgreesAsync("svg-shown", false);
+
+    [Fact]
+    public Task The_button_clipped_inside_a_zero_size_box_which_keeps_a_box_of_its_own() => AgreesAsync("zero-button", false);
+
+    [Fact]
+    public Task A_sized_box() => AgreesAsync("sized", false);
+
+    [Fact]
+    public Task A_button_inside_closed_details() => AgreesAsync("in-closed", true);
+
+    [Fact]
+    public Task The_summary_of_closed_details() => AgreesAsync("closed-summary", false);
+
+    [Fact]
+    public Task A_button_inside_open_details() => AgreesAsync("in-open", false);
+
+    [Fact]
+    public Task Open_details_nested_in_the_body_of_closed_details() => AgreesAsync("nested", true);
+
+    [Fact]
+    public Task The_summary_of_details_nested_in_closed_details() => AgreesAsync("nested-summary", true);
+
+    [Fact]
+    public Task A_button_inside_open_details_nested_in_closed_details() => AgreesAsync("in-nested", true);
+
+    [Fact]
+    public Task An_empty_display_contents_element() => AgreesAsync("contents-empty", true);
+
+    [Fact]
+    public Task A_display_contents_element_whose_only_child_is_hidden() => AgreesAsync("contents-hidden-child", true);
+
+    [Fact]
+    public Task A_display_contents_element_with_a_painted_child() => AgreesAsync("contents-painted", false);
+
+    [Fact]
+    public Task A_display_contents_element_with_bare_text() => AgreesAsync("contents-text", false);
+
+    [Fact]
+    public Task A_hidden_display_contents_element_whose_child_inherits_it() => AgreesAsync("contents-hidden-element", true);
+
+    [Fact]
+    public Task A_hidden_display_contents_element_whose_child_is_visible_again() => AgreesAsync("contents-shown-child", false);
+
+    [Fact]
+    public Task An_aria_hidden_spinner_that_paints() => AgreesAsync("spinner", false);
+
+    [Fact]
+    public Task A_button_under_an_aria_hidden_container() => AgreesAsync("under-aria-hidden", false);
+
+    [Fact]
+    public Task A_content_visibility_hidden_element_which_keeps_its_box() => AgreesAsync("skipping", false);
+
+    [Fact]
+    public Task A_button_content_visibility_hidden_skips() => AgreesAsync("skipped", true);
+
+    [Fact]
+    public Task A_button_slotted_under_a_content_visibility_hidden_host() => AgreesAsync("skipped-slotted", true);
+
+    [Fact]
+    public Task A_visibility_hidden_parent() => AgreesAsync("vis-parent", true);
+
+    [Fact]
+    public Task A_child_that_sets_visibility_visible_under_a_hidden_parent() => AgreesAsync("vis-child", false);
+
+    private async Task AgreesAsync(string testId, bool hidden)
     {
         await chromium.Page.SetContentAsync(Html);
-        var cases = new (string Case, string TestId, bool Hidden)[]
-        {
-            ("an SVG with visibility: hidden", "svg-hidden", true),
-            ("a shown SVG", "svg-shown", false),
-            // Not ported: "a zero-size box with clipped content" (#zero). The tree's one hidden state is also
-            // what role queries skip, so it leaves out a box with no size (see the aria-hidden rows below).
-            ("the button clipped inside a zero-size box, which keeps a box of its own", "zero-button", false),
-            ("a sized box", "sized", false),
-            ("a button inside closed details", "in-closed", true),
-            ("the summary of closed details", "closed-summary", false),
-            ("a button inside open details", "in-open", false),
-            ("open details nested in the body of closed details", "nested", true),
-            ("the summary of details nested in closed details", "nested-summary", true),
-            ("a button inside open details nested in closed details", "in-nested", true),
-            ("an empty display: contents element", "contents-empty", true),
-            ("a display: contents element whose only child is hidden", "contents-hidden-child", true),
-            ("a display: contents element with a painted child", "contents-painted", false),
-            ("a display: contents element with bare text", "contents-text", false),
-            ("a hidden display: contents element whose child inherits it", "contents-hidden-element", true),
-            ("a hidden display: contents element whose child is visible again", "contents-shown-child", false),
-            ("an aria-hidden spinner that paints", "spinner", false),
-            ("a button under an aria-hidden container", "under-aria-hidden", false),
-            ("a content-visibility: hidden element, which keeps its box", "skipping", false),
-            ("a button content-visibility: hidden skips", "skipped", true),
-            ("a button slotted under a content-visibility: hidden host", "skipped-slotted", true),
-            ("a visibility: hidden parent", "vis-parent", true),
-            ("a child that sets visibility: visible under a hidden parent", "vis-child", false),
-        };
-        foreach (var (name, testId, hidden) in cases)
-        {
-            var locator = chromium.Page.GetByTestId(testId);
-            var reader = (await chromium.ReadAsync(locator))?.Hidden;
-            var byPlaywright = await locator.IsHiddenAsync();
-            Assert.True(reader == hidden && byPlaywright == hidden, $"{name}: reader {reader}, Playwright {byPlaywright}");
-        }
+        var locator = chromium.Page.GetByTestId(testId);
+        var reader = (await chromium.ReadAsync(locator))?.Hidden;
+        var byPlaywright = await locator.IsHiddenAsync();
+        Assert.Equal((hidden, hidden), (reader, byPlaywright));
     }
 }

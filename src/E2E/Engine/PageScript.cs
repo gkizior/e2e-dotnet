@@ -706,8 +706,18 @@ internal static class PageScript
             return out;
           };
           // How many nodes the walk would list, or only those on screen. Text-only nodes are not counted.
+          // Chrome drops an inert subtree from its accessibility tree, and so does the walk. A slotted
+          // element is inert when a shadow ancestor of its slot is, which a closed root hides from assignedSlot.
+          const isInert = (el) => {
+            if (el.inert) return true;
+            const shadow = el.parentElement && shadowOf(el.parentElement);
+            const name = el.getAttribute("slot");
+            const slot = shadow?.querySelector(name ? `slot[name="${CSS.escape(name)}"]` : "slot:not([name])");
+            for (let node = slot; node && node !== shadow; node = node.parentNode) if (node.inert) return true;
+            return false;
+          };
           const tally = (el, visible) => {
-            if (!el || skip.has(el.tagName)) return 0;
+            if (!el || skip.has(el.tagName) || isInert(el)) return 0;
             if (el.tagName === "IFRAME" && (ariaHidden(el) || hidden(el))) return 0;
             let n = 0;
             const role = roleOf(el);
@@ -727,7 +737,7 @@ internal static class PageScript
           // parentAria is whether an ancestor is aria-hidden: the node paints
           // and is visible, but the accessibility tree drops it.
           const walk = (el, into, parentHidden, parentAria) => {
-            if (!el || skip.has(el.tagName) || full) return;
+            if (!el || skip.has(el.tagName) || isInert(el) || full) return;
             const style = getComputedStyle(el);
             const isHidden = !!parentHidden || hidden(el, style);
             const isAriaHidden = !!parentAria || ariaHidden(el);
@@ -828,14 +838,16 @@ internal static class PageScript
           document.adoptedStyleSheets = [...sheets, plain];
           let truncated;
           try {
-            truncated = !!document.body && tally(document.body, false) > max;
-            if (truncated) offBudget = Math.max(0, max - tally(document.body, true));
-            if (document.body) walk(document.body, roots, false, false);
+            const body = document.documentElement.inert ? null : document.body;
+            truncated = !!body && tally(body, false) > max;
+            if (truncated) offBudget = Math.max(0, max - tally(body, true));
+            if (body) walk(body, roots, false, false);
           } finally {
             document.adoptedStyleSheets = sheets;
           }
           window[Symbol.for("e2e.observation.elements")] = elements;
-          return JSON.stringify({ next, count, truncated: truncated || full || textCut, scroll, roots });
+          // The object itself, not JSON.stringify of it: the application may have replaced that, or added a toJSON.
+          return { next, count, truncated: truncated || full || textCut, scroll, roots };
         }
         """;
 
