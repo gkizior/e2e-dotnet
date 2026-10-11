@@ -73,14 +73,41 @@ public sealed class EngineErrorTests
     }
 
     [Fact]
-    public void Navigation_and_reads_map_to_engine_codes()
+    public async Task Chromium_reports_engine_codes_instead_of_playwright_errors()
     {
-        Assert.Equal("OPERATION_TIMEOUT", WebErrors.Translate(new System.TimeoutException("Timeout 5000ms exceeded."), "navigate to /").Code);
-        Assert.Equal("ENGINE_FAILURE", WebErrors.Translate(new PlaywrightException("net::ERR_CONNECTION_REFUSED"), "navigate to /").Code);
+        using var site = await TinySite.StartAsync("""
+            <!DOCTYPE html>
+            <html><body><button type="button" disabled>Save</button></body></html>
+            """);
+        var session = await new WebEngine(headless: true).StartAsync(new EngineStartOptions { ActionTimeout = TimeSpan.FromMilliseconds(500) }, CancellationToken.None);
 
-        var stale = WebErrors.NavigationStaleOr(new PlaywrightException("Execution context was destroyed, most likely because of a navigation"), "observe");
-        Assert.Equal("NODE_STALE", stale.Code);
-        Assert.True(stale.Retryable);
-        Assert.Equal("ENGINE_FAILURE", WebErrors.NavigationStaleOr(new PlaywrightException("boom"), "observe").Code);
+        await using (session)
+        {
+            await session.OpenAsync(site.Url, CancellationToken.None);
+            var observation = await session.ObserveAsync(CancellationToken.None);
+            var button = Flatten(observation.Roots).First(node => node.Role == "button");
+
+            var blocked = await Assert.ThrowsAsync<EngineException>(() => session.PerformAsync(button, new LocatorAction.Tap(), CancellationToken.None));
+            Assert.Equal("NOT_ACTIONABLE", blocked.Code);
+
+            var missing = new SemanticNode { Ref = "e9999", Role = "button" };
+            var stale = await Assert.ThrowsAsync<EngineException>(() => session.PerformAsync(missing, new LocatorAction.Tap(), CancellationToken.None));
+            Assert.Equal("NODE_STALE", stale.Code);
+
+            var unreachable = await Assert.ThrowsAsync<EngineException>(() => session.OpenAsync("http://127.0.0.1:1/", CancellationToken.None));
+            Assert.Equal("ENGINE_FAILURE", unreachable.Code);
+        }
+    }
+
+    private static IEnumerable<SemanticNode> Flatten(IEnumerable<SemanticNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            foreach (var child in Flatten(node.Children))
+            {
+                yield return child;
+            }
+        }
     }
 }

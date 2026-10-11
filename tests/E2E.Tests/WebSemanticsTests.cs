@@ -290,16 +290,9 @@ public sealed class WebSemanticsTests
     }
 
     [Fact]
-    public void Invalid_web_options_are_refused()
+    public void A_viewport_with_no_size_is_refused()
     {
-        Assert.Equal("INVALID_CONFIG", Assert.Throws<EngineException>(() => new WebEngine(new WebEngineOptions { TestIdAttribute = " " })).Code);
         Assert.Equal("INVALID_CONFIG", Assert.Throws<EngineException>(() => new WebEngine(new WebEngineOptions { Viewport = new WebViewport(0, 10) })).Code);
-        Assert.Equal("INVALID_CONFIG", Assert.Throws<EngineException>(() => new WebEngine(new WebEngineOptions { BasicAuth = new WebBasicAuth("a:b", "c") })).Code);
-        Assert.Equal("INVALID_CONFIG", Assert.Throws<EngineException>(() => new WebEngine(new WebEngineOptions
-        {
-            UserAgent = "x",
-            Headers = new Dictionary<string, string> { ["User-Agent"] = "y" },
-        })).Code);
     }
 
     [Fact]

@@ -122,6 +122,11 @@ public sealed class AttemptSessionTests
         current.Pages.Add(active.Page);
         await using var owner = await Engine(followWindow: true).StartAsync(Start(), None);
         var browser = (IBrowserSession)owner;
+
+        // Not ported: 390.5x600. A fractional pixel cannot be passed as an int.
+        var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => browser.SetViewportAsync(390, -1, None));
+        Assert.Contains("whole, non-negative pixels, got 390x-1", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(active.ViewportCalls);
         await browser.SetViewportAsync(390, 600, None);
         Assert.Empty(active.ViewportCalls);
         await owner.OpenAsync(Url, None);
