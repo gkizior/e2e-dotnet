@@ -2037,6 +2037,7 @@ internal sealed class AttemptScope
 {
     private readonly Dictionary<string, int> _callIndexes = new(StringComparer.Ordinal);
     private readonly List<Secret> _secrets = [];
+    private readonly List<(string Name, string Value)> _registered = [];
     private Built? _redactor;
 
     /// <summary>
@@ -2126,8 +2127,8 @@ internal sealed class AttemptScope
     public IReadOnlyList<Secret> Secrets => _secrets;
 
     /// <summary>
-    /// The redactor for <see cref="Secrets"/>, rebuilt only when <see cref="Remember"/>
-    /// has added a secret since the last build: building one costs time linear in
+    /// The redactor for <see cref="Secrets"/> and the values <see cref="Register"/> took, rebuilt only when
+    /// <see cref="Remember"/> or <see cref="Register"/> has added one since the last build: building one costs time linear in
     /// the values' length, so a long value must not pay it on every snapshot.
     /// </summary>
     public Redactor Redactor
@@ -2135,13 +2136,13 @@ internal sealed class AttemptScope
         get
         {
             var built = _redactor;
-            if (built is not null && built.Count == _secrets.Count)
+            var count = _secrets.Count + _registered.Count;
+            if (built is not null && built.Count == count)
             {
                 return built.Redactor;
             }
 
-            var secrets = _secrets.ToArray();
-            built = new Built(Redactor.For(secrets), secrets.Length);
+            built = new Built(Redactor.For(_secrets.Select(secret => (secret.Name, secret.Value)).Concat(_registered).ToArray()), count);
             _redactor = built;
             return built.Redactor;
         }
@@ -2209,6 +2210,18 @@ internal sealed class AttemptScope
             {
                 _secrets.Add(secret);
             }
+        }
+    }
+
+    /// <summary>
+    /// Registers one value under a name for redaction alone, as the redaction ledger does: it is not a secret
+    /// the agent may fill, and it does not withhold pixels. An earlier value for the name keeps redacting.
+    /// </summary>
+    public void Register(string name, string value)
+    {
+        if (!_registered.Contains((name, value)))
+        {
+            _registered.Add((name, value));
         }
     }
 
