@@ -55,7 +55,7 @@ await Agent.ActAsync("sign in with the given credentials", new ActOptions
 pass returns an `ActResult` with `Summary`, `ModelCalls`, `Actions`, and
 `Cache` (the replay cache's part). A failed or blocked step throws an
 `AgentException` whose `Code` says why: `ACTION_FAILED` (product failure);
-`STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` (out of room);
+`STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT`, `CONTEXT_OVERFLOW` (out of room);
 `AUTH_CREDENTIAL_UNAVAILABLE`, `AUTH_CREDENTIAL_INVALID`,
 `SECRET_UNAVAILABLE`, `ENVIRONMENT_UNAVAILABLE`, `SEED_DATA_MISSING`,
 `TEST_SETUP_FAILED`, `AUTOMATION_UNSUPPORTED`, `POLICY_DENIED` (blocked from

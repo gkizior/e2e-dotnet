@@ -40,7 +40,8 @@ internal static class ModelHttp
 
     /// <summary>
     /// Sends <paramref name="message"/> and returns the body of a successful answer. A timeout, an unreachable
-    /// host, or an error status fails with <c>MODEL_PROVIDER_FAILED</c>. The failure names the HTTP status and
+    /// host, or an error status fails with <c>MODEL_PROVIDER_FAILED</c>, or with a blocked <c>CONTEXT_OVERFLOW</c>
+    /// when the provider says the request was too large. The failure names the HTTP status and
     /// the body, redacted with <paramref name="redactor"/> and cut at 1 KB.
     /// </summary>
     public static async Task<string> SendAsync(HttpClient http, HttpRequestMessage message, Redactor redactor, CancellationToken cancellationToken)
@@ -70,11 +71,26 @@ internal static class ModelHttp
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                throw new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed: " + FailureText(response, body, redactor));
+                var failure = FailureText(response, body, redactor);
+                // A request too big is not an outage: the step's observations are what must shrink, and the code says so.
+                if (ContextOverflow.Describes((int)response.StatusCode, null, body))
+                {
+                    throw new AgentException("CONTEXT_OVERFLOW", "The model request exceeded the context window: " + failure, blocked: true);
+                }
+
+                throw new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed: " + failure);
             }
 
             return body;
         }
+    }
+
+    /// <summary>The failure of a response the provider answered 200 and then failed: a blocked <c>CONTEXT_OVERFLOW</c> when it says the request was too large.</summary>
+    public static AgentException ResponseFailed(string error)
+    {
+        return ContextOverflow.Describes(null, error, null)
+            ? new AgentException("CONTEXT_OVERFLOW", "The model request exceeded the context window: " + error, blocked: true)
+            : new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed the response. " + error);
     }
 
     /// <summary>

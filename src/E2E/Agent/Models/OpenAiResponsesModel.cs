@@ -41,7 +41,7 @@ public sealed class OpenAiResponsesModel : IAgentModel, IDisposable
         var folded = ResponsesStream.Fold(body);
         if (folded.Error is not null)
         {
-            throw new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed the response. " + folded.Error);
+            throw ModelHttp.ResponseFailed(folded.Error);
         }
 
         return ModelHttp.Parse(folded.Body, Parse);
@@ -145,7 +145,7 @@ public sealed class OpenAiResponsesModel : IAgentModel, IDisposable
     {
         if (root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
         {
-            throw new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed the response. " + error.GetRawText());
+            throw ModelHttp.ResponseFailed(error.GetRawText());
         }
 
         var text = new List<string>();
