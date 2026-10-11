@@ -107,9 +107,22 @@ internal static class FixtureApp
         </html>
         """;
 
+    // A heading with a level and a toggle button that reports aria-pressed.
+    public const string Pointer = """
+        <!doctype html>
+        <html>
+        <head><title>Fixture Pointer</title></head>
+        <body style="margin:0">
+        <h2>Pointer</h2>
+        <button id="toggle" aria-pressed="false" onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true')">Mute</button>
+        </body>
+        </html>
+        """;
+
     private static readonly Dictionary<string, string> Pages = new(StringComparer.Ordinal)
     {
         ["/"] = Home,
+        ["/pointer"] = Pointer,
         ["/form"] = Form,
         ["/values"] = Values,
         ["/contents"] = Contents,

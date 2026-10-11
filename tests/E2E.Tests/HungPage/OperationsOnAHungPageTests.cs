@@ -19,6 +19,19 @@ namespace E2E.Tests.HungPage;
 public sealed class OperationsOnAHungPageTests
 {
     [Fact]
+    public async Task Ends_a_title_assertion_on_a_stuck_page_at_its_own_timeout()
+    {
+        using var site = await TinySite.StartAsync(BusyPage);
+        await using var session = await StartAsync();
+        await FreezeAsync(session, site);
+        var browser = new Browser(session, "web", site.Url, Directory.GetCurrentDirectory(), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(1), () => CancellationToken.None, () => { }, new SoftFailures());
+
+        var title = await BoundedAsync(() => new BrowserExpect(browser, negated: false).ToHaveTitleAsync("Other", timeout: TimeSpan.FromSeconds(1)));
+
+        Assert.Equal("OPERATION_TIMEOUT", title.Code);
+    }
+
+    [Fact]
     public async Task Times_out_a_navigation_to_a_server_that_never_answers()
     {
         using var site = await TinySite.StartAsync(_ => Task.Delay(Timeout.Infinite));

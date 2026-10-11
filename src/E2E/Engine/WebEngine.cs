@@ -599,6 +599,12 @@ public sealed partial class WebEngine : IEngine
             context.HttpCredentials = new HttpCredentials { Username = auth.Username, Password = auth.Password };
         }
 
+        // Routing never sees a service worker's requests, so a worker would skip the headers.
+        if (options.Headers is not null)
+        {
+            context.ServiceWorkers = ServiceWorkerPolicy.Block;
+        }
+
         return context;
     }
 
