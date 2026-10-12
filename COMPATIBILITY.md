@@ -14,7 +14,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 | `e2e.config.ts` | `e2e.config.json`, the same keys as JSON. `E2ETest` finds and applies it; fixture properties override it |
 | Vercel AI SDK model | `OpenAiCompatibleModel`, `OpenAiResponsesModel`, `AnthropicModel`, `GoogleModel`, and `BedrockModel`, built from `provider` in JSON or `ModelProviders` in code. See [Models](#models) |
 | `e2e/oauth/chatgpt`, `copilot`, `grok`, `opencode-console` | `E2E.OAuth.Subscriptions` |
-| `e2e login`, `e2e logout`, `e2e models`, `e2e guide`, `e2e mcp` | `E2E.Cli`, a .NET tool whose command is `e2e`. `e2e guide [topic]` prints the bundled skill, as upstream; an unknown topic exits 2. `e2e mcp` is ported apart from video, project tools, and `e2e init`: see [MCP server](#mcp-server) |
+| `e2e login`, `e2e logout`, `e2e models`, `e2e guide`, `e2e mcp`, `e2e-web install` | `E2E.Cli`, a .NET tool whose command is `e2e`. `e2e guide [topic]` prints the bundled skill, as upstream; an unknown topic exits 2. `e2e-web install` is `e2e install`: see [Browser install command](#browser-install-command). `e2e mcp` is ported apart from video, project tools, and `e2e init`: see [MCP server](#mcp-server) |
 | — | `DocumentEngine`, an in-memory page for hosts that do not want a browser |
 
 ## Ported
@@ -118,6 +118,19 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - Value expectations (`expect(value).toBe`, `toEqual`, `toMatchObject`, `toHaveProperty`, `toMatchSchema`, and the rest) and their `expect.soft` form. Use NUnit `Assert.That` with constraints, and `Assert.EnterMultipleScope` (or `Assert.Multiple`) for soft value checks. `expect.poll` takes NUnit constraints through `ToMatchAsync` in their place
 - Asymmetric matchers (`expect.any`, `anything`, `objectContaining`, `arrayContaining`, `stringContaining`, `stringMatching`). Use NUnit constraints such as `Is.InstanceOf`, `Is.Not.Null`, `Has.Property`, `Is.SupersetOf`, `Does.Contain`, and `Does.Match`
 - The upstream reporter, GitHub pull request comment, and trace viewer
+
+## Browser install command
+
+Upstream's `e2e-web` command (`packages/web/src/cli.ts`) has one subcommand, `install`. It runs the pinned Playwright CLI. The port has it as `e2e install [chromium|firefox|webkit ...] [--with-deps]`, in the tool that already ships the Playwright driver. It installs Chromium when no browser is named, forwards the options before the browsers, exits with the Playwright code, prints usage for `-h` or `--help` anywhere, and exits 2 for an unknown option or browser. As upstream, the install runs with `PLAYWRIGHT_SKIP_BROWSER_GC=1` unless the user set it. The engine itself drives Chromium only.
+
+Upstream's command lives in the web package (`e2e-web`, from `@e2e-dev/web`), apart from the `e2e` command. The port is one tool, and `WebEngine` is in the `E2E` package, so the command is `e2e install` in `E2E.Cli`, the one place the Playwright driver ships. The code follows upstream's split: `E2eWebCli.MainAsync` is `main` and `CliIo` is its `CliIo` (`E2eWebCli` is named for the command; a method called `Main` would be taken for an entry point), `WebEngine.RunPlaywrightCli` is `runPlaywrightCli`, and `BrowserConnection.BrowserNames` and `IsBrowserName` are `BROWSER_NAMES` and `isBrowserName`.
+
+Not ported:
+
+- A command named `e2e-web`, and `npx`, `bunx`, and `pnpm exec` usage lines. `dotnet e2e install` is the local tool form.
+- Upstream's exit code 2 for a missing or unknown command. `e2e` exits 1 for both, as it does for every command.
+- Forwarding SIGINT and SIGTERM to the installer and the 128-plus-signal exit code. `Microsoft.Playwright.Program.Main` runs in this process. Ctrl+C in a terminal reaches its driver in the same process group; a SIGTERM sent to `e2e` alone does not.
+- `install.test.ts` (`ensureBrowsersInstalled`) is the first-launch install of the engine, not the command. The port covers it in `E2E.Tests/Install`, and upstream's own checks of the installed-browser cache and of the run's environment have no counterpart: the port leaves that to Playwright's install (see [Web engine](#web-engine)).
 
 ## MCP server
 

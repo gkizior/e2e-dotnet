@@ -9,6 +9,15 @@ namespace E2E.Engine;
 /// <summary>The browser connection, as upstream <c>browser-connection.ts</c>: every CDP attach goes through one bounded dial.</summary>
 internal static class BrowserConnection
 {
+    /// <summary>Every browser Playwright installs, in the order the CLI lists them (upstream <c>BROWSER_NAMES</c>). The engine launches Chromium only.</summary>
+    public static readonly IReadOnlyList<string> BrowserNames = ["chromium", "firefox", "webkit"];
+
+    /// <summary>Whether <paramref name="name"/> is a browser Playwright installs (upstream <c>isBrowserName</c>).</summary>
+    public static bool IsBrowserName(string name)
+    {
+        return BrowserNames.Contains(name);
+    }
+
     /// <summary>
     /// Attaches to a Chromium over CDP, failing once <paramref name="timeout"/> passes
     /// without an answer instead of holding the caller.

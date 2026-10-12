@@ -379,9 +379,19 @@ public sealed partial class WebEngine : IEngine
     /// </summary>
     internal static int RunChromiumInstall(bool headed, Func<string[], int> install)
     {
+        return RunPlaywrightCli(["install", .. InstallArgs(headed)], install);
+    }
+
+    /// <summary>
+    /// Runs the Playwright CLI with <paramref name="args"/> and returns its exit code (upstream <c>runPlaywrightCli</c>), keeping
+    /// other tools' browsers as <see cref="RunChromiumInstall"/> does. <paramref name="playwright"/> is a test seam.
+    /// Upstream spawns <c>node cli.js</c> and forwards SIGINT and SIGTERM to it; <c>Program.Main</c> runs in this process.
+    /// </summary>
+    internal static int RunPlaywrightCli(string[] args, Func<string[], int>? playwright = null)
+    {
         // Program.Main starts the driver with this process's environment, so the value is set on the process.
         Environment.SetEnvironmentVariable(SkipBrowserGcVariable, Environment.GetEnvironmentVariable(SkipBrowserGcVariable) ?? "1");
-        return install(["install", .. InstallArgs(headed)]);
+        return (playwright ?? Microsoft.Playwright.Program.Main)(args);
     }
 
     internal static async Task EnsureChromiumAsync(bool headed, CancellationToken cancellationToken)

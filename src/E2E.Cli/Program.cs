@@ -13,7 +13,7 @@ namespace E2E.Cli;
 /// <summary>
 /// <c>e2e login</c>, <c>e2e logout</c>, and <c>e2e models</c>: upstream's subscription commands. Logins go to the
 /// credentials file upstream's CLI uses, so a login made with either one serves both. <c>e2e guide</c> prints
-/// the bundled skill, and <c>e2e mcp</c> serves a coding agent over MCP.
+/// the bundled skill, <c>e2e install</c> installs browsers, and <c>e2e mcp</c> serves a coding agent over MCP.
 /// </summary>
 public static class Program
 {
@@ -23,7 +23,10 @@ public static class Program
           e2e logout [provider]
           e2e models [provider]
           e2e guide [topic]
+          e2e install [chromium|firefox|webkit ...] [--with-deps]
           e2e mcp [--config <path>] [--target <name>] [--headed] [--max-sessions <n>]
+
+        e2e install downloads browsers for the Playwright version E2E runs. It installs chromium when no browser is named.
 
         Providers:
           openai            ChatGPT Plus/Pro, the Codex sign-in (--device for a machine without a browser)
@@ -74,6 +77,11 @@ public static class Program
         if (args[0] == "mcp")
         {
             return await McpAsync(args.Skip(1), stdout, stderr, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (args[0] == "install")
+        {
+            return await E2eWebCli.MainAsync(args[1..], new CliIo(stdout, stderr, forwarded => E2E.Engine.WebEngine.RunPlaywrightCli(forwarded))).ConfigureAwait(false);
         }
 
         var (positional, flags) = Parse(args.Skip(1));
