@@ -1,0 +1,12 @@
+{
+  "actionTimeout": 15000,
+  "assertionTimeout": 10000,
+  "agents": {
+    "default": {
+      "model": "claude-sonnet-5.5",
+      "provider": "copilot",
+      "context": "MobileApp is a small demo app with two parts. A greeting form: type a name, press Greet, and the app says hello. A counter: press Add one and the count goes up."
+    }
+  },
+  "cache": { "dir": ".e2e/cache" }
+}

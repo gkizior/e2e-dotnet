@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MobileApp.MainPage">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="24,48" Spacing="16">
+            <Label
+                Text="Say hello"
+                Style="{StaticResource Headline}"
+                HorizontalOptions="Start"
+                SemanticProperties.HeadingLevel="Level1" />
+
+            <Label
+                Text="Type a name and the app greets you."
+                Style="{StaticResource SubHeadline}"
+                HorizontalOptions="Start" />
+
+            <!-- AutomationId is the accessibility identifier on iOS. It is what GetByTestId finds. -->
+            <Entry
+                x:Name="NameEntry"
+                AutomationId="name"
+                Placeholder="Ada Lovelace"
+                SemanticProperties.Description="Name"
+                Completed="OnGreetClicked" />
+
+            <Button
+                AutomationId="greet"
+                Text="Greet"
+                Clicked="OnGreetClicked" />
+
+            <Label
+                x:Name="ErrorLabel"
+                AutomationId="error"
+                Text="Enter a name first."
+                TextColor="DarkOrange"
+                IsVisible="False" />
+
+            <Label
+                x:Name="GreetingLabel"
+                AutomationId="greeting"
+                FontSize="18"
+                IsVisible="False" />
+
+            <BoxView HeightRequest="1" Color="Gray" />
+
+            <Label
+                x:Name="CounterLabel"
+                AutomationId="counter"
+                Text="Count: 0"
+                FontSize="18" />
+
+            <Button
+                AutomationId="increment"
+                Text="Add one"
+                Clicked="OnIncrementClicked" />
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

@@ -154,7 +154,9 @@ To test without a browser or model, override `CreateEngine()` to return a
 
 ## Mobile targets
 
-Not ported. There is no device engine.
+iOS and Android are driven by `MobileEngine` in the `E2E.Mobile` project (not on NuGet yet). `e2e.config.json` supports only `"platform": "web"`, so a mobile fixture overrides `CreateEngine()` and returns a `MobileEngine` with `MobileOptions` (`Platform`, `Device`, and `App` with `BundleId` and `AppPath`). The `agents`, `cache`, and timeout settings still come from the config. A device target has no URL: launch the app with `Device.OpenAppAsync(bundleId, new OpenAppOptions { Relaunch = true })` instead of `App.OpenAsync()`, and reach the `Device` fixture through `engine.ActiveSessions`.
+
+agent-device needs Node 22.12 or newer, and a booted simulator or emulator. `samples/MobileApp.E2ETests` is a working example, with a MAUI app to drive. Agent steps on a device are slower, so raise `StepTimeout` (90 seconds works). The tests need a device, so keep them out of the CI run, for example with the `RealModel` category.
 
 ## Done when
 

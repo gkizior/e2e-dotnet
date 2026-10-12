@@ -1,0 +1,3 @@
+<Project>
+  <!-- A MAUI app is not part of the packable libraries. Skip the repo-wide strict build settings and MinVer. -->
+</Project>

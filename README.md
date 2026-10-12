@@ -210,6 +210,8 @@ Runs are headless. To watch a run in a browser window, set `E2E_HEADLESS=0`, for
 
 [`samples/TodoMvc`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/TodoMvc) ports Playwright's TodoMVC example to agent steps, using the NuGet packages. Its README compares the two.
 
+[`samples/MobileApp`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/MobileApp) is a small .NET MAUI app, and [`samples/MobileApp.E2ETests`](https://github.com/hardkoded/e2e-dotnet/tree/main/samples/MobileApp.E2ETests) drives it on an iOS simulator or Android emulator with `MobileEngine`. Its README lists the prerequisites (Node 22.12 or newer for agent-device) and the run commands.
+
 ## Tests
 
 ```bash
@@ -229,4 +231,4 @@ Most unit tests use `DocumentEngine` and a scripted model. No test needs an API 
 | `@e2e-dev/limrun` | `E2E.Mobile` (`LimrunSimulators`) |
 | `e2e login`, `e2e logout`, `e2e models`, `e2e guide`, `e2e mcp`, `e2e-web install` (as `e2e install`) | `E2E.Cli` (the `e2e` .NET tool) |
 
-`@e2e-dev/mobile` is ported in part (the snapshot model, the engine, and the EAS and Limrun providers). `@e2e-dev/github` and `@e2e-dev/kernel` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).
+`@e2e-dev/mobile` is ported in part (the snapshot model, the engine, and the EAS and Limrun providers) as `E2E.Mobile`, which is not on NuGet yet. `@e2e-dev/github` and `@e2e-dev/kernel` are not ported. Details are in [COMPATIBILITY.md](COMPATIBILITY.md).

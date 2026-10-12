@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>MobileApp.E2ETests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="NUnit" Version="5.0.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="E2E" />
+    <Using Include="NUnit.Framework" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\E2E\E2E.csproj" />
+    <ProjectReference Include="..\..\src\E2E.Mobile\E2E.Mobile.csproj" />
+    <ProjectReference Include="..\..\src\E2E.NUnit\E2E.NUnit.csproj" />
+  </ItemGroup>
+</Project>
