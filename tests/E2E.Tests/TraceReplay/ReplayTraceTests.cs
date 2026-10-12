@@ -14,8 +14,7 @@ namespace E2E.Tests.TraceReplay;
 /// raw look. The port's replay has no gaps, drags, bare points, or lost-list
 /// fallback, and always looks before a free action until it reaches the recorded end route, so those <c>it</c>s are not ported.
 /// Not ported either: "relocates by semantic identity when a recorded test id churned" (the port finds a test id exactly),
-/// "surfaces an unknown commit state as action-uncertain" (the port has no such reason), "rethrows runtime hard stops
-/// untouched" (the port hands every step error a replayed action raises off as action-failed), and "hands off with
+/// "surfaces an unknown commit state as action-uncertain" (the port has no such reason), and "hands off with
 /// action-failed when the look before the second action throws" (the port's look before an action is outside the replay's catch).
 /// </summary>
 public sealed class ReplayTraceTests
@@ -141,6 +140,31 @@ public sealed class ReplayTraceTests
 
         Assert.Null(replay.Error);
         Assert.Equal(("agent-concluded", "action-failed", 1), (replay.Cache?.Mode, replay.Cache?.Reason, replay.Cache?.ReplayedActions));
+    }
+
+    [Fact]
+    public async Task Rethrows_runtime_hard_stops_untouched()
+    {
+        var exhausted = false;
+        DocumentWorld World() => new DocumentWorld().Map("/home", page => page.Heading("Home")).Map("/plan", page =>
+        {
+            var status = page.Status("Idle");
+            page.Button("Upgrade", () =>
+            {
+                if (exhausted)
+                {
+                    throw new AgentException("STEP_BUDGET_EXHAUSTED", "out of actions");
+                }
+
+                status.Name = status.Text = "Upgraded";
+            });
+        });
+        var directory = await RecordAsync(World, NavigateThenUpgrade);
+        exhausted = true;
+
+        var replay = await ReplayStepAsync(World(), directory, null, ModelResponses.Done("passed", "Done."));
+
+        Assert.Equal("STEP_BUDGET_EXHAUSTED", Assert.IsType<AgentException>(replay.Error).Code);
     }
 
     [Fact]
