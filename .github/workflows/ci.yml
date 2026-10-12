@@ -12,6 +12,7 @@ jobs:
   build:
     name: restore-build-test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,7 +30,7 @@ jobs:
         run: dotnet build E2E.slnx --no-restore -c Release
 
       - name: Test
-        run: dotnet test E2E.slnx --no-build -c Release --filter "TestCategory!=RealModel" --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test E2E.slnx --no-build -c Release --filter "TestCategory!=RealModel" --blame-hang-timeout 5m --logger "trx;LogFileName=test-results.trx"
 
       - name: Pack
         run: |

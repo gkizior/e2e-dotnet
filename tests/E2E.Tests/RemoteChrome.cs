@@ -129,7 +129,15 @@ internal sealed partial class RemoteChrome : IAsyncDisposable
                 _process.Kill(entireProcessTree: true);
             }
 
-            await _process.WaitForExitAsync();
+            // A Chrome helper the kill did not reach can keep the pipes open, so stop reading and bound the wait.
+            _process.CancelErrorRead();
+            _process.CancelOutputRead();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await _process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // A helper still holds the pipes; stop waiting and let the profile cleanup below cope.
         }
         catch (InvalidOperationException)
         {
