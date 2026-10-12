@@ -94,7 +94,8 @@ public sealed class SessionHostTests : IDisposable
     [Fact]
     public async Task Opens_sessions_side_by_side_up_to_the_limit_and_a_call_names_its_session_while_several_are_open()
     {
-        var pair = Host(new FakeEngine(), maxSessions: 2);
+        var engines = new List<FakeEngine>();
+        var pair = Host(new FakeEngine(), maxSessions: 2, create: () => new FakeEngine(), made: engines);
         var opened = await Task.WhenAll(pair.OpenAsync(new OpenSessionOptions()), pair.OpenAsync(new OpenSessionOptions()));
         var first = SessionId(opened[0]);
         var second = SessionId(opened[1]);
@@ -117,6 +118,12 @@ public sealed class SessionHostTests : IDisposable
         Assert.Contains($"Session {second} on target \"web\"", pair.Catalog(null, null), StringComparison.Ordinal);
         Assert.Contains($"Session {second} closed (server shutdown)", await pair.CloseAllAsync("server shutdown"), StringComparison.Ordinal);
         Assert.Null(await pair.CloseAllAsync("server shutdown"));
+        Assert.Equal(2, engines.Count);
+        Assert.All(engines, engine =>
+        {
+            Assert.Equal(1, engine.AttemptsStarted);
+            Assert.Equal(1, engine.Disposes);
+        });
     }
 
     [Fact]
@@ -162,19 +169,23 @@ public sealed class SessionHostTests : IDisposable
                 return released.Task;
             },
         };
-        var single = Host(fake, maxSessions: 1);
+        var single = Host(fake, maxSessions: 2);
         var id = SessionId(await single.OpenAsync(new OpenSessionOptions()));
         var closing = single.CloseAsync("done", id);
         await disposing.Task.WaitAsync(Patience);
         var again = single.CloseAsync("again", id);
         var catalog = Assert.Throws<ConfigurationException>(() => single.Catalog(id, null));
         Assert.Equal($"session \"{id}\" is closing (done)", catalog.Message);
+        var other = await Assert.ThrowsAsync<ConfigurationException>(() => single.OpenAsync(new OpenSessionOptions { Config = "other.config.json" }));
+        Assert.Equal("CONFIG_IN_USE", other.Code);
+        var second = SessionId(await single.OpenAsync(new OpenSessionOptions()));
         var full = await Assert.ThrowsAsync<ConfigurationException>(() => single.OpenAsync(new OpenSessionOptions()));
         Assert.Equal("SESSION_OPEN", full.Code);
         released.SetResult();
         Assert.Contains($"Session {id} closed (done)", await closing, StringComparison.Ordinal);
         Assert.Equal(await closing, await again);
         Assert.Contains("button \"Submit\"", await single.OpenAsync(new OpenSessionOptions()), StringComparison.Ordinal);
+        await single.CloseAsync("done", second);
         await single.CloseAsync("done");
     }
 
@@ -198,9 +209,10 @@ public sealed class SessionHostTests : IDisposable
     {
         var read = new List<string>();
         var mixed = Host(new FakeEngine(), maxSessions: 2, onLoad: path => read.Add(Path.GetFileName(path)));
-        await mixed.OpenAsync(new OpenSessionOptions());
+        var first = SessionId(await mixed.OpenAsync(new OpenSessionOptions()));
         var other = await Assert.ThrowsAsync<ConfigurationException>(() => mixed.OpenAsync(new OpenSessionOptions { Config = "other.config.json" }));
         Assert.Equal("CONFIG_IN_USE", other.Code);
+        Assert.Contains($"session {first} is open on config {Path.Combine(_dir, "e2e.config.json")}", other.Message, StringComparison.Ordinal);
         Assert.Equal(["e2e.config.json"], read);
         await mixed.CloseAsync("done");
     }
@@ -336,7 +348,9 @@ public sealed class SessionHostTests : IDisposable
         int maxSessions = 4,
         Task? loaded = null,
         Action<string>? onLoad = null,
-        string secrets = "")
+        string secrets = "",
+        Func<FakeEngine>? create = null,
+        List<FakeEngine>? made = null)
     {
         var host = new SessionHost(new SessionHostOptions
         {
@@ -354,7 +368,14 @@ public sealed class SessionHostTests : IDisposable
             CreateEngine = value =>
             {
                 headedValues?.Add(value);
-                return engine;
+                if (create is null)
+                {
+                    return engine;
+                }
+
+                var next = create();
+                made?.Add(next);
+                return next;
             },
             Headed = headed,
             MaxSessions = maxSessions,
