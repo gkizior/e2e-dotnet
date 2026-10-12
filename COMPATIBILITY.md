@@ -104,7 +104,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 ## Not ported
 
 - The `e2e` command-line tool apart from `login`, `logout`, `models`, `guide`, and `mcp`: the custom runner, `[E2ETest]` discovery, `--grep`, `test.only`, and the JSON report
-- `@e2e-dev/mobile` apart from its snapshot model (see [Mobile snapshot model](#mobile-snapshot-model)), `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
+- `@e2e-dev/mobile` apart from its snapshot model and engine (see [Mobile snapshot model](#mobile-snapshot-model) and [Mobile engine](#mobile-engine)), `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
 - `e2e init`
 - Vision, traces, and video. `app.screenshot()` is not ported either. `ToHaveScreenshotAsync` is: see [Visual comparison](#visual-comparison)
 - Parallel workers and serial suites
@@ -121,7 +121,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 
 ## Mobile snapshot model
 
-`E2E.Mobile` ports the pure logic of `@e2e-dev/mobile`: the projection of an agent-device accessibility snapshot onto `SemanticNode` (`SnapshotProjection`), locator expressions and agent-device selectors over it (`DeviceLocator`, `AgentDeviceSelector`), error translation (`DeviceErrors`), links, screenshot masking, and the shared helpers (`DeviceSupport`). There is no device, client, pool, provider, or engine yet. Differences:
+`E2E.Mobile` ports the pure logic of `@e2e-dev/mobile`: the projection of an agent-device accessibility snapshot onto `SemanticNode` (`SnapshotProjection`), locator expressions and agent-device selectors over it (`DeviceLocator`, `AgentDeviceSelector`), error translation (`DeviceErrors`), links, screenshot masking, and the shared helpers (`DeviceSupport`). The client, pool, provider, and engine are in [Mobile engine](#mobile-engine). Differences:
 
 - agent-device is a Node package. `AgentDeviceError` stands in for its `AppError`, and `AgentDeviceSelector` reads the selector grammar of `parseSelectorChain` and applies the term rules of `listSelectorChainMatches` to the raw nodes, for the target's platform (the keys `id`, `role`, `text`, `label`, `value`, `appname`, `windowtitle`, and the flags `visible`, `hidden`, `editable`, `selected`, `focused`, `enabled`, `hittable`).
 - `SemanticNode.States` holds plain booleans, so it cannot tell an unchecked switch from a node with no checked state. `ProjectedNode.States` keeps the states the platform reported, and `ProjectedNode.Selector` keeps the `id=` hint upstream puts on the node.
@@ -129,6 +129,18 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - A role query has no `hidden` state. Role queries skip hidden nodes, as upstream's do.
 - Link parsing reads a URL with `System.Uri`, after the whitespace rules a browser applies.
 - `MaskPng` refuses a PNG with no end chunk, as upstream's parser does.
+
+## Mobile engine
+
+`MobileEngine` ports `engine.ts`, `options.ts`, `bindings.ts`, `pool.ts`, `provider.ts`, and the parts of `surface.ts` that start, observe, and close a device session. It implements `IEngine` and declares every capability. The node actions, key presses, scrolls, screenshots, the `device` fixture, the tools, and video are not ported yet: `IDeviceActions` is the seam for the first four, and without an implementation each answers `UNSUPPORTED_CAPABILITY`. The `eas`, `limrun`, and `kernel` providers are not ported either. Differences:
+
+- agent-device is a Node program. `IDeviceClient` stands in for upstream's `createAgentDeviceClient`: a call is `namespace.method` with an options object, as upstream's client names them. `AgentDeviceRpcClient` implements it over the daemon's HTTP JSON-RPC 2.0 (`POST /rpc`, method `agent_device.command`, `GET /health`). The wire format was read from agent-device 0.21.22's code and checked against a running 0.21.22 daemon for `devices`, `boot`, `close`, `session_list`, `prepare`, and `snapshot`. It is not a documented protocol, so the version is pinned (`AgentDeviceVersion.Pinned`) and the client checks `rpcProtocolVersion` and the daemon version. `DeviceCommands` turns each call into a command, positionals, and flags. The calls the engine makes today are covered. A call it does not know is refused.
+- A local daemon needs Node 22.12 or newer. The first call starts it the way agent-device's own CLI does (`npx --yes agent-device@0.21.22 session list --json`, with `AGENT_DEVICE_DAEMON_TRANSPORT=http`), in the state directory `~/.agent-device/e2e-dotnet`, and it keeps running after the command. `E2E_AGENT_DEVICE_BIN` names an `agent-device.mjs` to run in place of `npx`. A missing Node, a Node that is too old, an agent-device that does not start, and a daemon of another version fail with `INVALID_CONFIG` and the recovery. Starting a daemon on Windows is not verified.
+- `MobileOptions` carries the app (`App`: bundle id, build path, launch arguments, permissions), the target name, and the device choice as three properties (`Device`, `Devices`, `Provider`; at most one), because the port has no target config for a device yet. Permission names and states are enums, so an unknown one cannot be written. `Settle` and `SettleMilliseconds` stand in for `settle: number | false`.
+- The core engine contract has no `prepare`, `finish`, `init`, or worker slot. `MobileEngine.PrepareAsync` and `FinishAsync` take their own info records, and `StartAsync(MobileStartInfo)` starts the worker of one slot. `StartAsync(EngineStartOptions)` starts slot 0 of the target. Bindings travel from prepare to a worker through `MobilePrepareResult.Env`, as upstream's environment variable does. In one process the pool also keeps them.
+- `app.open()` is `OpenAsync`: it launches the pinned app fresh. A deep link or any absolute URL is refused. `EngineStartOptions.BaseUrl` is refused as upstream refuses `app.url`.
+- `DeviceSession.BackAsync` always settles (upstream's agent origin), since a test step has no origin here.
+- A device provider cannot record video yet (`record` and the recording tests are not ported).
 
 ## Browser install command
 
