@@ -7,15 +7,18 @@ using E2E.Internal;
 namespace E2E.OAuth;
 
 /// <summary>
-/// A model that settles its protocol on the first call and delegates to the client for it. Only a lookup that
+/// A model that settles its protocol on the first call and delegates to the client for it. One lookup serves every
+/// concurrent call, under its own timeout, so a caller that gives up never fails the others. Only a lookup that
 /// succeeded is remembered: when it could not be read, that call goes over the fallback and the next call asks again.
 /// </summary>
 public abstract class DelegatingModel : IAgentModel, IDisposable
 {
     private static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(10);
 
-    private readonly SemaphoreSlim _gate = new(1, 1);
-    private IAgentModel? _resolved;
+    private readonly object _lock = new();
+    private readonly CancellationTokenSource _lifetime = new();
+    private volatile IAgentModel? _resolved;
+    private Task<IAgentModel?>? _pending;
 
     protected DelegatingModel(string name, HttpClient http)
     {
@@ -32,29 +35,13 @@ public abstract class DelegatingModel : IAgentModel, IDisposable
         var model = _resolved;
         if (model is null)
         {
-            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                model = _resolved;
-                if (model is null)
-                {
-                    using var lookup = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    lookup.CancelAfter(LookupTimeout);
-                    try
-                    {
-                        _resolved = await ResolveAsync(lookup.Token).ConfigureAwait(false);
-                    }
-                    catch (OAuthException ex)
-                    {
-                        throw new AgentException("MODEL_PROVIDER_FAILED", "The subscription login failed (" + ex.Code + "): " + ex.Message, blocked: true, ex);
-                    }
-
-                    model = _resolved ?? Fallback;
-                }
+                model = await Settle().WaitAsync(cancellationToken).ConfigureAwait(false) ?? Fallback;
             }
-            finally
+            catch (OAuthException ex)
             {
-                _gate.Release();
+                throw new AgentException("MODEL_PROVIDER_FAILED", "The subscription login failed (" + ex.Code + "): " + ex.Message, blocked: true, ex);
             }
         }
 
@@ -63,9 +50,35 @@ public abstract class DelegatingModel : IAgentModel, IDisposable
 
     public void Dispose()
     {
+        _lifetime.Cancel();
         Http.Dispose();
-        _gate.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>The lookup in flight, or a new one. It runs under its own timeout, not any caller's token.</summary>
+    private Task<IAgentModel?> Settle()
+    {
+        lock (_lock)
+        {
+            return _resolved is { } resolved ? Task.FromResult<IAgentModel?>(resolved) : _pending ??= Task.Run(LookupAsync);
+        }
+    }
+
+    private async Task<IAgentModel?> LookupAsync()
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            timeout.CancelAfter(LookupTimeout);
+            return _resolved = await ResolveAsync(timeout.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_lock)
+            {
+                _pending = null;
+            }
+        }
     }
 
     /// <summary>The model to use until a lookup succeeds.</summary>

@@ -90,16 +90,17 @@ public sealed class CopilotEndpointSelectionTests
         Assert.Equal(["/models", "/chat/completions", "/models", "/responses", "/responses"], api.Requests.Select(request => request.Uri.AbsolutePath));
     }
 
-    /// <summary>Partial: the port runs the listing again for the caller that waited, where upstream shares the one listing, so the number of listings is not asserted.</summary>
     [Fact]
     public async Task Lets_one_caller_give_up_on_the_listing_without_failing_the_others_waiting_on_it()
     {
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var listing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var listings = 0;
         var api = new Replying(async (request, token) =>
         {
             if (request.RequestUri!.AbsolutePath == "/models")
             {
+                Interlocked.Increment(ref listings);
                 listing.TrySetResult();
                 await release.Task.WaitAsync(token);
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{ "data": [{ "id": "m", "supported_endpoints": ["/chat/completions"] }] }""") };
@@ -122,6 +123,7 @@ public sealed class CopilotEndpointSelectionTests
         release.SetResult();
 
         Assert.Equal("ok", (await second).Content);
+        Assert.Equal(1, listings);
     }
 
     private static ModelRequest Request() => new() { System = "", Tools = [], Messages = [new ModelMessage { Role = "user", Content = "x" }] };
