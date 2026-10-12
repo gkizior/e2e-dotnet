@@ -188,7 +188,7 @@ public sealed class Agent
             ModelResponse response;
             try
             {
-                response = await CallModelAsync(agent.Model, ActSystemFor(agent), messages, offered, agent, token).ConfigureAwait(false);
+                response = await CallModelAsync(agent.Model, ActSystemFor(agent), messages, offered, agent, token, markLatest: true).ConfigureAwait(false);
             }
             catch (AgentException overflow) when (string.Equals(overflow.Code, "CONTEXT_OVERFLOW", StringComparison.Ordinal))
             {
@@ -211,7 +211,7 @@ public sealed class Agent
                 messages.AddRange(shrunk);
                 try
                 {
-                    response = await CallModelAsync(agent.Model, ActSystemFor(agent), messages, offered, agent, token).ConfigureAwait(false);
+                    response = await CallModelAsync(agent.Model, ActSystemFor(agent), messages, offered, agent, token, markLatest: true).ConfigureAwait(false);
                 }
                 catch (AgentException again) when (string.Equals(again.Code, "CONTEXT_OVERFLOW", StringComparison.Ordinal))
                 {
@@ -1624,7 +1624,8 @@ public sealed class Agent
         List<ModelMessage> messages,
         IReadOnlyList<ModelTool> tools,
         ResolvedAgent agent,
-        CancellationToken token)
+        CancellationToken token,
+        bool markLatest = false)
     {
         if (model is null)
         {
@@ -1639,6 +1640,7 @@ public sealed class Agent
                 System = _scope.Redactor.Redact(system),
                 Messages = messages,
                 Tools = tools,
+                MarkLatest = markLatest,
                 ProviderOptions = agent.ProviderOptions,
                 Redactor = _scope.Redactor,
             };

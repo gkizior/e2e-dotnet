@@ -130,6 +130,7 @@ public sealed class ModelProviderTests
         {
             System = request.System,
             Tools = request.Tools,
+            MarkLatest = true,
             Messages = [.. request.Messages, new ModelMessage { Role = "user", Content = "Call done." }],
         };
         var response = await model.CompleteAsync(request, CancellationToken.None);

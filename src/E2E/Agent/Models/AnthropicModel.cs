@@ -103,7 +103,7 @@ public sealed class AnthropicModel : IAgentModel, IDisposable
             }
         }
 
-        if (_options.CacheBreakpoints && messages.Count > 0 && messages[^1]?["content"] is JsonArray { Count: > 0 } latest)
+        if (_options.CacheBreakpoints && request.MarkLatest && messages.Count > 0 && messages[^1]?["content"] is JsonArray { Count: > 0 } latest)
         {
             latest[^1]!["cache_control"] = Breakpoint.DeepClone();
         }

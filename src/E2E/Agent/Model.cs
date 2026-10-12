@@ -30,6 +30,12 @@ public sealed class ModelRequest
     /// </summary>
     public IReadOnlyDictionary<string, JsonElement>? ProviderOptions { get; init; }
 
+    /// <summary>
+    /// Upstream's <c>ProviderHints.markLatest</c>, which only the act tool loop calls: the next turn repeats everything up
+    /// to the newest message, so <see cref="AnthropicModel"/> marks that message for caching. Judgments and extractions leave it off.
+    /// </summary>
+    public bool MarkLatest { get; init; }
+
     /// <summary>Redacts the secrets of the step from a provider failure that quotes the response body.</summary>
     internal Redactor Redactor { get; init; } = Redactor.None;
 }
