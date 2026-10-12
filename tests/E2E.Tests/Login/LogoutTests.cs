@@ -9,10 +9,6 @@ namespace E2E.Tests.Login;
 
 public sealed class LogoutTests
 {
-    /// <summary>
-    /// Partial: upstream also asks a read-only environment store to log out a provider it does not hold, and gets false. The
-    /// port's <c>LogoutAsync</c> asks the store to remove it, and that store refuses every removal, so that part is not ported.
-    /// </summary>
     [Fact]
     public async Task Reports_whether_a_login_was_stored_and_removes_it()
     {
@@ -24,5 +20,8 @@ public sealed class LogoutTests
         Assert.False(await OAuthProviders.LogoutAsync("openai", store));
         Assert.True(await OAuthProviders.LogoutAsync("spacexai", store));
         Assert.Empty(await store.ListAsync());
+
+        // A read-only source is not asked to remove what it does not hold.
+        Assert.False(await OAuthProviders.LogoutAsync("openai", new EnvironmentCredentialStore("{}")));
     }
 }

@@ -149,10 +149,17 @@ public static class OAuthProviders
     }
 
     /// <summary>Forgets the stored login. True when one was stored.</summary>
-    public static Task<bool> LogoutAsync(string providerId, ICredentialStore? store = null, CancellationToken cancellationToken = default)
+    public static async Task<bool> LogoutAsync(string providerId, ICredentialStore? store = null, CancellationToken cancellationToken = default)
     {
         var provider = Get(providerId);
-        return (store ?? CredentialStores.Default()).RemoveAsync(provider.Id, cancellationToken);
+        store ??= CredentialStores.Default();
+        if (await store.GetAsync(provider.Id, cancellationToken).ConfigureAwait(false) is null)
+        {
+            return false;
+        }
+
+        await store.RemoveAsync(provider.Id, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     /// <summary>The models <paramref name="providerId"/>'s stored login serves; <see cref="OAuthException.NotLoggedIn"/> without one.</summary>
