@@ -73,7 +73,7 @@ internal static class ModelHttp
             {
                 var failure = FailureText(response, body, redactor);
                 // A request too big is not an outage: the step's observations are what must shrink, and the code says so.
-                if (ContextOverflow.Describes((int)response.StatusCode, null, body))
+                if (ContextOverflow.DescribesOverflow((int)response.StatusCode, null, body))
                 {
                     throw new AgentException("CONTEXT_OVERFLOW", "The model request exceeded the context window: " + failure, blocked: true);
                 }
@@ -88,7 +88,7 @@ internal static class ModelHttp
     /// <summary>The failure of a response the provider answered 200 and then failed: a blocked <c>CONTEXT_OVERFLOW</c> when it says the request was too large.</summary>
     public static AgentException ResponseFailed(string error)
     {
-        return ContextOverflow.Describes(null, error, null)
+        return ContextOverflow.DescribesOverflow(null, error, null)
             ? new AgentException("CONTEXT_OVERFLOW", "The model request exceeded the context window: " + error, blocked: true)
             : new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed the response. " + error);
     }

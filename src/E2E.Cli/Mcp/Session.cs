@@ -5,6 +5,7 @@
 using System.Globalization;
 using System.Text.Json;
 using E2E.Engine;
+using E2E.Internal;
 using ModelContextProtocol.Protocol;
 
 namespace E2E.Cli.Mcp;
@@ -44,10 +45,10 @@ internal sealed class SessionHostOptions
     public int MaxSessions { get; init; } = SessionHost.SessionBounds.Default;
 
     /// <summary>A session nobody has touched for this long is closed, so no browser is left behind.</summary>
-    public TimeSpan Idle { get; init; } = SessionHost.IdleLimit;
+    public TimeSpan Idle { get; init; } = SessionHost.SessionIdle;
 
     /// <summary>How long one session may live, whatever happens.</summary>
-    public TimeSpan Lifetime { get; init; } = SessionHost.LifetimeLimit;
+    public TimeSpan Ttl { get; init; } = SessionHost.SessionTtl;
 
     /// <summary>Logs a line for the operator and the client: <c>info</c>, <c>warning</c>, or <c>error</c>.</summary>
     public Action<string, string> Log { get; init; } = static (_, _) => { };
@@ -69,10 +70,10 @@ internal sealed class SessionHost : IDisposable
     public static readonly (int Min, int Max, int Default) SessionBounds = (1, 16, 4);
 
     /// <summary>A session nobody has touched for this long is closed.</summary>
-    internal static readonly TimeSpan IdleLimit = TimeSpan.FromMinutes(30);
+    internal static readonly TimeSpan SessionIdle = TimeSpan.FromMinutes(30);
 
     /// <summary>How long one session may live.</summary>
-    internal static readonly TimeSpan LifetimeLimit = TimeSpan.FromHours(4);
+    internal static readonly TimeSpan SessionTtl = TimeSpan.FromHours(4);
 
     /// <summary>How long the attempt outlives the session's lifetime, so a session that hit it is still closed in order.</summary>
     private static readonly TimeSpan CloseGrace = TimeSpan.FromMinutes(1);
@@ -304,7 +305,7 @@ internal sealed class SessionHost : IDisposable
                     CacheEnabled = false,
                     CacheMode = CacheMode.Off,
                     TestTitle = "e2e mcp session " + id,
-                    TestTimeout = _options.Lifetime + CloseGrace,
+                    TestTimeout = _options.Ttl + CloseGrace,
                     LaunchTimeout = config.LaunchTimeout,
                     CleanupTimeout = config.CleanupTimeout,
                     ActionTimeout = config.ActionTimeout,
@@ -320,7 +321,7 @@ internal sealed class SessionHost : IDisposable
 
             // A first screen that came back despite the cancel must not become a live session nobody asked for.
             abort.Token.ThrowIfCancellationRequested();
-            live.Lifetime = new Timer(_ => EndOnItsOwn(live, "the session reached its time limit of " + Math.Round(_options.Lifetime.TotalMinutes).ToString(CultureInfo.InvariantCulture) + " minutes"), null, _options.Lifetime, Timeout.InfiniteTimeSpan);
+            live.Lifetime = new Timer(_ => EndOnItsOwn(live, "the session reached its time limit of " + Math.Round(_options.Ttl.TotalMinutes).ToString(CultureInfo.InvariantCulture) + " minutes"), null, _options.Ttl, Timeout.InfiniteTimeSpan);
             _sessions.Activate(live);
             Touch(live);
             return text;

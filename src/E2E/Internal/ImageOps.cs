@@ -11,7 +11,7 @@ namespace E2E.Internal;
 internal sealed record RgbaImage(int Width, int Height, byte[] Data);
 
 /// <summary>A box on whole image pixels.</summary>
-internal readonly record struct PixelBox(int X, int Y, int Width, int Height);
+internal readonly record struct ImageBox(int X, int Y, int Width, int Height);
 
 /// <summary>How far two images may differ and still match.</summary>
 /// <param name="Threshold">Per-pixel color distance, 0 to 1, below which two pixels are the same.</param>
@@ -24,7 +24,7 @@ internal abstract record ImageComparison
 {
     public sealed record Match(int DiffPixels) : ImageComparison;
 
-    public sealed record SizeMismatch(PixelBox Expected, PixelBox Actual) : ImageComparison;
+    public sealed record SizeMismatch(ImageBox Expected, ImageBox Actual) : ImageComparison;
 
     public sealed record Pixels(int DiffPixels, double Ratio, RgbaImage Diff) : ImageComparison;
 }
@@ -61,7 +61,7 @@ internal static class ImageOps
     }
 
     /// <summary>Resamples an image to <paramref name="width"/> by <paramref name="height"/> with a box filter; the input itself when it already has that size.</summary>
-    public static RgbaImage Resample(RgbaImage image, int width, int height)
+    public static RgbaImage ResampleImage(RgbaImage image, int width, int height)
     {
         if (image.Width == width && image.Height == height)
         {
@@ -107,17 +107,17 @@ internal static class ImageOps
     }
 
     /// <summary>The part of <paramref name="box"/> inside the image, on whole pixels; null when none of it is.</summary>
-    public static PixelBox? ClipBox(int imageWidth, int imageHeight, BoundingBox box)
+    public static ImageBox? ClipBox(int imageWidth, int imageHeight, BoundingBox box)
     {
         var x0 = Math.Max(0, RoundHalfUp(box.X));
         var y0 = Math.Max(0, RoundHalfUp(box.Y));
         var x1 = Math.Min(imageWidth, RoundHalfUp(box.X + box.Width));
         var y1 = Math.Min(imageHeight, RoundHalfUp(box.Y + box.Height));
-        return x1 > x0 && y1 > y0 ? new PixelBox(x0, y0, x1 - x0, y1 - y0) : null;
+        return x1 > x0 && y1 > y0 ? new ImageBox(x0, y0, x1 - x0, y1 - y0) : null;
     }
 
     /// <summary>The pixels of a box already inside the image (see <see cref="ClipBox"/>).</summary>
-    public static RgbaImage Crop(RgbaImage image, PixelBox box)
+    public static RgbaImage CropImage(RgbaImage image, ImageBox box)
     {
         var data = new byte[box.Width * box.Height * 4];
         for (var row = 0; row < box.Height; row++)
@@ -161,11 +161,11 @@ internal static class ImageOps
     /// and at most the tolerated number of pixels differ: <c>MaxDiffPixels</c>, a <c>MaxDiffPixelRatio</c> share
     /// of the image, the smaller of the two when both are set, and none when neither is.
     /// </summary>
-    public static ImageComparison Compare(RgbaImage expected, RgbaImage actual, ImageTolerance tolerance)
+    public static ImageComparison CompareImages(RgbaImage expected, RgbaImage actual, ImageTolerance tolerance)
     {
         if (expected.Width != actual.Width || expected.Height != actual.Height)
         {
-            return new ImageComparison.SizeMismatch(new PixelBox(0, 0, expected.Width, expected.Height), new PixelBox(0, 0, actual.Width, actual.Height));
+            return new ImageComparison.SizeMismatch(new ImageBox(0, 0, expected.Width, expected.Height), new ImageBox(0, 0, actual.Width, actual.Height));
         }
 
         var diff = new byte[expected.Width * expected.Height * 4];

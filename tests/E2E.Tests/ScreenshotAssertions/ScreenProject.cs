@@ -19,7 +19,7 @@ internal sealed class ScreenProject : IDisposable
         System.IO.Directory.CreateDirectory(Directory);
     }
 
-    public static string Suffix => "-fake-" + ScreenshotStoreName();
+    public static string Suffix => "-fake-" + ScreenshotContextName();
 
     public ScreenEngine Engine { get; }
 
@@ -36,7 +36,7 @@ internal sealed class ScreenProject : IDisposable
     {
         if (newRun)
         {
-            ScreenshotStore.ForgetWrittenUnder(Directory);
+            ScreenshotContext.ForgetWrittenUnder(Directory);
         }
 
         await using var session = await E2ESession.StartAsync(new E2ESessionOptions
@@ -73,5 +73,5 @@ internal sealed class ScreenProject : IDisposable
         }
     }
 
-    private static string ScreenshotStoreName() => ScreenshotStore.OperatingSystemName();
+    private static string ScreenshotContextName() => ScreenshotContext.OperatingSystemName();
 }

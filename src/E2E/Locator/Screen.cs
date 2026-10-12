@@ -50,7 +50,7 @@ public sealed class Screen
     internal TimeSpan PollInterval { get; } = TimeSpan.FromMilliseconds(50);
 
     /// <summary>Where <c>ToHaveScreenshotAsync</c> keeps screenshots; null for a screen outside a session.</summary>
-    internal ScreenshotStore? Screenshots { get; set; }
+    internal ScreenshotContext? Screenshots { get; set; }
 
     /// <summary>A secret was filled in this attempt, so the app may show it outside a secure field and pixels are withheld.</summary>
     internal bool SecretFilled { get; private set; }

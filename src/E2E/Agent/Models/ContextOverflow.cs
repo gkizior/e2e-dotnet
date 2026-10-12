@@ -57,12 +57,12 @@ internal static class ContextOverflow
     /// Whether a provider failure says the request exceeded the model's context window. Reads the message of
     /// the error and of everything it wraps, so a gateway or retry wrapper does not hide the provider's words.
     /// </summary>
-    public static bool Describes(Exception? error)
+    public static bool IsContextOverflow(Exception? error)
     {
         var current = error;
         for (var depth = 0; depth < MaxCauseDepth && current is not null; depth++)
         {
-            if (Describes(null, current.Message, null))
+            if (DescribesOverflow(null, current.Message, null))
             {
                 return true;
             }
@@ -78,7 +78,7 @@ internal static class ContextOverflow
     /// matches an overflow pattern and no throttling pattern; the veto is per text, so a wrapper's "rate limit"
     /// message cannot hide the provider's "prompt is too long" in the body.
     /// </summary>
-    public static bool Describes(int? status, string? message, string? body)
+    public static bool DescribesOverflow(int? status, string? message, string? body)
     {
         return status == 413 || Matches(message) || Matches(body);
     }

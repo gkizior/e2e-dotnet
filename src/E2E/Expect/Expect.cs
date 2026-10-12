@@ -87,12 +87,6 @@ public static class Expect
 /// </summary>
 public sealed class LocatorExpect
 {
-    /// <summary>How long a negated matcher's condition must stay false before it passes, as upstream.</summary>
-    internal static readonly TimeSpan NegationGrace = TimeSpan.FromMilliseconds(1000);
-
-    /// <summary>A read that starts with less than this left of the wait timed out because the wait did, not because the app stopped answering. Upstream's poll tick.</summary>
-    private static readonly TimeSpan CutOffWindow = TimeSpan.FromMilliseconds(100);
-
     private readonly Locator _locator;
     private readonly bool _negated;
 
@@ -109,7 +103,7 @@ public sealed class LocatorExpect
     /// Waits for the one match to look like its stored screenshot, the box of the node cut from the screen. See <see cref="ScreenExpect.ToHaveScreenshotAsync(string?, ScreenshotOptions?, string?)"/>.
     /// </summary>
     public Task ToHaveScreenshotAsync(string? name = null, ScreenshotOptions? options = null, [CallerFilePath] string? callerFile = null)
-        => ScreenshotAssertion.RunAsync(_locator.Screen, _locator, _negated, name, options, callerFile, default);
+        => ScreenshotAssertion.ExpectScreenshotAsync(_locator.Screen, _locator, _negated, name, options, callerFile, default);
 
     /// <inheritdoc cref="ToHaveScreenshotAsync(string?, ScreenshotOptions?, string?)"/>
     public Task ToHaveScreenshotAsync(ScreenshotOptions options, [CallerFilePath] string? callerFile = null)
@@ -372,12 +366,9 @@ public sealed class LocatorExpect
     }
 
     /// <summary>
-    /// Polls until the condition holds, or, negated, until it has been false for <see cref="NegationGrace"/>
-    /// in a row (or for the whole budget when that is shorter). A sample that cannot answer resets the
-    /// negation clock: <c>not.toBeChecked</c> on no node is not a pass. A negation holds from the moment the
-    /// read that first saw it was issued, so a slow read counts toward the window. A read the deadline cut off
-    /// (see <see cref="CutOffWindow"/>) after an earlier one completed ends the poll on the last sample: a
-    /// negation passes if it had held long enough by then, anything else fails with that read as its cause.
+    /// Polls until the condition holds, or, negated, until it has been false for the negation grace in a row
+    /// (see <see cref="Time.PollConditionAsync"/>). A sample that cannot answer resets the negation clock:
+    /// <c>not.toBeChecked</c> on no node is not a pass.
     /// </summary>
     private async Task PollAsync(
         string matcher,
@@ -394,85 +385,33 @@ public sealed class LocatorExpect
 
         var token = _locator.Screen.Token(cancellationToken);
         var clock = _locator.Screen.Clock;
-        var start = clock.GetUtcNow();
-        var deadline = start + (timeout ?? _locator.Screen.AssertionTimeout);
-        var grace = deadline - start < NegationGrace ? deadline - start : NegationGrace;
-        var readAt = start;
-        DateTimeOffset? falseSince = null;
-        Verdict? last = null;
+        Verdict last = default;
         IReadOnlyList<SemanticNode> lastMatches = [];
-        bool Holds(DateTimeOffset now) => falseSince is { } since && now - since >= grace;
         try
         {
-            while (true)
+            await Time.PollConditionAsync(new PollConditionOptions
             {
-                token.ThrowIfCancellationRequested();
-                var startedWith = deadline - readAt;
-                IReadOnlyList<SemanticNode> matches;
-                try
+                Deadline = new Deadline(timeout ?? _locator.Screen.AssertionTimeout, clock),
+                Clock = clock,
+                Token = token,
+                Negated = _negated,
+                Interval = _locator.Screen.PollInterval,
+                Evaluate = async () =>
                 {
-                    matches = await _locator.ResolveAsync(token, includeHidden).ConfigureAwait(false);
-                }
-                catch (EngineException ex) when (last is not null && ex.Code == EngineErrorCodes.OperationTimeout && startedWith < CutOffWindow)
-                {
-                    if (_negated && Holds(Min(clock.GetUtcNow(), deadline)))
-                    {
-                        _locator.Screen.NotifyVerified();
-                        return;
-                    }
-
-                    throw Failure(matcher, describeExpected, last.Value, lastMatches, ex);
-                }
-
-                var verdict = evaluate(matches);
-                last = verdict;
-                lastMatches = matches;
-                if (!_negated && verdict.Holds == true)
-                {
-                    _locator.Screen.NotifyVerified();
-                    return;
-                }
-
-                // False from the first sample means false for the whole budget so far, so the clock starts with the budget.
-                falseSince = _negated && verdict.Holds == false ? falseSince ?? readAt : null;
-                var now = clock.GetUtcNow();
-                if (Holds(now))
-                {
-                    _locator.Screen.NotifyVerified();
-                    return;
-                }
-
-                if (now >= deadline)
-                {
-                    throw Failure(matcher, describeExpected, verdict, matches);
-                }
-
-                // Rounded up to whole milliseconds, which is what Task.Delay waits, so the capped pause never wakes before the deadline.
-                // No sleep runs past the deadline, so the last read starts at it and never sees a state that arrived later.
-                var remaining = TimeSpan.FromMilliseconds(Math.Ceiling((deadline - now).TotalMilliseconds));
-                await Task.Delay(remaining < _locator.Screen.PollInterval ? remaining : _locator.Screen.PollInterval, clock, token).ConfigureAwait(false);
-
-                // A read past the deadline has no budget left, so a negation decides at the deadline on what it has seen.
-                readAt = clock.GetUtcNow();
-                if (_negated && readAt >= deadline)
-                {
-                    if (Holds(readAt))
-                    {
-                        _locator.Screen.NotifyVerified();
-                        return;
-                    }
-
-                    throw Failure(matcher, describeExpected, verdict, matches);
-                }
-            }
+                    var matches = await _locator.ResolveAsync(token, includeHidden).ConfigureAwait(false);
+                    last = evaluate(matches);
+                    lastMatches = matches;
+                    return last.Holds;
+                },
+                OnTimeout = cause => Failure(matcher, describeExpected, last, lastMatches, cause),
+            }).ConfigureAwait(false);
+            _locator.Screen.NotifyVerified();
         }
         catch (OperationCanceledException ex) when (token.IsCancellationRequested)
         {
             throw new TestException(EngineErrorCodes.Cancelled, "operation cancelled", ex);
         }
     }
-
-    private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
 
     /// <summary>The error a matcher throws at its deadline, built from its last sample.</summary>
     private TestException Failure(string matcher, string describeExpected, Verdict verdict, IReadOnlyList<SemanticNode> matches, Exception? cause = null)
@@ -651,7 +590,7 @@ public sealed class ScreenExpect
     /// written and fails the call, or, with <c>E2E_UPDATE_SNAPSHOTS=1</c>, written and passed. Only the web engine captures pixels.
     /// </summary>
     public Task ToHaveScreenshotAsync(string? name = null, ScreenshotOptions? options = null, [CallerFilePath] string? callerFile = null)
-        => ScreenshotAssertion.RunAsync(_screen, null, _negated, name, options, callerFile, default);
+        => ScreenshotAssertion.ExpectScreenshotAsync(_screen, null, _negated, name, options, callerFile, default);
 
     /// <inheritdoc cref="ToHaveScreenshotAsync(string?, ScreenshotOptions?, string?)"/>
     public Task ToHaveScreenshotAsync(ScreenshotOptions options, [CallerFilePath] string? callerFile = null)

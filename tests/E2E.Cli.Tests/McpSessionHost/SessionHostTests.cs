@@ -358,8 +358,8 @@ public sealed class SessionHostTests : IDisposable
             },
             Headed = headed,
             MaxSessions = maxSessions,
-            Idle = idle ?? SessionHost.IdleLimit,
-            Lifetime = lifetime ?? SessionHost.LifetimeLimit,
+            Idle = idle ?? SessionHost.SessionIdle,
+            Ttl = lifetime ?? SessionHost.SessionTtl,
             Log = (level, message) =>
             {
                 lock (_logs)

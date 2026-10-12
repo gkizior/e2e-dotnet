@@ -9,7 +9,7 @@ using E2E.Engine;
 namespace E2E;
 
 /// <summary>Where one attempt's <c>ToHaveScreenshotAsync</c> calls keep their screenshots, and what the process has written so far.</summary>
-internal sealed class ScreenshotStore
+internal sealed class ScreenshotContext
 {
     // Stored screenshots this process wrote. A retry, a repeat, or another test naming the same screenshot
     // compares against an unreviewed file, so the comparison fails rather than passes.

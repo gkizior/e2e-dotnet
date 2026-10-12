@@ -173,10 +173,10 @@ public sealed class E2ESession : IAsyncDisposable
             softFailures);
         screen.RememberSecret = secret => scope.Remember(new Dictionary<string, object?>(StringComparer.Ordinal) { [secret.Name] = secret });
         screen.Redact = text => scope.Redactor.Redact(text);
-        screen.Screenshots = new ScreenshotStore
+        screen.Screenshots = new ScreenshotContext
         {
             ProjectRoot = projectRoot,
-            Suffix = "-" + (string.IsNullOrWhiteSpace(options.TargetName) ? options.Engine.Platform : options.TargetName) + "-" + ScreenshotStore.OperatingSystemName(),
+            Suffix = "-" + (string.IsNullOrWhiteSpace(options.TargetName) ? options.Engine.Platform : options.TargetName) + "-" + ScreenshotContext.OperatingSystemName(),
             Title = options.TestTitle,
             ResultsDirectory = Path.Combine(
                 Path.GetFullPath(options.ResultsDirectory ?? Path.Combine(projectRoot, ".e2e", "results")),

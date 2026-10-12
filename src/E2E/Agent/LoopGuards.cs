@@ -11,7 +11,7 @@ namespace E2E;
 /// repeated. Identity is the tool name plus its exact arguments, so two taps on different targets are
 /// never a repeat. A warning lets the model react; a stop forces the verdict.
 /// </summary>
-internal static class LoopGuard
+internal static class LoopGuards
 {
     private const int MaxCyclePeriod = 4;
     private const int RepeatWarn = 3;
@@ -20,7 +20,7 @@ internal static class LoopGuard
     private const int CycleStop = 3;
 
     /// <summary>The calls of a transcript in order, without the verdict tool: ending the step is never a loop.</summary>
-    public static IReadOnlyList<(string Name, string Input)> Calls(IEnumerable<ModelMessage> messages) =>
+    public static IReadOnlyList<(string Name, string Input)> ExtractGuardCalls(IEnumerable<ModelMessage> messages) =>
         messages
             .Where(message => message.ToolCalls is not null)
             .SelectMany(message => message.ToolCalls!)
@@ -32,7 +32,7 @@ internal static class LoopGuard
     /// Checks the trailing calls for exact repetition (period 1) and short exact cycles (periods 2 to 4).
     /// Returns no reason when the calls are clear.
     /// </summary>
-    public static (bool Stop, string? Reason) Check(IReadOnlyList<(string Name, string Input)> calls)
+    public static (bool Stop, string? Reason) CheckLoopGuards(IReadOnlyList<(string Name, string Input)> calls)
     {
         (bool Stop, string? Reason) warning = (false, null);
         for (var period = 1; period <= MaxCyclePeriod; period++)

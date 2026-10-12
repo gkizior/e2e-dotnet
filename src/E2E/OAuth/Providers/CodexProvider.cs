@@ -263,7 +263,7 @@ public sealed class CodexProvider : IOAuthProvider
         return new OAuthCredentials { Access = tokens.AccessToken, Refresh = refresh, Expires = TokenEndpoint.ExpiryFrom(tokens.ExpiresIn), Extra = extra };
     }
 
-    private async Task<TokenResponse> ExchangeAsync(string code, string redirectUri, string verifier, CancellationToken cancellationToken)
+    private async Task<TokenResponse> ExchangeCodeAsync(string code, string redirectUri, string verifier, CancellationToken cancellationToken)
     {
         try
         {
@@ -345,7 +345,7 @@ public sealed class CodexProvider : IOAuthProvider
         }
 
         callbacks.OnProgress?.Invoke("Exchanging the code for tokens");
-        return await ExchangeAsync(code, redirectUri, verifier, cancellationToken).ConfigureAwait(false);
+        return await ExchangeCodeAsync(code, redirectUri, verifier, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<string?> PasteCodeAsync(OAuthLoginCallbacks callbacks, string state, CancellationToken cancellationToken)
@@ -389,7 +389,7 @@ public sealed class CodexProvider : IOAuthProvider
                 if (response.IsSuccessStatusCode)
                 {
                     var grant = JsonNode.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false)) as JsonObject ?? [];
-                    var tokens = await ExchangeAsync(
+                    var tokens = await ExchangeCodeAsync(
                         TokenEndpoint.Text(grant, "authorization_code") ?? "",
                         _issuer + "/deviceauth/callback",
                         TokenEndpoint.Text(grant, "code_verifier") ?? "",

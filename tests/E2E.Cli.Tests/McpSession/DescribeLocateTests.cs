@@ -17,7 +17,7 @@ public sealed class DescribeLocateTests
     [Fact]
     public void Tells_the_agent_which_test_outcome_the_locator_would_have()
     {
-        var query = SessionCatalog.BuildLocateQuery(new LocateArgs { Role = "button", Name = "Save" });
+        var query = SessionCatalog.LocateQuery(new LocateArgs { Role = "button", Name = "Save" });
         Assert.Equal(
             "1 node matches getByRole(\"button\", \"Save\").\nUse: Screen.GetByRole(\"button\", \"Save\")\n- button \"Save\"",
             SessionCatalog.DescribeLocate(query, 1, [Node("button", "Save")], Redactor.None));
@@ -32,7 +32,7 @@ public sealed class DescribeLocateTests
     [Fact]
     public void Never_shows_the_value_of_a_secure_node()
     {
-        var query = SessionCatalog.BuildLocateQuery(new LocateArgs { Label = "Password" });
+        var query = SessionCatalog.LocateQuery(new LocateArgs { Label = "Password" });
         var text = SessionCatalog.DescribeLocate(query, 1, [Node("textbox", "Password", value: "hunter2", states: new NodeStates { Secure = true })], Redactor.None);
         Assert.DoesNotContain("hunter2", text, StringComparison.Ordinal);
     }
@@ -41,7 +41,7 @@ public sealed class DescribeLocateTests
     public void Renders_a_registered_secret_in_a_plain_node_by_its_name_never_the_plaintext()
     {
         var redactor = Redactor.For([Secret.Create("apiKey", "sk-live-SUPERSECRET-0000")]);
-        var query = SessionCatalog.BuildLocateQuery(new LocateArgs { Label = "API key" });
+        var query = SessionCatalog.LocateQuery(new LocateArgs { Label = "API key" });
         var filled = Node("textbox", "API key", value: "sk-live-SUPERSECRET-0000");
         var echoed = Node("status", "Saved key", text: "Saved sk-live-SUPERSECRET-0000");
         var text = SessionCatalog.DescribeLocate(query, 2, [filled, echoed], redactor);

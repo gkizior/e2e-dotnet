@@ -99,7 +99,7 @@ internal sealed class SessionCatalog
     /// Builds the locator and the matching <c>Screen</c> call from the tool arguments: exactly one of role, text,
     /// label, placeholder, or testId.
     /// </summary>
-    public static LocateQuery BuildLocateQuery(LocateArgs args)
+    public static LocateQuery LocateQuery(LocateArgs args)
     {
         ArgumentNullException.ThrowIfNull(args);
         var exact = args.Exact != false;
@@ -363,7 +363,7 @@ internal sealed class SessionCatalog
                 ("exact", new JsonObject { ["type"] = "boolean", ["description"] = "false for substring, case-insensitive matching" }, false)),
             Execute = async (args, token) =>
             {
-                var query = BuildLocateQuery(new LocateArgs
+                var query = LocateQuery(new LocateArgs
                 {
                     Role = Text(args, "role"),
                     Name = Text(args, "name"),

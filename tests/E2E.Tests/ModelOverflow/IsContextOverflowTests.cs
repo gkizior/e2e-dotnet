@@ -33,7 +33,7 @@ public sealed class IsContextOverflowTests
     [InlineData("Range of input length should be [1, 129024]")]
     public void Recognizes(string message)
     {
-        Assert.True(ContextOverflow.Describes(new Exception(message)));
+        Assert.True(ContextOverflow.IsContextOverflow(new Exception(message)));
     }
 
     [Theory]
@@ -45,35 +45,35 @@ public sealed class IsContextOverflowTests
     [InlineData("")]
     public void Does_not_mistake_a_failure_for_an_overflow(string message)
     {
-        Assert.False(ContextOverflow.Describes(new Exception(message)));
+        Assert.False(ContextOverflow.IsContextOverflow(new Exception(message)));
     }
 
     [Fact]
     public void Reads_the_HTTP_status_and_the_response_body_when_the_message_says_nothing()
     {
-        Assert.True(ContextOverflow.Describes(413, "Bad Request", null));
-        Assert.False(ContextOverflow.Describes(400, "Bad Request", null));
-        Assert.True(ContextOverflow.Describes(400, "Bad Request", """{"error":{"message":"prompt is too long: 250000 tokens > 200000 maximum"}}"""));
+        Assert.True(ContextOverflow.DescribesOverflow(413, "Bad Request", null));
+        Assert.False(ContextOverflow.DescribesOverflow(400, "Bad Request", null));
+        Assert.True(ContextOverflow.DescribesOverflow(400, "Bad Request", """{"error":{"message":"prompt is too long: 250000 tokens > 200000 maximum"}}"""));
     }
 
     [Fact]
     public void Vetoes_per_field_a_throttling_message_does_not_hide_an_overflow_in_the_body_and_413_stands_alone()
     {
-        Assert.True(ContextOverflow.Describes(400, "Rate limit reached", """{"error":{"message":"prompt is too long: 250000 tokens > 200000 maximum"}}"""));
-        Assert.True(ContextOverflow.Describes(413, "Too many requests", null));
-        Assert.True(ContextOverflow.Describes(null, "prompt is too long", "ThrottlingException: Too many tokens"));
+        Assert.True(ContextOverflow.DescribesOverflow(400, "Rate limit reached", """{"error":{"message":"prompt is too long: 250000 tokens > 200000 maximum"}}"""));
+        Assert.True(ContextOverflow.DescribesOverflow(413, "Too many requests", null));
+        Assert.True(ContextOverflow.DescribesOverflow(null, "prompt is too long", "ThrottlingException: Too many tokens"));
     }
 
     [Fact]
     public void Looks_through_a_cause_chain()
     {
-        Assert.True(ContextOverflow.Describes(new Exception("gateway failed", new Exception(Overflow))));
-        Assert.False(ContextOverflow.Describes(new Exception("outer", new Exception("middle", new Exception("rate limit")))));
+        Assert.True(ContextOverflow.IsContextOverflow(new Exception("gateway failed", new Exception(Overflow))));
+        Assert.False(ContextOverflow.IsContextOverflow(new Exception("outer", new Exception("middle", new Exception("rate limit")))));
     }
 
     [Fact]
     public void Rejects_a_null_error()
     {
-        Assert.False(ContextOverflow.Describes(null));
+        Assert.False(ContextOverflow.IsContextOverflow(null));
     }
 }

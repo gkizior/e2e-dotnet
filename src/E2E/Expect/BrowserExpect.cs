@@ -2,7 +2,6 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 using E2E.Engine;
 using E2E.Internal;
@@ -17,11 +16,6 @@ namespace E2E;
 /// </summary>
 public sealed class BrowserExpect
 {
-    /// <summary>How long a negated matcher's condition must stay false before it passes, as <see cref="LocatorExpect"/>.</summary>
-    private static readonly TimeSpan NegationGrace = LocatorExpect.NegationGrace;
-
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
-
     private readonly Browser _browser;
     private readonly bool _negated;
 
@@ -97,9 +91,8 @@ public sealed class BrowserExpect
     }
 
     /// <summary>
-    /// Polls until the condition holds, or, negated, until it has been false for <see cref="NegationGrace"/>
-    /// in a row (or for the whole budget when that is shorter), as the locator matchers do. A read the
-    /// deadline cut off after an earlier one completed ends the poll on the last sample.
+    /// Polls until the condition holds, or, negated, until it has been false for the negation grace in a row, as
+    /// the locator matchers do (see <see cref="Time.PollConditionAsync"/>). Each read is bounded by the time left.
     /// </summary>
     private async Task PollAsync(string matcher, string describeExpected, TimeSpan? timeout, Func<CancellationToken, Task<(bool Holds, string Observed)>> read, CancellationToken cancellationToken)
     {
@@ -109,78 +102,36 @@ public sealed class BrowserExpect
         }
 
         var token = _browser.Token(cancellationToken);
-        var budget = timeout ?? _browser.AssertionTimeout;
-        var grace = budget < NegationGrace ? budget : NegationGrace;
-        var clock = Stopwatch.StartNew();
-        var readAt = TimeSpan.Zero;
-        TimeSpan? falseSince = null;
+        var clock = TimeProvider.System;
+        var deadline = new Deadline(timeout ?? _browser.AssertionTimeout, clock);
         string? observed = null;
-        bool Holds(TimeSpan now) => falseSince is { } since && now - since >= grace;
         try
         {
-            while (true)
+            await Time.PollConditionAsync(new PollConditionOptions
             {
-                token.ThrowIfCancellationRequested();
-                var left = budget - readAt;
-                using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token);
-                bounded.CancelAfter(left > PollInterval ? left : PollInterval);
-                (bool Holds, string Observed) sample;
-                try
+                Deadline = deadline,
+                Clock = clock,
+                Token = token,
+                Negated = _negated,
+                Evaluate = async () =>
                 {
-                    sample = await read(bounded.Token).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (bounded.IsCancellationRequested && !token.IsCancellationRequested && ex is OperationCanceledException or EngineException { Code: EngineErrorCodes.Cancelled or EngineErrorCodes.OperationTimeout })
-                {
-                    if (observed is null || left >= PollInterval)
+                    var left = deadline.Remaining(clock.GetUtcNow());
+                    using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    bounded.CancelAfter(left > Time.PollInterval ? left : Time.PollInterval);
+                    try
+                    {
+                        var sample = await read(bounded.Token).ConfigureAwait(false);
+                        observed = sample.Observed;
+                        return sample.Holds;
+                    }
+                    catch (Exception ex) when (bounded.IsCancellationRequested && !token.IsCancellationRequested && ex is OperationCanceledException or EngineException { Code: EngineErrorCodes.Cancelled or EngineErrorCodes.OperationTimeout })
                     {
                         throw new EngineException(EngineErrorCodes.OperationTimeout, "expect." + matcher + " read timed out", retryable: false, ex);
                     }
-
-                    if (_negated && Holds(clock.Elapsed < budget ? clock.Elapsed : budget))
-                    {
-                        _browser.NotifyVerified();
-                        return;
-                    }
-
-                    throw Failure(matcher, describeExpected, observed, ex);
-                }
-
-                observed = sample.Observed;
-                if (!_negated && sample.Holds)
-                {
-                    _browser.NotifyVerified();
-                    return;
-                }
-
-                falseSince = _negated && !sample.Holds ? falseSince ?? readAt : null;
-                var now = clock.Elapsed;
-                if (Holds(now))
-                {
-                    _browser.NotifyVerified();
-                    return;
-                }
-
-                if (now >= budget)
-                {
-                    throw Failure(matcher, describeExpected, observed);
-                }
-
-                // No sleep runs past the deadline, so the last read starts at it and never sees a state that arrived later.
-                var remaining = budget - now;
-                await Task.Delay(remaining < PollInterval ? remaining : PollInterval, token).ConfigureAwait(false);
-
-                readAt = clock.Elapsed;
-                if (_negated && readAt >= budget)
-                {
-                    if (Holds(readAt))
-                    {
-                        _browser.NotifyVerified();
-                        return;
-                    }
-
-                    throw Failure(matcher, describeExpected, observed);
-                }
-            }
+                },
+                OnTimeout = cause => Failure(matcher, describeExpected, observed!, cause),
+            }).ConfigureAwait(false);
+            _browser.NotifyVerified();
         }
         catch (OperationCanceledException ex) when (token.IsCancellationRequested)
         {

@@ -11,7 +11,7 @@ internal static class Config
     /// The absolute path of a project's config, found without reading it: <paramref name="configPath"/> relative to
     /// <paramref name="cwd"/>, else the nearest <c>e2e.config.json</c> from <paramref name="cwd"/> upward.
     /// </summary>
-    public static string Locate(string cwd, string? configPath)
+    public static string LocateProjectConfig(string cwd, string? configPath)
     {
         if (configPath is not null)
         {

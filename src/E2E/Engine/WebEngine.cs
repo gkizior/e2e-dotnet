@@ -426,12 +426,12 @@ public sealed partial class WebEngine : IEngine
 
         foreach (var (name, value) in options.Headers ?? new Dictionary<string, string>())
         {
-            if (!HeaderNamePattern().IsMatch(name))
+            if (!ProtectedApp.HeaderNamePattern().IsMatch(name))
             {
                 throw new EngineException("INVALID_CONFIG", "headers has an invalid header name: \"" + name + "\".");
             }
 
-            if (FieldValueControlPattern().IsMatch(value))
+            if (ProtectedApp.FieldValueControlPattern().IsMatch(value))
             {
                 throw new EngineException("INVALID_CONFIG", "headers: header \"" + name + "\" must not contain a control character.");
             }
@@ -457,7 +457,7 @@ public sealed partial class WebEngine : IEngine
                 throw new EngineException("INVALID_CONFIG", "userAgent must be a non-empty string.");
             }
 
-            if (FieldValueControlPattern().IsMatch(userAgent))
+            if (ProtectedApp.FieldValueControlPattern().IsMatch(userAgent))
             {
                 throw new EngineException("INVALID_CONFIG", "userAgent must not contain a control character.");
             }
@@ -578,14 +578,6 @@ public sealed partial class WebEngine : IEngine
 
         return true;
     }
-
-    // An HTTP header field name: one or more token characters (RFC 9110).
-    [GeneratedRegex(@"^[!#$%&'*+.^_`|~0-9A-Za-z-]+\z")]
-    private static partial Regex HeaderNamePattern();
-
-    // A control character no HTTP field value may carry; a horizontal tab is the one the grammar allows.
-    [GeneratedRegex(@"[\u0000-\u0008\u000A-\u001F\u007F]")]
-    private static partial Regex FieldValueControlPattern();
 
     // An attribute name an element could carry, so a test id query can match something.
     [GeneratedRegex(@"^[A-Za-z_:][A-Za-z0-9_:.-]*\z")]
@@ -1001,7 +993,7 @@ public sealed partial class WebEngine : IEngine
             System.Text.Json.JsonElement? outcome;
             try
             {
-                outcome = await budget.WithinAsync(Page.EvaluateAsync<System.Text.Json.JsonElement?>(EvaluationBoundary(expression, hasArg), arg)).ConfigureAwait(false);
+                outcome = await budget.WithinAsync(Page.EvaluateAsync<System.Text.Json.JsonElement?>(Evaluation.CompileEvaluation(expression, hasArg), arg)).ConfigureAwait(false);
             }
             catch (PlaywrightException ex) when (ex.Message.StartsWith("SyntaxError", StringComparison.Ordinal))
             {
@@ -1026,25 +1018,6 @@ public sealed partial class WebEngine : IEngine
 
             throw new TestException("EVALUATE_FAILED", result.GetProperty("message").GetString()!);
         });
-
-        // One expression: a function it evaluates to is called with the argument, any other value is the result.
-        // The page code runs inside a try, so an exception it throws comes back as data, apart from the browser's own failures.
-        private static string EvaluationBoundary(string expression, bool hasArg) => $$"""
-            async (arg) => {
-              try {
-                return { ok: true, value: await ((result) => typeof result === 'function' ? result({{(hasArg ? "arg" : "")}}) : result)(({{expression}}
-            )) };
-              } catch (cause) {
-                let message;
-                try {
-                  message = typeof cause?.message === 'string' ? cause.message : String(cause);
-                } catch {
-                  message = 'Page evaluation threw an unprintable value';
-                }
-                return { ok: false, message };
-              }
-            }
-            """;
 
         // What the page code threw, without the stack Playwright appends or the "Error: " it prefixes to an Error's message.
         private static string PageMessage(PlaywrightException ex)

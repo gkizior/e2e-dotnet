@@ -69,7 +69,7 @@ internal static class Server
         McpServer? server = null;
         using var host = new SessionHost(new SessionHostOptions
         {
-            LocateConfig = configPath => Config.Locate(options.Cwd, configPath ?? options.ConfigPath),
+            LocateConfig = configPath => Config.LocateProjectConfig(options.Cwd, configPath ?? options.ConfigPath),
             Headed = options.Headed,
             DefaultTarget = options.Target,
             MaxSessions = options.MaxSessions,

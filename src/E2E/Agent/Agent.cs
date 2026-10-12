@@ -168,7 +168,7 @@ public sealed class Agent
             }
 
             // A repeat warns first. A stop leaves the model only done, so it still writes its own verdict.
-            var (stop, repeat) = stopped ? (true, null) : LoopGuard.Check(LoopGuard.Calls(messages));
+            var (stop, repeat) = stopped ? (true, null) : LoopGuards.CheckLoopGuards(LoopGuards.ExtractGuardCalls(messages));
             if (repeat is not null && !string.Equals(repeat, noticed, StringComparison.Ordinal))
             {
                 noticed = repeat;
@@ -242,7 +242,7 @@ public sealed class Agent
                     // Only a cache that writes keeps the recording, so only it waits for the screen to settle: after the
                     // last action's change, held still.
                     pending.Entry = _scope.CacheWrite
-                        ? await RecordAsync(pending.Step!, start, actions, options?.Params, token).ConfigureAwait(false)
+                        ? await StageAsync(pending.Step!, start, actions, options?.Params, token).ConfigureAwait(false)
                         : null;
                     _scope.Completed.Add(summary.Length == 0 ? instruction : summary);
                     if (info is not null && pending.ParamCollision && pending.Entry is not null)
@@ -1625,7 +1625,7 @@ public sealed class Agent
         route is null ? null : CacheKeys.Detemplate(route, parameters);
 
     // The cache is disposable: a passing step whose end screen cannot be read records nothing, and still passes.
-    private async Task<CacheEntry?> RecordAsync(
+    private async Task<CacheEntry?> StageAsync(
         CacheEntry step,
         Observation start,
         List<RecordedAction> actions,

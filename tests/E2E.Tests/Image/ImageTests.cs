@@ -141,7 +141,7 @@ public sealed class ImageTests
     [Fact]
     public void Clips_a_box_to_the_image_on_whole_pixels_and_has_none_for_a_box_outside_it()
     {
-        Assert.Equal(new PixelBox(0, 4, 3, 6), ImageOps.ClipBox(10, 10, new BoundingBox(-2.4, 3.6, 5, 20)));
+        Assert.Equal(new ImageBox(0, 4, 3, 6), ImageOps.ClipBox(10, 10, new BoundingBox(-2.4, 3.6, 5, 20)));
         Assert.Null(ImageOps.ClipBox(10, 10, new BoundingBox(12, 0, 5, 5)));
     }
 
@@ -153,36 +153,36 @@ public sealed class ImageTests
         Assert.Equal(Gray(4, 4, 0).Data, blank.Data);
         Assert.Equal(
             new byte[] { 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 0, 0, 255 },
-            ImageOps.Crop(image, new PixelBox(1, 1, 2, 2)).Data);
+            ImageOps.CropImage(image, new ImageBox(1, 1, 2, 2)).Data);
     }
 
     [Fact]
     public void Averages_the_pixels_each_target_pixel_covers_when_it_resamples()
     {
         var image = new RgbaImage(2, 1, [0, 0, 0, 255, 200, 200, 200, 255]);
-        Assert.Equal(new byte[] { 100, 100, 100, 255 }, ImageOps.Resample(image, 1, 1).Data);
-        Assert.Same(image, ImageOps.Resample(image, 2, 1));
+        Assert.Equal(new byte[] { 100, 100, 100, 255 }, ImageOps.ResampleImage(image, 1, 1).Data);
+        Assert.Same(image, ImageOps.ResampleImage(image, 2, 1));
     }
 
     [Fact]
     public void Reports_a_size_mismatch_and_counts_differing_pixels_against_maxDiffPixels_and_maxDiffPixelRatio_the_smaller_one_when_both_are_set()
     {
-        Assert.IsType<ImageComparison.SizeMismatch>(ImageOps.Compare(Gray(2, 2, 0), Gray(2, 3, 0), Exact));
+        Assert.IsType<ImageComparison.SizeMismatch>(ImageOps.CompareImages(Gray(2, 2, 0), Gray(2, 3, 0), Exact));
         var expected = Gray(10, 10, 255);
         var actual = ImageOps.FillBoxes(Gray(10, 10, 255), [new BoundingBox(0, 0, 5, 1)], (0, 0, 0));
-        var pixels = Assert.IsType<ImageComparison.Pixels>(ImageOps.Compare(expected, actual, Exact));
+        var pixels = Assert.IsType<ImageComparison.Pixels>(ImageOps.CompareImages(expected, actual, Exact));
         Assert.Equal(5, pixels.DiffPixels);
         Assert.Equal(0.05, pixels.Ratio);
-        Assert.IsType<ImageComparison.Match>(ImageOps.Compare(expected, actual, Exact with { MaxDiffPixels = 5 }));
-        Assert.IsType<ImageComparison.Match>(ImageOps.Compare(expected, actual, Exact with { MaxDiffPixelRatio = 0.05 }));
-        Assert.IsType<ImageComparison.Pixels>(ImageOps.Compare(expected, actual, Exact with { MaxDiffPixels = 10, MaxDiffPixelRatio = 0.04 }));
+        Assert.IsType<ImageComparison.Match>(ImageOps.CompareImages(expected, actual, Exact with { MaxDiffPixels = 5 }));
+        Assert.IsType<ImageComparison.Match>(ImageOps.CompareImages(expected, actual, Exact with { MaxDiffPixelRatio = 0.05 }));
+        Assert.IsType<ImageComparison.Pixels>(ImageOps.CompareImages(expected, actual, Exact with { MaxDiffPixels = 10, MaxDiffPixelRatio = 0.04 }));
     }
 
     [Fact]
     public void Counts_a_pixel_as_the_same_when_its_color_is_within_the_threshold()
     {
-        Assert.IsType<ImageComparison.Match>(ImageOps.Compare(Gray(4, 4, 200), Gray(4, 4, 204), Exact with { Threshold = 0.2 }));
-        var pixels = Assert.IsType<ImageComparison.Pixels>(ImageOps.Compare(Gray(4, 4, 200), Gray(4, 4, 204), Exact));
+        Assert.IsType<ImageComparison.Match>(ImageOps.CompareImages(Gray(4, 4, 200), Gray(4, 4, 204), Exact with { Threshold = 0.2 }));
+        var pixels = Assert.IsType<ImageComparison.Pixels>(ImageOps.CompareImages(Gray(4, 4, 200), Gray(4, 4, 204), Exact));
         Assert.Equal(16, pixels.DiffPixels);
     }
 }
