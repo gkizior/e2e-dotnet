@@ -63,7 +63,7 @@ public sealed class AnthropicModel : IAgentModel, IDisposable
         {
             if (message.ToolCalls is { Count: > 0 })
             {
-                var content = new JsonArray();
+                var content = Thinking(message);
                 if (!string.IsNullOrEmpty(message.Content))
                 {
                     content.Add(new JsonObject { ["type"] = "text", ["text"] = message.Content });
@@ -97,7 +97,9 @@ public sealed class AnthropicModel : IAgentModel, IDisposable
             else
             {
                 var role = string.Equals(message.Role, "assistant", StringComparison.Ordinal) ? "assistant" : "user";
-                Append(messages, role, new JsonArray { new JsonObject { ["type"] = "text", ["text"] = string.IsNullOrEmpty(message.Content) ? "(empty)" : message.Content } });
+                var content = role == "assistant" ? Thinking(message) : [];
+                content.Add(new JsonObject { ["type"] = "text", ["text"] = string.IsNullOrEmpty(message.Content) ? "(empty)" : message.Content });
+                Append(messages, role, content);
             }
         }
 
@@ -141,6 +143,18 @@ public sealed class AnthropicModel : IAgentModel, IDisposable
         return payload;
     }
 
+    // The thinking blocks of an earlier turn go back as they came, signature and all, ahead of its text and tool calls.
+    private static JsonArray Thinking(ModelMessage message)
+    {
+        var blocks = new JsonArray();
+        foreach (var item in message.ReasoningItems ?? [])
+        {
+            blocks.Add(JsonNode.Parse(item.GetRawText()));
+        }
+
+        return blocks;
+    }
+
     /// <summary>Anthropic wants turns to alternate, so consecutive turns of one role share a message.</summary>
     private static void Append(JsonArray messages, string role, JsonArray content)
     {
@@ -162,10 +176,16 @@ public sealed class AnthropicModel : IAgentModel, IDisposable
     {
         var text = new List<string>();
         var calls = new List<ModelToolCall>();
+        var thinking = new List<JsonElement>();
         foreach (var block in root.GetProperty("content").EnumerateArray())
         {
             switch (block.GetProperty("type").GetString())
             {
+                // A thinking block can only be sent back with its signature, and a redacted one with its data.
+                case "thinking" when block.TryGetProperty("signature", out var signature) && signature.ValueKind == JsonValueKind.String:
+                case "redacted_thinking" when block.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.String:
+                    thinking.Add(block.Clone());
+                    break;
                 case "text":
                     text.Add(block.GetProperty("text").GetString() ?? "");
                     break;
@@ -192,7 +212,7 @@ public sealed class AnthropicModel : IAgentModel, IDisposable
             };
         }
 
-        return new ModelResponse { Content = text.Count == 0 ? null : string.Concat(text), ToolCalls = calls, Usage = usage };
+        return new ModelResponse { Content = text.Count == 0 ? null : string.Concat(text), ToolCalls = calls, Usage = usage, ReasoningItems = thinking };
     }
 }
 

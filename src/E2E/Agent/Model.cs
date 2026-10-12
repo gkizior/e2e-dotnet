@@ -46,7 +46,7 @@ public sealed class ModelMessage
 
     public string? Name { get; init; }
 
-    /// <summary>The reasoning items the model returned with this turn, sent back as they came. Only <see cref="OpenAiResponsesModel"/> reads them.</summary>
+    /// <summary>The reasoning the model returned with this turn, sent back as it came: encrypted items for <see cref="OpenAiResponsesModel"/>, signed thinking blocks for <see cref="AnthropicModel"/>, the reasoning text as a JSON string for <see cref="OpenAiCompatibleModel"/>.</summary>
     public IReadOnlyList<JsonElement>? ReasoningItems { get; init; }
 }
 
@@ -83,7 +83,7 @@ public sealed class ModelResponse
 
     public ModelUsage? Usage { get; init; }
 
-    /// <summary>The reasoning items of the turn that carry encrypted content, to replay on the next turn. Empty when the model gave none.</summary>
+    /// <summary>The reasoning of the turn that the model can take back, to replay on the next turn. Empty when the model gave none.</summary>
     public IReadOnlyList<JsonElement> ReasoningItems { get; init; } = [];
 }
 

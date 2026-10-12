@@ -84,12 +84,14 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
                     });
                 }
 
-                messages.Add(new JsonObject
+                var assistant = new JsonObject
                 {
                     ["role"] = "assistant",
                     ["content"] = message.Content ?? "",
-                    ["tool_calls"] = calls,
-                });
+                };
+                AddReasoning(assistant, message);
+                assistant["tool_calls"] = calls;
+                messages.Add(assistant);
             }
             else if (string.Equals(message.Role, "tool", StringComparison.Ordinal))
             {
@@ -102,7 +104,9 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
             }
             else
             {
-                messages.Add(new JsonObject { ["role"] = message.Role, ["content"] = message.Content ?? "" });
+                var turn = new JsonObject { ["role"] = message.Role, ["content"] = message.Content ?? "" };
+                AddReasoning(turn, message);
+                messages.Add(turn);
             }
         }
 
@@ -149,6 +153,16 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
         return payload;
     }
 
+    // A model that thinks aloud gets its earlier reasoning back as reasoning_content, as the AI SDK sends it.
+    private static void AddReasoning(JsonObject assistant, ModelMessage message)
+    {
+        var reasoning = string.Concat((message.ReasoningItems ?? []).Select(item => item.GetString()));
+        if (string.Equals(message.Role, "assistant", StringComparison.Ordinal) && reasoning.Length > 0)
+        {
+            assistant["reasoning_content"] = reasoning;
+        }
+    }
+
     private bool IsGatewayOpenAi()
     {
         return string.Equals(_options.Provider, "gateway", StringComparison.Ordinal) && _options.Model.StartsWith("openai/", StringComparison.Ordinal);
@@ -180,6 +194,17 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
             }
         }
 
+        // Servers spell the reasoning text reasoning_content, or reasoning.
+        var reasoning = new List<JsonElement>();
+        foreach (var name in new[] { "reasoning_content", "reasoning" })
+        {
+            if (message.TryGetProperty(name, out var text) && text.ValueKind == JsonValueKind.String && text.GetString()!.Length > 0)
+            {
+                reasoning.Add(text.Clone());
+                break;
+            }
+        }
+
         ModelUsage? usage = null;
         if (root.TryGetProperty("usage", out var usageElement) && usageElement.ValueKind == JsonValueKind.Object)
         {
@@ -190,7 +215,7 @@ public sealed class OpenAiCompatibleModel : IAgentModel, IDisposable
             };
         }
 
-        return new ModelResponse { Content = content, ToolCalls = calls, Usage = usage };
+        return new ModelResponse { Content = content, ToolCalls = calls, Usage = usage, ReasoningItems = reasoning };
     }
 }
 
