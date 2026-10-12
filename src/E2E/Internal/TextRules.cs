@@ -59,13 +59,22 @@ internal static class TextRules
         return contains ? subject.Contains(text, comparison) : string.Equals(subject, text, comparison);
     }
 
-    public static string Truncate(string value, int limit)
+    /// <summary>
+    /// Caps prose at <paramref name="maxChars"/>, marking the cut with an ellipsis. A cut never splits a surrogate pair.
+    /// </summary>
+    public static string Bound(string text, int maxChars)
     {
-        if (value.Length <= limit)
+        if (text.Length <= maxChars)
         {
-            return value;
+            return text;
         }
 
-        return value[..limit];
+        var end = maxChars - 1;
+        if (end > 0 && char.IsHighSurrogate(text[end - 1]))
+        {
+            end--;
+        }
+
+        return text[..end] + "…";
     }
 }
