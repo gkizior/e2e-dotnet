@@ -5,6 +5,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using E2E.Cli.Mcp;
 using E2E.OAuth;
 
@@ -15,7 +16,7 @@ namespace E2E.Cli;
 /// credentials file upstream's CLI uses, so a login made with either one serves both. <c>e2e guide</c> prints
 /// the bundled skill, <c>e2e install</c> installs browsers, and <c>e2e mcp</c> serves a coding agent over MCP.
 /// </summary>
-public static class Program
+public static partial class Program
 {
     private const string Usage = """
         Usage:
@@ -375,11 +376,15 @@ public static class Program
         return (positional, flags);
     }
 
-    /// <summary>Vendor text is untrusted: terminal control characters are dropped.</summary>
+    /// <summary>A CSI sequence, a terminated string sequence (OSC, DCS, SOS, PM, APC), or a two-character escape.</summary>
+    [GeneratedRegex(@"\u001b(?:\[[0-?]*[ -/]*[@-~]|[\]PX^_][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\-_])")]
+    private static partial Regex EscapeSequence();
+
+    /// <summary>Vendor text is untrusted: escape sequences are stripped whole, and the other terminal control characters are dropped.</summary>
     private static string Clean(string text)
     {
         var builder = new StringBuilder(text.Length);
-        foreach (var c in text)
+        foreach (var c in EscapeSequence().Replace(text, string.Empty))
         {
             if (!char.IsControl(c) || c is '\n' or '\t')
             {

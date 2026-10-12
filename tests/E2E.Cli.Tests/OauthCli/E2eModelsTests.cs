@@ -45,10 +45,6 @@ public sealed class E2eModelsTests : IDisposable
         Assert.Equal("no SpaceXAI login is stored; run `e2e login spacexai`", named.Message);
     }
 
-    /// <summary>
-    /// Partial: the vendor text carries a bell, where upstream's carries a color escape sequence. The port drops control
-    /// characters only, so the printable rest of an escape sequence would stay.
-    /// </summary>
     [Fact]
     public async Task Prints_one_aligned_line_per_model_with_vendor_text_stripped_of_terminal_controls_and_keeps_going_past_a_failing_provider()
     {
@@ -60,7 +56,7 @@ public sealed class E2eModelsTests : IDisposable
             () =>
             [
                 new SubscriptionModel("grok-4", Detail: "vision; also grok-4-latest"),
-                new SubscriptionModel("grok-4-fast\a", "grok-4-fast\a"),
+                new SubscriptionModel("grok-4-fast\u001b[31m", "grok-4-fast\u001b[31m"),
                 new SubscriptionModel("grok-3"),
             ]);
 
@@ -72,7 +68,7 @@ public sealed class E2eModelsTests : IDisposable
             string.Join('\n', "SpaceXAI (spacexai): 3 models", "  grok-4       vision; also grok-4-latest", "  grok-4-fast", "  grok-3", ""),
             stdout,
             StringComparison.Ordinal);
-        Assert.DoesNotContain('\a', stdout);
+        Assert.DoesNotContain('\u001b', stdout);
 
         OAuthProviders.Replacements["spacexai"] = new ModelsDouble("spacexai", "SpaceXAI", () => []);
         var (emptyCode, emptyOut, _) = await RunAsync("models", "spacexai");
