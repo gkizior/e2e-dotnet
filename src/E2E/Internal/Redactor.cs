@@ -36,6 +36,7 @@ internal sealed class Redactor
     private readonly Regex? _known;
     private readonly string[] _markers = [];
     private readonly Dictionary<string, int> _fragments = new(StringComparer.Ordinal);
+    private readonly string[][] _leadingForms = [];
 
     private Redactor(IEnumerable<(string Marker, string Value)> values)
     {
@@ -54,6 +55,7 @@ internal sealed class Redactor
         _known = new Regex("(" + markerAlternatives + ")", RegexOptions.CultureInvariant, MatchTimeout);
         var source = string.Join('|', entries.Select(entry => "(" + ValuePattern(entry.Value) + ")"));
         _pattern = new Regex(source, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, MatchTimeout);
+        _leadingForms = new string[entries.Count][];
         for (var index = 0; index < entries.Count; index++)
         {
             var key = new string(ReadingKey(entries[index].Value).Span);
@@ -61,6 +63,10 @@ internal sealed class Redactor
             {
                 _fragments.TryAdd(key.Substring(start, FragmentLength), index);
             }
+
+            // A reader trims a value's leading whitespace as it trims any text's, so a cut part may begin past it.
+            var trimmable = new StringInfo(entries[index].Value.Trim()).LengthInTextElements >= Secret.MinLength;
+            _leadingForms[index] = trimmable && key.TrimStart() != key ? [key, key.TrimStart()] : [key];
         }
     }
 
@@ -95,6 +101,79 @@ internal sealed class Redactor
         }
 
         return MapPieces(text, Rewrite);
+    }
+
+    /// <summary>
+    /// <see cref="Redact"/> for text cut short at a length limit, as an engine cuts an observed name or text: a value
+    /// the cut stopped partway through leaves its leading part at the end, which no whole-value match sees, so the
+    /// longest such part becomes that value's marker too, down to <see cref="FragmentLength"/> characters, or half of
+    /// a value shorter than twice that. The part is matched in any case and with every whitespace run on both sides
+    /// read as one space, and a value's leading whitespace is dropped where whole-value matching trims it. A case
+    /// mapping that changes length (<c>ß</c> to <c>SS</c>) is not followed. The part is found before whole values are
+    /// rewritten, so a value that starts with another value is not half rewritten as the shorter one, and an
+    /// occurrence running into the part joins its marker.
+    /// </summary>
+    public string RedactCut(string text)
+    {
+        if (_pattern is null || _known is null || text.Length == 0)
+        {
+            return text;
+        }
+
+        // Only what follows the last marker can end in a value cut short.
+        var tail = _known.Split(text)[^1];
+        var reading = ReadingKey(tail);
+        var cut = 0;
+        var marker = "";
+        for (var index = 0; index < _leadingForms.Length; index++)
+        {
+            foreach (var form in _leadingForms[index])
+            {
+                var length = LeadingPartAtEnd(reading.Span, form, Math.Min(FragmentLength, (form.Length + 1) / 2));
+                if (length > cut)
+                {
+                    cut = length;
+                    marker = _markers[index];
+                }
+            }
+        }
+
+        if (cut == 0)
+        {
+            return Redact(text);
+        }
+
+        // An occurrence the whole-value pass would rewrite across the fragment's start joins the fragment.
+        var start = reading.At(reading.Length - cut);
+        foreach (Match match in _pattern.Matches(tail))
+        {
+            if (match.Index >= start)
+            {
+                break;
+            }
+
+            if (match.Index + match.Length > start)
+            {
+                start = match.Index;
+                break;
+            }
+        }
+
+        return Redact(text[..(text.Length - tail.Length + start)]) + marker;
+    }
+
+    /// <summary>The length of the longest leading part of <paramref name="value"/>, short of the whole and at least <paramref name="minimum"/> long, that <paramref name="text"/> ends with; 0 when it ends with none.</summary>
+    private static int LeadingPartAtEnd(ReadOnlySpan<char> text, string value, int minimum)
+    {
+        for (var length = Math.Min(text.Length, value.Length - 1); length >= minimum; length--)
+        {
+            if (text.EndsWith(value.AsSpan(0, length), StringComparison.Ordinal))
+            {
+                return length;
+            }
+        }
+
+        return 0;
     }
 
     /// <summary>

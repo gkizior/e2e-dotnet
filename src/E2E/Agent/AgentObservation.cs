@@ -64,6 +64,31 @@ internal static class AgentObservation
     /// <summary>The shape of a screen already rendered as text.</summary>
     public static string Shape(string text) => Clock.Replace(Focus.Replace(Reference.Replace(text, ""), ""), "<time>");
 
+    /// <summary>
+    /// One observed string with every secret taken out, as upstream's <c>redactText</c> (agent/observation.ts) does,
+    /// in the form it is written and in the one-line form a line, a descriptor, or an anchor shows it. A field exactly
+    /// as long as <paramref name="limit"/>, and so possibly cut there, passes through <see cref="Redactor.RedactCut"/>:
+    /// a secret the cut stopped partway through leaves a leading part at the end that no whole value matches. Any
+    /// other field is whole, and passes through <see cref="Redactor.Redact"/>. A field whose collapsed form still
+    /// holds a secret (the whitespace inside a value widened) is kept collapsed and redacted, so no later collapse
+    /// brings the value back. Unlike upstream, which redacts every field of the tree once when it builds the
+    /// observation, the port redacts where a field is shown or recorded: the engine reads a node's name, role, and
+    /// test id as the page wrote them (to tell twins apart), so the agent keeps the raw nodes.
+    /// </summary>
+    public static string RedactText(string text, Redactor redactor, int? limit = null)
+    {
+        string Pass(string value) => text.Length == limit ? redactor.RedactCut(value) : redactor.Redact(value);
+        var redacted = Pass(text);
+        var collapsed = TextRules.Collapse(redacted);
+        if (string.Equals(collapsed, redacted, StringComparison.Ordinal))
+        {
+            return redacted;
+        }
+
+        var read = Pass(collapsed);
+        return string.Equals(read, collapsed, StringComparison.Ordinal) ? redacted : read;
+    }
+
     /// <summary>Whether an observation shows a screen in transition: no node, or only an empty document root.</summary>
     public static bool IsTransitional(Observation observation)
     {

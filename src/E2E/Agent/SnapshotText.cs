@@ -48,7 +48,7 @@ internal static class SnapshotText
             // or its test id, shows the text it owns, so a container does not repeat its children's.
             // A named node shows its text too, when it differs.
             var shown = node.OwnText ?? node.Text;
-            var name = Clean(redactor.Redact((string.IsNullOrEmpty(node.Name) ? shown : node.Name) ?? ""));
+            var name = TextRules.Collapse(string.IsNullOrEmpty(node.Name) ? AgentObservation.RedactText(shown ?? "", redactor, ObservationLimits.Text) : AgentObservation.RedactText(node.Name, redactor, ObservationLimits.Name));
             if (name.Length > 0)
             {
                 builder.Append(" \"").Append(name).Append('"');
@@ -56,7 +56,7 @@ internal static class SnapshotText
 
             if (!string.IsNullOrEmpty(node.Name))
             {
-                var text = Clean(redactor.Redact(shown ?? ""));
+                var text = TextRules.Collapse(AgentObservation.RedactText(shown ?? "", redactor, ObservationLimits.Text));
                 if (text.Length > 0 && text != name)
                 {
                     builder.Append(" text=\"").Append(text).Append('"');
@@ -67,7 +67,7 @@ internal static class SnapshotText
             // A checkbox's or radio's value is an app token its checked state already says more than.
             if (!node.States.Secure && !string.IsNullOrEmpty(node.Value) && !LocatorResolver.IsCheckable(node))
             {
-                builder.Append(" value=\"").Append(redactor.Redact(node.Value)).Append('"');
+                builder.Append(" value=\"").Append(AgentObservation.RedactText(node.Value, redactor, ObservationLimits.Text)).Append('"');
             }
 
             if (node.States.Secure)
@@ -120,8 +120,4 @@ internal static class SnapshotText
 
         return wrote;
     }
-
-    // App text is collapsed to one line. A control character becomes U+FFFD, so app text cannot put it in the prompt.
-    private static string Clean(string text) =>
-        string.Concat(TextRules.Normalize(text).Select(character => char.IsControl(character) ? '�' : character));
 }

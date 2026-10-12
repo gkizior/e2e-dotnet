@@ -11,6 +11,13 @@ namespace E2E.Internal;
 /// </summary>
 internal static class TextRules
 {
+    /// <summary>
+    /// App text as one line, as upstream's <c>collapseText</c> reads it: whitespace collapsed, and a control
+    /// character becomes U+FFFD, so app text cannot put it in a prompt.
+    /// </summary>
+    public static string Collapse(string text) =>
+        string.Concat(Normalize(text).Select(character => char.IsControl(character) ? '�' : character));
+
     public static string Normalize(string text)
     {
         var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
