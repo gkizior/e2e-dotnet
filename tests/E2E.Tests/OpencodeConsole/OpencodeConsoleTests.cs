@@ -103,8 +103,7 @@ public sealed class OpencodeConsoleTests
     }
 
     /// <summary>
-    /// Partial: the port also marks the newest message of a call with no tools, and a caller cannot place its own
-    /// breakpoint, so only the system prompt and the newest message of a tool loop are asserted.
+    /// Partial: a caller cannot place its own breakpoint, so only the system prompt and the newest message of a tool loop are asserted. The newest message of a judgment call stays unmarked.
     /// </summary>
     [Fact]
     public async Task Marks_Anthropic_cache_breakpoints_on_the_system_prompt_and_the_newest_message_in_a_tool_loop()
@@ -124,6 +123,7 @@ public sealed class OpencodeConsoleTests
             {
                 System = "You test web apps.",
                 Tools = [click],
+                MarkLatest = true,
                 Messages =
                 [
                     new ModelMessage { Role = "user", Content = "first" },
@@ -140,6 +140,7 @@ public sealed class OpencodeConsoleTests
         Assert.Equal("ephemeral", loop["system"]!.AsArray()[^1]!["cache_control"]!["type"]!.GetValue<string>());
         Assert.Equal(["newest"], MarkedTexts(loop));
         Assert.Equal("ephemeral", judgment["system"]!.AsArray()[^1]!["cache_control"]!["type"]!.GetValue<string>());
+        Assert.Empty(MarkedTexts(judgment));
     }
 
     /// <summary>The texts of the message parts an Anthropic request marks as cache breakpoints.</summary>

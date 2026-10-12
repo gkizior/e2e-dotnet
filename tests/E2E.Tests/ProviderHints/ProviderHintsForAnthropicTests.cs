@@ -40,11 +40,12 @@ public sealed class ProviderHintsForAnthropicTests
     [Fact]
     public async Task Marks_only_the_newest_message_of_each_turns_request()
     {
-        var first = await BodyAsync(Request());
+        var first = await BodyAsync(Request(markLatest: true));
         Assert.Equal("ephemeral", first["messages"]![0]!["content"]![0]!["cache_control"]!["type"]!.GetValue<string>());
 
         var call = new ModelToolCall { Id = "c1", Name = "tap", Arguments = JsonDocument.Parse("{}").RootElement.Clone() };
         var second = await BodyAsync(Request(
+            markLatest: true,
             messages:
             [
                 new ModelMessage { Role = "user", Content = "step" },

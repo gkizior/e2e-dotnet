@@ -19,11 +19,12 @@ internal static class HintedBodies
 
     public const string AnthropicAnswer = """{ "content": [{ "type": "text", "text": "ok" }] }""";
 
-    public static ModelRequest Request(string system = "rules", IReadOnlyDictionary<string, JsonElement>? providerOptions = null, params ModelMessage[] messages) => new()
+    public static ModelRequest Request(string system = "rules", IReadOnlyDictionary<string, JsonElement>? providerOptions = null, bool markLatest = false, params ModelMessage[] messages) => new()
     {
         System = system,
         Tools = ModelProviderTests.Tools(),
         Messages = messages.Length == 0 ? [new ModelMessage { Role = "user", Content = "step" }] : messages,
+        MarkLatest = markLatest,
         ProviderOptions = providerOptions,
     };
 
