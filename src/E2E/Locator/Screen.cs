@@ -55,7 +55,17 @@ public sealed class Screen
     /// <summary>A secret was filled in this attempt, so the app may show it outside a secure field and pixels are withheld.</summary>
     internal bool SecretFilled { get; private set; }
 
-    internal void MarkSecretFilled() => SecretFilled = true;
+    internal void MarkSecretFilled(Secret secret)
+    {
+        SecretFilled = true;
+        RememberSecret?.Invoke(secret);
+    }
+
+    /// <summary>Makes the attempt know a secret filled through this screen, so every message it redacts covers it.</summary>
+    internal Action<Secret>? RememberSecret { get; set; }
+
+    /// <summary>Replaces the secrets the attempt knows in text a failure quotes from the screen; the text as it is for a screen outside a session.</summary>
+    internal Func<string, string> Redact { get; set; } = static text => text;
 
     /// <summary>Creates a lazy role query. <c>img</c> is read as <c>image</c>. A role query never matches a hidden node.</summary>
     public Locator GetByRole(string role, TextMatch? name = null, bool exact = true)
@@ -244,7 +254,7 @@ public sealed class Locator
     public Task FillAsync(Secret value, ActionOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(value);
-        _screen.MarkSecretFilled();
+        _screen.MarkSecretFilled(value);
         return ActAsync(new LocatorAction.Fill(value.Value, Sensitive: true), options, cancellationToken);
     }
 

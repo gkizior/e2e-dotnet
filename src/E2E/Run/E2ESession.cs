@@ -161,6 +161,7 @@ public sealed class E2ESession : IAsyncDisposable
 
         var app = new App(engine, baseUrl, () => timeout.Token);
         var browser = new Browser(engine, options.Engine.Platform, baseUrl, projectRoot, options.ActionTimeout, options.AssertionTimeout, () => timeout.Token, scope.MarkVerified, softFailures);
+        browser.Redact = text => scope.Redactor.Redact(text);
         var agent = new Agent(scope);
         var screen = new Screen(
             token => engine.ObserveAsync(token),
@@ -170,6 +171,8 @@ public sealed class E2ESession : IAsyncDisposable
             options.ActionTimeout,
             options.AssertionTimeout,
             softFailures);
+        screen.RememberSecret = secret => scope.Remember(new Dictionary<string, object?>(StringComparer.Ordinal) { [secret.Name] = secret });
+        screen.Redact = text => scope.Redactor.Redact(text);
         screen.Screenshots = new ScreenshotStore
         {
             ProjectRoot = projectRoot,

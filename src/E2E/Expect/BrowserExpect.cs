@@ -191,6 +191,7 @@ public sealed class BrowserExpect
     private TestException Failure(string matcher, string describeExpected, string observed, Exception? cause = null)
     {
         var message = "expect." + (_negated ? "not." : "") + matcher + " failed\nexpected: " + (_negated ? "not " : "") + describeExpected + "\nobserved: " + observed;
+        message = _browser.Redact(message);
         return cause is null ? new TestException("ASSERTION_FAILED", message) : new TestException("ASSERTION_FAILED", message, cause);
     }
 }

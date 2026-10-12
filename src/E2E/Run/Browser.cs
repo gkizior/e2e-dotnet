@@ -57,6 +57,9 @@ public sealed class Browser
 
     internal SoftFailures SoftFailures { get; }
 
+    /// <summary>Replaces the secrets the attempt knows in text a failure quotes from the page; the text as it is for a browser outside a session.</summary>
+    internal Func<string, string> Redact { get; set; } = static text => text;
+
     internal TimeSpan AssertionTimeout => _assertionTimeout;
 
     internal string? BaseUrl => _baseUrl;
