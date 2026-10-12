@@ -155,10 +155,13 @@ public sealed class DocumentEngine : IEngine
                 case LocatorAction.PressSequentially typed:
                     RequireText(element);
                     _focused = element;
-                    foreach (var character in typed.Text)
+                    // A surrogate pair is one keystroke, as upstream splits by code point.
+                    for (var index = 0; index < typed.Text.Length;)
                     {
-                        element.Value = (element.Value ?? "") + character;
+                        var length = char.IsSurrogatePair(typed.Text, index) ? 2 : 1;
+                        element.Value = (element.Value ?? "") + typed.Text.Substring(index, length);
                         element.OnFill?.Invoke(element.Value);
+                        index += length;
                     }
 
                     break;
