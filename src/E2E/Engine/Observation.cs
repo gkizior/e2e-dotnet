@@ -89,12 +89,18 @@ public sealed class SemanticNode
     /// </summary>
     public IReadOnlyDictionary<string, string> Attributes { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The whole <c>href</c> attribute. <see cref="Attributes"/> carries it reduced to origin and path, as upstream's tree does,
+    /// but upstream reads <c>getAttribute</c> from a separate node read that keeps the whole value; here that read comes from this tree.
+    /// </summary>
+    internal string? WholeHref { get; init; }
+
     /// <summary>The attribute that carries <see cref="TestId"/>. The tree reports the id as a field, so <see cref="Attributes"/> leaves it out.</summary>
     internal string? TestIdAttribute { get; init; }
 
     /// <summary>Reads one attribute, the test-id attribute included.</summary>
     internal string? AttributeOf(string name) =>
-        Attributes.TryGetValue(name, out var value) ? value : name == TestIdAttribute ? TestId : null;
+        name == "href" && WholeHref is not null ? WholeHref : Attributes.TryGetValue(name, out var value) ? value : name == TestIdAttribute ? TestId : null;
 
     /// <summary>The node's box in viewport CSS pixels, when the platform measures one.</summary>
     public BoundingBox? Rect { get; init; }
