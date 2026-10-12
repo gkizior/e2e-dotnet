@@ -24,7 +24,8 @@ public sealed class PollOptions
 /// <summary>
 /// Re-reads a value until the chosen matcher holds or the timeout passes. A
 /// read that throws is retried, and its error is reported if the poll times
-/// out. With NUnit, <c>ToMatchAsync</c> from <c>E2E.NUnit</c> takes any NUnit constraint.
+/// out. A matcher that refuses the read value's type counts as not yet. With NUnit,
+/// <c>ToMatchAsync</c> from <c>E2E.NUnit</c> takes any NUnit constraint.
 /// </summary>
 public sealed class PollExpectation<T>
 {
@@ -105,7 +106,20 @@ public sealed class PollExpectation<T>
                 continue;
             }
 
-            if (check(value) != _negated)
+            bool holds;
+            try
+            {
+                holds = check(value);
+            }
+            catch (ArgumentException ex)
+            {
+                // The matcher refused this value's type, as a sample that does not hold yet.
+                last = ex.Message;
+                await PauseAsync(deadline, interval, clock, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            if (holds != _negated)
             {
                 return;
             }

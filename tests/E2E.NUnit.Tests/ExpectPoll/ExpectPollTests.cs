@@ -52,4 +52,15 @@ public sealed class ExpectPollTests
         Assert.That(held!.Message, Does.StartWith("expect.poll(...).not.toSatisfy(...) timed out after 60 ms"));
         Assert.That(held.Message, Does.Contain("last: received 1, which does satisfy"));
     }
+
+    [Test]
+    public async Task Treats_a_matcher_type_complaint_as_not_yet_like_any_other_failing_sample()
+    {
+        var reads = 0;
+        object Read() => ++reads > 1 ? "hello world" : 42;
+
+        await Expect.Poll(Read, Every(5)).ToMatchAsync(Does.Contain("world"));
+
+        Assert.That(reads, Is.EqualTo(2));
+    }
 }
