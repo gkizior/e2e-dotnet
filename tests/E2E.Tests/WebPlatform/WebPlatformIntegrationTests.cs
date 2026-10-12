@@ -18,6 +18,8 @@ public sealed class WebPlatformIntegrationTests
     [InlineData("toHaveAttribute reads the value attribute of plain fields")]
     [InlineData("a viewport set before the first navigation holds through app.open")]
     [InlineData("toHaveURL ignoreCase folds the comparison")]
+    [InlineData("string and RegExp URL patterns match what they name")]
+    [InlineData("routes are attempt-scoped: registered before the first page, kept across restart and clearState")]
     [InlineData("contenteditable hosts are textboxes: reached by label and by role (a bare host too), filled, and read as a value")]
     public async Task Passes(string title)
     {
@@ -78,7 +80,7 @@ public sealed class WebPlatformIntegrationTests
     }
 
     [Fact]
-    public async Task A_negated_toHaveURL_ignoreCase_fails_on_a_case_folded_match()
+    public async Task Fails_a_negated_toHaveURL_ignoreCase_on_a_case_folded_match()
     {
         var error = Assert.IsType<TestException>(await RunAsync(async session =>
         {
@@ -153,6 +155,44 @@ public sealed class WebPlatformIntegrationTests
             await Expect.That(session.Browser).ToHaveURLAsync("/CLASSES", ignoreCase: true);
             await Expect.That(session.Browser).ToHaveURLAsync(new Regex("CLASSES$"), ignoreCase: true);
             await Expect.That(session.Browser).Not.ToHaveURLAsync("/CLASSES", timeout: TimeSpan.FromMilliseconds(300));
+        },
+        ["string and RegExp URL patterns match what they name"] = async session =>
+        {
+            var browser = session.Browser;
+            var flags = session.Screen.GetByRole("status", "Flags");
+            var short200 = TimeSpan.FromMilliseconds(200);
+            await session.App.OpenAsync("/about");
+            await Expect.That(browser).ToHaveURLAsync("/about");
+            await Expect.That(browser).ToHaveURLAsync(new Regex("/about$"));
+            await Expect.That(browser).Not.ToHaveURLAsync("/other", timeout: short200);
+            await Expect.That(browser).Not.ToHaveURLAsync(new Regex("/other$"), timeout: short200);
+            await browser.WaitForURLAsync(new Regex("/about$"));
+            await browser.RouteAsync(new Regex("/other$"), route => route.AbortAsync());
+            await browser.RouteAsync(new Regex("/api/flags$"), route => route.FulfillAsync(new RouteFulfillResponse { Json = new Dictionary<string, bool> { ["betaBoard"] = true } }));
+            var waiting = browser.WaitForResponseAsync(new Regex("/api/flags$"));
+            await browser.GotoAsync("/flags");
+            var response = await waiting;
+            Assert.Matches("/api/flags$", response.Url);
+            Assert.Equal(new Dictionary<string, bool> { ["betaBoard"] = true }, await response.JsonAsync<Dictionary<string, bool>>());
+            await Expect.That(flags).ToHaveTextAsync("beta on");
+            await browser.UnrouteAsync(new Regex("/api/flags$"));
+            var real = browser.WaitForResponseAsync("**/api/flags");
+            await browser.ReloadAsync();
+            Assert.Equal(new Dictionary<string, bool> { ["betaBoard"] = false }, await (await real).JsonAsync<Dictionary<string, bool>>());
+            await Expect.That(flags).ToHaveTextAsync("beta off");
+        },
+        ["routes are attempt-scoped: registered before the first page, kept across restart and clearState"] = async session =>
+        {
+            var flags = session.Screen.GetByRole("status", "Flags");
+            await session.Browser.RouteAsync("**/api/flags", route => route.FulfillAsync(new RouteFulfillResponse { Json = new Dictionary<string, bool> { ["betaBoard"] = true } }));
+            await session.App.OpenAsync("/flags");
+            await Expect.That(flags).ToHaveTextAsync("beta on");
+            await session.App.RestartAsync();
+            await session.Browser.GotoAsync("/flags");
+            await Expect.That(flags).ToHaveTextAsync("beta on");
+            await session.App.ClearStateAsync();
+            await session.Browser.GotoAsync("/flags");
+            await Expect.That(flags).ToHaveTextAsync("beta on");
         },
         ["deterministic queries and reads"] = async session =>
         {

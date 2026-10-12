@@ -137,6 +137,28 @@ internal static class FixtureApp
         </html>
         """;
 
+    // The flags the page reads from /api/flags.
+    private const string Flags = """
+        <!doctype html>
+        <html>
+        <head><title>Flags</title></head>
+        <body>
+          <h1>Flags</h1>
+          <output id="flags" aria-label="Flags">loading</output>
+          <script>
+            fetch('/api/flags')
+              .then((response) => response.json())
+              .then((flags) => {
+                document.getElementById('flags').textContent = flags.betaBoard ? 'beta on' : 'beta off';
+              })
+              .catch(() => {
+                document.getElementById('flags').textContent = 'error';
+              });
+          </script>
+        </body>
+        </html>
+        """;
+
     // Rich-text editors: a bare contenteditable host named through aria-labelledby, and one that also carries the explicit role.
     private const string Editor = """
         <!doctype html>
@@ -159,10 +181,21 @@ internal static class FixtureApp
             "/" => TinySite.RespondAsync(context, Home),
             "/about" => TinySite.RespondAsync(context, About),
             "/classes" => TinySite.RespondAsync(context, Classes),
+            "/flags" => TinySite.RespondAsync(context, Flags),
+            "/api/flags" => RespondJsonAsync(context, """{"betaBoard":false}"""),
             "/editor" => TinySite.RespondAsync(context, Editor),
             "/value-attributes" => TinySite.RespondAsync(context, ValueAttributes),
             _ => NotFoundAsync(context),
         });
+    }
+
+    private static async Task RespondJsonAsync(HttpListenerContext context, string json)
+    {
+        var body = System.Text.Encoding.UTF8.GetBytes(json);
+        context.Response.ContentType = "application/json";
+        context.Response.ContentLength64 = body.Length;
+        await context.Response.OutputStream.WriteAsync(body);
+        context.Response.Close();
     }
 
     private static Task NotFoundAsync(HttpListenerContext context)

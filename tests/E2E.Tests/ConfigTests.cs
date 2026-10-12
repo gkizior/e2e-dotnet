@@ -264,19 +264,6 @@ public sealed class ConfigTests
         Assert.NotEmpty(Directory.GetFiles(directory));
     }
 
-    [Fact]
-    public async Task Launch_timeout_stops_a_slow_engine()
-    {
-        var error = await Assert.ThrowsAsync<EngineException>(() => E2ESession.StartAsync(new E2ESessionOptions
-        {
-            Engine = new HangingEngine(),
-            TestTitle = "launch",
-            LaunchTimeout = TimeSpan.FromMilliseconds(50),
-        }));
-        Assert.Equal("ENVIRONMENT_UNAVAILABLE", error.Code);
-        Assert.Contains("launch timeout", error.Message, StringComparison.Ordinal);
-    }
-
     [Theory]
     [InlineData("tester.army", "https://tester.army/")]
     [InlineData("localhost:3000/app", "http://localhost:3000/app")]
@@ -309,7 +296,7 @@ public sealed class ConfigTests
     {
         var error = await Assert.ThrowsAsync<ConfigurationException>(() => E2ESession.StartAsync(new E2ESessionOptions
         {
-            Engine = new HangingEngine(),
+            Engine = new E2E.Tests.EngineContract.RunnerEngineContractTests.HangingEngine(),
             TestTitle = "base url",
             BaseUrl = "http://example.test",
         }));
@@ -366,19 +353,4 @@ public sealed class ConfigTests
     }
 
     internal static string TempCache() => Path.Combine(Path.GetTempPath(), "e2e-config-cache", Guid.NewGuid().ToString("n"));
-
-    private sealed class HangingEngine : IEngine
-    {
-        public string Platform => "web";
-
-        public string Version => "1.0";
-
-        public EngineCapabilities Capabilities => EngineCapabilities.None;
-
-        public async Task<IEngineSession> StartAsync(EngineStartOptions options, CancellationToken cancellationToken)
-        {
-            await Task.Delay(Timeout.Infinite, cancellationToken);
-            throw new InvalidOperationException("unreachable");
-        }
-    }
 }

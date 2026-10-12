@@ -19,12 +19,15 @@ namespace E2E.Tests.ExpectSoft;
 public sealed class ExpectSoftTests
 {
     [Fact]
-    public async Task Throws_once_the_collection_is_closed_as_an_afterEach_hook_finds_it()
+    public async Task Throws_at_once_from_an_afterEach_hook_where_nothing_collects_soft_failures()
     {
+        // Partial: the hook's matcher is a locator matcher, so the message is the locator failure, not "expected 1 to be 2".
         await using var session = await StartAsync();
         await session.App.OpenAsync("/settings/billing");
         Assert.Null(session.CloseSoftFailures());
-        await Assert.ThrowsAsync<TestException>(() => Expect.Soft(session.Screen.GetByRole("status", "Pro")).ToBeVisibleAsync());
+        var error = await Assert.ThrowsAsync<TestException>(() => Expect.Soft(session.Screen.GetByRole("status", "Pro")).ToBeVisibleAsync());
+        Assert.Equal("ASSERTION_FAILED", error.Code);
+        Assert.Contains("toBeVisible failed", error.Message, StringComparison.Ordinal);
     }
 
     private static Task<E2ESession> StartAsync()
