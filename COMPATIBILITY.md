@@ -104,7 +104,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 ## Not ported
 
 - The `e2e` command-line tool apart from `login`, `logout`, `models`, `guide`, and `mcp`: the custom runner, `[E2ETest]` discovery, `--grep`, `test.only`, and the JSON report
-- `@e2e-dev/mobile` apart from its snapshot model and engine (see [Mobile snapshot model](#mobile-snapshot-model) and [Mobile engine](#mobile-engine)), `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
+- `@e2e-dev/mobile` apart from its snapshot model and engine (see [Mobile snapshot model](#mobile-snapshot-model) and [Mobile engine](#mobile-engine)), `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/limrun`
 - `e2e init`
 - Vision, traces, and video. `app.screenshot()` is not ported either. `ToHaveScreenshotAsync` is: see [Visual comparison](#visual-comparison)
 - Parallel workers and serial suites
@@ -147,6 +147,15 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - agent-device takes no abort signal, so a cancelled command keeps running. Upstream's surface tracks those commands and makes the next attempt wait for them. The port does not: each attempt has its own session and client.
 - The key grammar (`DeviceKeys`) is ported here, since the core has none.
 - Not ported: video (`startVideo`, `stopVideo`, and the recording tests), the tool-pixels test (needs the full runner and a scripted model), and the `device.openApp` check of an unknown permission name.
+
+## EAS Simulators
+
+`EasSimulators` (`E2E.Mobile.Eas`) ports `@e2e-dev/eas`: hosted iOS simulators and Android emulators from Expo, leased through Expo's GraphQL API over `HttpClient`, with no SDK. It lives in the `E2E.Mobile` package, as the other pieces of the device pool. Pass it as `MobileOptions.Provider`. The sessions, the queue and startup limits, the idle backstop, the `EXPO_TOKEN` or eas-cli login, and the project id from the app config follow upstream. Differences:
+
+- Options are the `EasSimulatorsOptions` record, so an unknown option key is a compile error and upstream's `rejectUnknownKeys` has no counterpart. A bad combination (`BuildId` with `ApplicationArchiveUrl`, an idle limit not below the duration) is `INVALID_CONFIG` from the constructor.
+- A dynamic app config (`app.config.ts` and its siblings) is evaluated by running the project's own `expo config` with `node` from the path of the process, so it needs Node. A static `app.json` needs nothing.
+- The request's cancellation is a `CancellationToken`. A cancelled read of the app config is an `OperationCanceledException`; upstream wraps it as "could not read the Expo app config".
+- A device request always carries the project root, so upstream's check for an engine that passes none has no counterpart.
 
 ## Browser install command
 
