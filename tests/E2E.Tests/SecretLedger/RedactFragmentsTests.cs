@@ -118,11 +118,12 @@ public sealed class RedactFragmentsTests
         _ = kind;
         var ledger = Ledger.Of(("apiKey", Value));
         var text = string.Concat(Enumerable.Repeat(line, (int)Math.Ceiling(8_000_000.0 / line.Length))) + Value[10..30];
-        var before = GC.GetTotalMemory(forceFullCollection: false);
+        // Bytes this thread allocates: neither a collection mid-scan nor a test running in parallel moves the figure.
+        var before = GC.GetAllocatedBytesForCurrentThread();
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var redacted = ledger.RedactFragments(text);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), "took " + watch.Elapsed);
-        Assert.True(GC.GetTotalMemory(forceFullCollection: false) - before < text.Length * 16L, "used too much memory");
+        Assert.True(GC.GetAllocatedBytesForCurrentThread() - before < text.Length * 16L, "used too much memory");
         Assert.EndsWith("<secret:apiKey>", redacted, StringComparison.Ordinal);
     }
 
