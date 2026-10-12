@@ -64,6 +64,33 @@ public sealed class ObservationTests
     }
 
     [Fact]
+    public async Task Measures_the_screen_in_the_viewport_the_snapshot_publishes_and_in_its_tree_when_it_publishes_none()
+    {
+        var h = Harness.Create();
+        var session = await OpenAttempt(h);
+        // The application node reads 390x844; a published viewport outranks it.
+        h.Fake.Respond(DeviceMethods.CaptureSnapshot, _ =>
+        {
+            var snapshot = FakeDeviceClient.SettingsSnapshot();
+            snapshot["viewport"] = new JsonObject { ["width"] = 402, ["height"] = 874 };
+            return snapshot;
+        });
+        Assert.Equal(new BoundingBox(0, 0, 402, 874), (await session.ObserveAsync(CancellationToken.None)).Roots[0].Rect);
+        h.Fake.Respond(DeviceMethods.CaptureSnapshot, _ => FakeDeviceClient.SettingsSnapshot());
+        Assert.Equal(new BoundingBox(0, 0, 390, 844), (await session.ObserveAsync(CancellationToken.None)).Roots[0].Rect);
+        Assert.DoesNotContain("capture.screenshot", h.Fake.Methods());
+
+        // A published size that is not positive is no measurement: the tree decides.
+        h.Fake.Respond(DeviceMethods.CaptureSnapshot, _ =>
+        {
+            var snapshot = FakeDeviceClient.SettingsSnapshot();
+            snapshot["viewport"] = new JsonObject { ["width"] = 0, ["height"] = 0 };
+            return snapshot;
+        });
+        Assert.Equal(new BoundingBox(0, 0, 390, 844), (await session.ObserveAsync(CancellationToken.None)).Roots[0].Rect);
+    }
+
+    [Fact]
     public async Task Asks_for_interactive_only_snapshots_when_configured()
     {
         var h = Harness.Create(options => options with { Snapshot = SnapshotMode.Interactive });

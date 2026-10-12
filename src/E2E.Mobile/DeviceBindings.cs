@@ -46,12 +46,6 @@ public sealed record SlotBinding : DeviceConnection
 
     /// <summary>The id of the provider lease the slot rides, set only for a provider's lease.</summary>
     public string? LeaseId { get; init; }
-
-    /// <summary>
-    /// App the warm-up in <c>prepare</c> opened in the slot's session, which the worker resumes: a permission
-    /// command there already acts on it. Absent when nothing was opened, or the open failed.
-    /// </summary>
-    public string? SessionApp { get; init; }
 }
 
 /// <summary>
@@ -104,8 +98,7 @@ public static class DeviceBindings
                 ("daemon", binding.Daemon is null ? null : DeviceArgs.Of(("baseUrl", Text(binding.Daemon.BaseUrl)), ("authToken", Text(binding.Daemon.AuthToken)))),
                 ("client", binding.Client?.DeepClone()),
                 ("installedApp", Text(binding.InstalledApp)),
-                ("leaseId", Text(binding.LeaseId)),
-                ("sessionApp", Text(binding.SessionApp))));
+                ("leaseId", Text(binding.LeaseId))));
         }
 
         var encoded = array.ToJsonString(Compact);
@@ -166,8 +159,7 @@ public static class DeviceBindings
         if (!TryString(entry, "device", out var device)
             || !TryString(entry, "deviceId", out var deviceId)
             || !TryString(entry, "installedApp", out var installedApp)
-            || !TryString(entry, "leaseId", out var leaseId)
-            || !TryString(entry, "sessionApp", out var sessionApp))
+            || !TryString(entry, "leaseId", out var leaseId))
         {
             return false;
         }
@@ -203,7 +195,6 @@ public static class DeviceBindings
             DeviceId = deviceId,
             InstalledApp = installedApp,
             LeaseId = leaseId,
-            SessionApp = sessionApp,
             Daemon = daemon,
             Client = client,
         };

@@ -13,7 +13,7 @@ namespace E2E.Mobile;
 /// <listheader><term>agent-device failure</term><description>Code</description></listheader>
 /// <item><term>already an engine, test, or configuration error</term><description>passed through untouched</description></item>
 /// <item><term>cancellation</term><description>CANCELLED</description></item>
-/// <item><term>no active session, session not found, requires a session</term><description>INVALID_STATE</description></item>
+/// <item><term>SESSION_NOT_FOUND, or a session-or-device-selector refusal</term><description>INVALID_STATE</description></item>
 /// <item><term>UNSUPPORTED_OPERATION, NOT_IMPLEMENTED, UNSUPPORTED_PLATFORM, or "not supported on this device" under any code</term><description>UNSUPPORTED_CAPABILITY</description></item>
 /// <item><term>a stale-ref refusal, by <c>details.reason</c> (action paths only)</term><description>NODE_STALE (retryable)</description></item>
 /// <item><term>the iOS runner busy, wedged, or past its watchdog; a snapshot the runner acquired but could not present</term><description>ENGINE_FAILURE, naming the runner and the recovery</description></item>
@@ -31,6 +31,12 @@ public static partial class DeviceErrors
 
     private const string RunnerRecovery =
         "If the next run meets it again, stop the daemon (`npx agent-device daemon stop`) and reboot the simulator (`xcrun simctl shutdown <udid>`, then `boot`).";
+
+    /// <summary>
+    /// The <c>details.reason</c> agent-device refuses a command with when it has no session and no device selector
+    /// to fall back on (0.21.21).
+    /// </summary>
+    private const string NoSessionReason = "session_or_device_selector_required";
 
     private static readonly HashSet<string> UnsupportedCodes = ["UNSUPPORTED_OPERATION", "NOT_IMPLEMENTED", "UNSUPPORTED_PLATFORM"];
 
@@ -105,7 +111,7 @@ public static partial class DeviceErrors
 
         var normalized = AgentDeviceErrors.Normalize(cause);
         var text = $"{operation} failed: {WithHint(cause, normalized.Message)}";
-        if (normalized.Code == "SESSION_NOT_FOUND" || NoSession().IsMatch(normalized.Message))
+        if (normalized.Code == "SESSION_NOT_FOUND" || Details(cause).GetValueOrDefault("reason") is NoSessionReason)
         {
             return new EngineException(EngineErrorCodes.InvalidState, text, retryable: false, cause);
         }
@@ -134,13 +140,6 @@ public static partial class DeviceErrors
     /// did not open (warm-up) must not tolerate this.
     /// </summary>
     public static bool IsRunnerFailure(Exception? error) => error?.InnerException is { } cause && RunnerState(cause) is not null;
-
-    /// <summary>
-    /// True for a translated settings command agent-device refused because its session is on no app: the
-    /// one refusal a foreground open of the pinned app answers.
-    /// </summary>
-    public static bool IsNoSessionApp(Exception? error) =>
-        error?.InnerException is { } cause && NoSessionApp().IsMatch(AgentDeviceErrors.Normalize(cause).Message);
 
     /// <summary>
     /// True for a translated snapshot the iOS runner acquired but could not present. The check is per
@@ -248,16 +247,8 @@ public static partial class DeviceErrors
         return $"{operation} failed: {state.Headline}{location}: {Message(cause)} The app is fine. {state.FirstMove} {RunnerRecovery}";
     }
 
-    [GeneratedRegex(
-        @"no active (?:app )?session|requires an active session|session\b.*\bnot found|open an app first|no app (?:is )?open",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex NoSession();
-
     [GeneratedRegex(@"\b(?:is )?not supported\b|\bunsupported\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Unsupported();
-
-    [GeneratedRegex(@"requires an active app in (?:the )?session", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex NoSessionApp();
 
     /// <summary>agent-device's generic hint (<c>Check command arguments and run --help</c>) is CLI advice.</summary>
     [GeneratedRegex(@"--help|command arguments", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

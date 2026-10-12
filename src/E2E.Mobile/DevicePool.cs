@@ -152,9 +152,9 @@ public sealed partial class DevicePool
 
     /// <summary>
     /// Binds a device to every worker slot the run will use and warms each, once per run and outside every launch
-    /// budget, so a worker's start finds a booted device. The bindings, each naming the app its session is on, are
-    /// reported back as the target's worker cap and left in the environment for the workers. A target nothing runs
-    /// on binds nothing: a hosted session is billed from the moment it starts.
+    /// budget, so a worker's start finds a booted device. The bindings are reported back as the target's worker cap
+    /// and left in the environment for the workers. A target nothing runs on binds nothing: a hosted session is
+    /// billed from the moment it starts.
     /// </summary>
     public async Task<MobilePrepareResult> PrepareAsync(MobilePrepareInfo info, CancellationToken cancellationToken)
     {
@@ -163,7 +163,8 @@ public sealed partial class DevicePool
             return new MobilePrepareResult();
         }
 
-        var bindings = await WarmAsync(await _source.BindAsync(info, cancellationToken).ConfigureAwait(false), info, cancellationToken).ConfigureAwait(false);
+        var bindings = await _source.BindAsync(info, cancellationToken).ConfigureAwait(false);
+        await WarmAsync(bindings, info, cancellationToken).ConfigureAwait(false);
         lock (_bound)
         {
             _bound[info.TargetName] = bindings;
@@ -239,20 +240,19 @@ public sealed partial class DevicePool
     }
 
     /// <summary>
-    /// Boots every bound device, starts the iOS automation runner on it, and opens the pinned app on it once, so the
-    /// slot's session is on the app, which the returned binding records for the worker: a permission it presets there
-    /// needs no open first. A plain foreground open, with none of the engine's launch options. One slot after
-    /// another, on purpose: workers booting at once contend for the host and the daemon, and one cold boot pushes the
-    /// others past the launch timeout. A device that cannot boot ends the run here. An app that does not open is
+    /// Boots every bound device, starts the iOS automation runner on it, and opens the pinned app on it once, so a
+    /// test that starts without <c>app.open()</c> finds it on screen. A plain foreground open, with none of the
+    /// engine's launch options. One slot after another, on purpose: workers booting at once contend for the host and
+    /// the daemon, and one cold boot pushes the others
+    /// past the launch timeout. A device that cannot boot ends the run here. An app that does not open is
     /// logged and left to the first attempt. An automation runner that is busy or wedged from an earlier run ends the
     /// run here too: the first attempt could only meet the same runner and fail its first observation with the app
     /// blamed. A runner that did not start leaves the slot unopened: the open would start it again under a shorter
-    /// budget, and its timeout resets the daemon every earlier slot is on. A build <c>appPath</c> is not on the device
-    /// yet, so that slot boots and starts the runner only, unless a lease says the build is already there.
+    /// budget. A build <c>appPath</c> is not on the device yet, so that slot boots and starts the runner only, unless a
+    /// lease says the build is already there.
     /// </summary>
-    private async Task<IReadOnlyList<SlotBinding>> WarmAsync(IReadOnlyList<SlotBinding> bindings, MobilePrepareInfo info, CancellationToken cancellationToken)
+    private async Task WarmAsync(IReadOnlyList<SlotBinding> bindings, MobilePrepareInfo info, CancellationToken cancellationToken)
     {
-        var warmed = new List<SlotBinding>();
         for (var slot = 0; slot < bindings.Count; slot++)
         {
             var binding = bindings[slot];
@@ -272,7 +272,6 @@ public sealed partial class DevicePool
             var app = DeviceBindings.PinnedApp(info.App, binding.InstalledApp);
             if (app is null || !runnerUp)
             {
-                warmed.Add(binding);
                 continue;
             }
 
@@ -280,7 +279,6 @@ public sealed partial class DevicePool
             if (info.App.AppPath is not null && binding.InstalledApp is null)
             {
                 info.Log($"{label}: {app} awaits the suite's device.installApp()");
-                warmed.Add(binding);
                 continue;
             }
 
@@ -291,24 +289,19 @@ public sealed partial class DevicePool
                     token => client.CallAsync(DeviceMethods.AppsOpen, where.ToArgs(("app", JsonValue.Create(app))), token),
                     cancellationToken,
                     at).ConfigureAwait(false);
-                warmed.Add(binding with { SessionApp = app });
             }
             catch (Exception cause) when (!cancellationToken.IsCancellationRequested && !DeviceErrors.IsRunnerFailure(cause))
             {
                 info.Log($"{label}: {app} did not open ({DeviceErrors.Message(cause)}); the first attempt opens it");
-                warmed.Add(binding);
             }
         }
-
-        return warmed;
     }
 
     /// <summary>
     /// Starts the slot's iOS automation runner under <c>prepare ios-runner</c>, whose startup budget covers a cold
     /// simulator. Left to the first open, the start runs inside that request's 90 s envelope, which a cold runner on a
-    /// loaded CI Mac outlasts, and a timed-out open resets the daemon, ending every other slot's session with it. A
-    /// runner that is busy or wedged ends the run here. Any other failure is logged and left to the first attempt.
-    /// True when the runner is up.
+    /// loaded CI Mac outlasts. A runner that is busy or wedged ends the run
+    /// here. Any other failure is logged and left to the first attempt. True when the runner is up.
     /// </summary>
     private static async Task<bool> PrepareRunnerAsync(IDeviceClient client, DeviceSelection where, MobilePrepareInfo info, string at, CancellationToken cancellationToken)
     {

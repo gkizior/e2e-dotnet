@@ -110,7 +110,7 @@ public sealed class LifecycleTests
     }
 
     [Fact]
-    public async Task Warms_each_device_with_a_plain_open_no_launch_arguments_and_hands_the_worker_the_app_its_session_is_on()
+    public async Task Warms_each_device_with_a_plain_open_and_no_launch_arguments()
     {
         var h = Harness.Create(
             options => options with { Device = "iPhone 16e" },
@@ -122,16 +122,15 @@ public sealed class LifecycleTests
         var result = await h.Engine.PrepareAsync(h.PrepareInfo(1), CancellationToken.None);
         Assert.Equal(BootRunnerOpen, h.Fake.Methods());
         JsonAssert.Args("""{"app":"Settings","platform":"ios","device":"iPhone 16e"}""", h.Fake.LastArgs("apps.open"));
-        Assert.Equal("""[{"device":"iPhone 16e","sessionApp":"Settings"}]""", result.Env[Harness.PoolVariableIn(result.Env, "IOS")]);
+        Assert.Equal("""[{"device":"iPhone 16e"}]""", result.Env[Harness.PoolVariableIn(result.Env, "IOS")]);
 
-        // The worker resumes a session that is on the app: its first fresh launch presets the permissions without an open to bind it.
-        h.Fake.Respond(DeviceMethods.SessionsList, _ => new JsonArray(new JsonObject { ["name"] = "e2e-ios-0", ["address"] = "e2e-ios-0" }));
+        // The worker's first fresh launch presets the permissions on the app by name, with no open first.
         var session = await h.Boot("ios", 0, Harness.WorkerEnv(result));
         var before = h.Fake.Calls.Count;
         await session.RestartAsync(CancellationToken.None);
         var after = h.Fake.Calls.Skip(before).ToList();
         Assert.Equal(["settings.update", "apps.open"], after.Select(call => call.Method));
-        JsonAssert.Args("""{"setting":"permission","permission":"camera","state":"grant"}""", after[0].Args);
+        JsonAssert.Args("""{"setting":"permission","permission":"camera","state":"grant","platform":"ios","device":"iPhone 16e","app":"Settings"}""", after[0].Args);
         JsonAssert.Args("""{"app":"Settings","platform":"ios","device":"iPhone 16e","relaunch":true,"launchArgs":["-e2e","YES"]}""", after[1].Args);
     }
 
@@ -197,11 +196,11 @@ public sealed class LifecycleTests
         // The workers read the pool from the environment prepare's result adds, never from a second inventory.
         var variable = Harness.PoolVariableIn(result.Env, "IOS");
         Assert.Equal(
-            """[{"deviceId":"2BBF3F07-AF66-4F95-82AB-BF442506FC89","sessionApp":"Settings"},{"deviceId":"8A2DC8D6-7B20-44FA-ADBB-47D3EAE6E8F3","sessionApp":"Settings"}]""",
+            """[{"deviceId":"2BBF3F07-AF66-4F95-82AB-BF442506FC89"},{"deviceId":"8A2DC8D6-7B20-44FA-ADBB-47D3EAE6E8F3"}]""",
             result.Env[variable]);
         var worker = Harness.Create();
         await worker.Boot("ios", 1, new Dictionary<string, string?> { [variable] = result.Env[variable] });
-        Assert.Equal(["devices.boot", "sessions.list"], worker.Fake.Methods());
+        Assert.Equal(["devices.boot"], worker.Fake.Methods());
         JsonAssert.Args("""{"platform":"ios","udid":"8A2DC8D6-7B20-44FA-ADBB-47D3EAE6E8F3"}""", worker.Fake.LastArgs("devices.boot"));
         Assert.Equal(["e2e-ios-1"], worker.Sessions);
     }
@@ -216,13 +215,13 @@ public sealed class LifecycleTests
         var boots = h.Fake.Calls.Where(call => call.Method == "devices.boot").ToList();
         Assert.Single(boots);
         JsonAssert.Args("""{"platform":"ios","udid":"A"}""", boots[0].Args);
-        Assert.Equal("""[{"deviceId":"A","sessionApp":"Settings"}]""", first.Env[Harness.PoolVariableIn(first.Env, "IOS")]);
+        Assert.Equal("""[{"deviceId":"A"}]""", first.Env[Harness.PoolVariableIn(first.Env, "IOS")]);
 
         // The same engine prepared again, for another target, discovers afresh and hands back that target's own variable.
         h.Fake.Respond(DeviceMethods.DevicesList, _ => Inventory(("ios", "C", "C", true)));
         var second = await h.Engine.PrepareAsync(h.PrepareInfo(1, targetName: "ios.a"), CancellationToken.None);
         Assert.Equal(2, Methods(h, "devices.list").Count);
-        Assert.Equal("""[{"deviceId":"C","sessionApp":"Settings"}]""", second.Env[Harness.PoolVariableIn(second.Env, "IOS_A")]);
+        Assert.Equal("""[{"deviceId":"C"}]""", second.Env[Harness.PoolVariableIn(second.Env, "IOS_A")]);
 
         // Names that sanitize alike keep distinct variables.
         var third = await h.Engine.PrepareAsync(h.PrepareInfo(1, targetName: "ios-a"), CancellationToken.None);
@@ -236,7 +235,7 @@ public sealed class LifecycleTests
         JsonAssert.Args("""{"platform":"ios"}""", cold.Fake.LastArgs("devices.boot"));
 
         // One slot bound to no device in particular: the daemon picks.
-        Assert.Equal("""[{"sessionApp":"Settings"}]""", coldResult.Env[Harness.PoolVariableIn(coldResult.Env, "IOS")]);
+        Assert.Equal("""[{}]""", coldResult.Env[Harness.PoolVariableIn(coldResult.Env, "IOS")]);
     }
 
     [Fact]
@@ -251,7 +250,7 @@ public sealed class LifecycleTests
         Assert.Matches(@"1 booted android device\(s\); driving 1: test", lines[0]);
         JsonAssert.Args("""{"platform":"android","serial":"emulator-5554"}""", h.Fake.LastArgs("devices.boot"));
         var variable = Harness.PoolVariableIn(result.Env, "ANDROID");
-        Assert.Equal("""[{"deviceId":"emulator-5554","sessionApp":"Settings"}]""", result.Env[variable]);
+        Assert.Equal("""[{"deviceId":"emulator-5554"}]""", result.Env[variable]);
         var worker = Harness.Create(options => options with { Platform = MobilePlatform.Android });
         await worker.Boot("android", 0, Harness.WorkerEnv(result));
         JsonAssert.Args("""{"platform":"android","serial":"emulator-5554"}""", worker.Fake.LastArgs("devices.boot"));

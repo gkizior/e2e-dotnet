@@ -90,6 +90,23 @@ public sealed class SnapshotProjectionTests
     }
 
     [Fact]
+    public void Measures_system_bars_against_a_published_viewport_where_the_tree_alone_would_end_the_screen_at_its_lowest_window()
+    {
+        // A panel above the bottom of a 2400 px screen, at the bottom of a tree that reaches only 1800 px.
+        RawNode[] nodes =
+        [
+            N("@e1", depth: 0, type: "android.widget.FrameLayout", bundleId: "dev.e2e.benchmark", rect: R(0, 0, 1080, 1800)),
+            N("@e2", depth: 0, type: "android.widget.FrameLayout", bundleId: SystemUi, rect: R(0, 1700, 1080, 100)),
+        ];
+        var published = SnapshotProjection.ProjectSnapshot(nodes, () => "n", new ViewportSize(1080, 2400));
+        Assert.Equal(new ViewportSize(1080, 2400), published.Viewport);
+        Assert.Equal(2, published.Roots.Count);
+        var inferred = SnapshotProjection.ProjectSnapshot(nodes, () => "n");
+        Assert.Equal(new ViewportSize(1080, 1800), inferred.Viewport);
+        Assert.Single(inferred.Roots);
+    }
+
+    [Fact]
     public void Leaves_the_Android_status_bar_and_navigation_bar_out_with_their_children_and_keeps_the_app_window()
     {
         var projected = Project(

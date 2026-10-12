@@ -28,14 +28,21 @@ public sealed class ErrorTranslationTests
         var missing = Engine(DeviceErrors.TranslateError(new AgentDeviceError("SESSION_NOT_FOUND", "session gone"), "snapshot"));
         Assert.Equal("INVALID_STATE", missing.Code);
         Assert.False(missing.Retryable);
-        Assert.Equal("INVALID_STATE", Engine(DeviceErrors.TranslateError(new Exception("No active app session. Run open first."), "snapshot")).Code);
 
         // What `appstate` says once `close` ended the session; the harness reports it as APP_NOT_OPEN.
         var closed = Engine(DeviceErrors.TranslateError(
-            new AgentDeviceError("INVALID_ARGS", "appstate requires an active session or an explicit device selector (e.g. --platform ios)."),
+            new AgentDeviceError(
+                "INVALID_ARGS",
+                "appstate requires an active session or an explicit device selector (e.g. --platform ios).",
+                Details(("reason", "session_or_device_selector_required"), ("dispatched", "no"))),
             "device.foregroundApp"));
         Assert.Equal("INVALID_STATE", closed.Code);
         Assert.False(closed.Retryable);
+
+        // Keyed on the code and reason, never the text: a message that only reads like a missing session stays an engine failure.
+        Assert.Equal(
+            "ENGINE_FAILURE",
+            Engine(DeviceErrors.TranslateError(new AgentDeviceError("INVALID_ARGS", "appstate requires an active session"), "device.foregroundApp")).Code);
         Assert.Equal(
             "INVALID_STATE",
             Engine(DeviceErrors.TranslateError(

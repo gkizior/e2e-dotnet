@@ -95,8 +95,8 @@ public sealed class CapturedDeviceSnapshotsTests
     {
         var raw = JsonSerializer.Deserialize<Capture>(File.ReadAllText(file), Json)!;
         var counter = 0;
-        var projected = SnapshotProjection.ProjectSnapshot(raw.Nodes, () => $"n{++counter}");
-        var root = SnapshotProjection.ScreenRoot(projected.Roots, SnapshotProjection.ViewportOf(raw.Nodes) ?? new ViewportSize(0, 0));
+        var projected = SnapshotProjection.ProjectSnapshot(raw.Nodes, () => $"n{++counter}", raw.Viewport);
+        var root = SnapshotProjection.ScreenRoot(projected.Roots, projected.Viewport ?? new ViewportSize(0, 0));
         return $"{(raw.Truncated == true ? "# truncated\n" : "")}{string.Join('\n', Render(root, 0, []))}\n";
     }
 
@@ -154,5 +154,5 @@ public sealed class CapturedDeviceSnapshotsTests
         return output;
     }
 
-    private sealed record Capture(RawNode[] Nodes, bool? Truncated);
+    private sealed record Capture(RawNode[] Nodes, ViewportSize? Viewport, bool? Truncated);
 }

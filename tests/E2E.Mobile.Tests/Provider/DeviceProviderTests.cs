@@ -124,8 +124,8 @@ public sealed class DeviceProviderTests
         JsonAssert.Args(
             """
             [
-              {"leaseId":"lease-0","device":"sim-0","daemon":{"baseUrl":"https://0.example","authToken":"token-0"},"sessionApp":"Settings"},
-              {"leaseId":"lease-1","device":"sim-1","daemon":{"baseUrl":"https://1.example","authToken":"token-1"},"sessionApp":"Settings"}
+              {"leaseId":"lease-0","device":"sim-0","daemon":{"baseUrl":"https://0.example","authToken":"token-0"}},
+              {"leaseId":"lease-1","device":"sim-1","daemon":{"baseUrl":"https://1.example","authToken":"token-1"}}
             ]
             """,
             JsonNode.Parse(result.Env[variable]));
@@ -239,7 +239,7 @@ public sealed class DeviceProviderTests
             });
         var h = Over(bookkeeping);
         var result = await h.Engine.PrepareAsync(h.PrepareInfo(1), CancellationToken.None);
-        JsonAssert.Args("""[{"leaseId":"l-0","daemon":{"baseUrl":"https://d.example"},"sessionApp":"Settings"}]""", JsonNode.Parse(result.Env[Harness.PoolVariableIn(result.Env, "IOS")]));
+        JsonAssert.Args("""[{"leaseId":"l-0","daemon":{"baseUrl":"https://d.example"}}]""", JsonNode.Parse(result.Env[Harness.PoolVariableIn(result.Env, "IOS")]));
         await h.Engine.FinishAsync(Harness.FinishInfo(), CancellationToken.None);
         Assert.Equal(granted, bookkeeping.Released);
         Assert.Same(granted[0], bookkeeping.Released[0]);
@@ -274,7 +274,6 @@ public sealed class DeviceProviderTests
         var variable = Harness.PoolVariableIn(result.Env, "IOS");
         var handed = JsonNode.Parse(result.Env[variable])!.AsArray();
         Assert.True(JsonNode.DeepEquals(scope, handed[0]!["client"]));
-        Assert.Equal("Settings", handed[1]!["sessionApp"]!.GetValue<string>());
         var worker = Over(scoped);
         await worker.Boot("ios", 0, Harness.WorkerEnv(result));
         Assert.True(JsonNode.DeepEquals(scope, worker.Connections[0]!.Client));

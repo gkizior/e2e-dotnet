@@ -33,7 +33,6 @@ public sealed class DeviceSession : IEngineSession
     private IDeviceClient? _client;
     private int _idCounter;
     private string? _appIdentity;
-    private string? _sessionApp;
     private ViewportSize? _knownViewport;
 
     private DeviceSession(MobileEngine engine, MobileStartInfo info, SlotBinding? binding, string name, string where, IDeviceClient client)
@@ -94,26 +93,6 @@ public sealed class DeviceSession : IEngineSession
     private async Task BootAsync(CancellationToken cancellationToken)
     {
         await CommandAsync("boot", DeviceMethods.DevicesBoot, Selection.ToArgs(), cancellationToken).ConfigureAwait(false);
-        _sessionApp = _binding?.SessionApp is { } app ? await ResumedSessionAppAsync(app, cancellationToken).ConfigureAwait(false) : null;
-    }
-
-    /// <summary>
-    /// The app the warm-up left the slot's session on, while agent-device still holds that session. A session not
-    /// listed, or a list that fails, leaves the app unknown, and the first permission change opens it again.
-    /// </summary>
-    private async Task<string?> ResumedSessionAppAsync(string app, CancellationToken cancellationToken)
-    {
-        JsonNode? sessions;
-        try
-        {
-            sessions = await CommandAsync("sessions", DeviceMethods.SessionsList, null, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            return null;
-        }
-
-        return sessions is JsonArray list && list.Any(entry => (Text(entry?["address"]) ?? Text(entry?["name"])) == _name) ? app : null;
     }
 
     public Task OpenAsync(string url, CancellationToken cancellationToken)
@@ -155,7 +134,7 @@ public sealed class DeviceSession : IEngineSession
     public async Task<Observation> ObserveAsync(CancellationToken cancellationToken)
     {
         var raw = await SnapshotOrEmptyAsync(Options.Snapshot == SnapshotMode.Interactive, cancellationToken).ConfigureAwait(false);
-        var projected = SnapshotProjection.ProjectSnapshot(raw.Nodes, () => $"n{++_idCounter}");
+        var projected = SnapshotProjection.ProjectSnapshot(raw.Nodes, () => $"n{++_idCounter}", raw.Viewport);
         Latest = projected;
         if (projected.Viewport is { } measured)
         {
@@ -193,7 +172,6 @@ public sealed class DeviceSession : IEngineSession
         var client = _client;
         _client = null;
         _appIdentity = null;
-        _sessionApp = null;
         InstalledApp = null;
         _knownViewport = null;
         Latest = null;
@@ -233,7 +211,7 @@ public sealed class DeviceSession : IEngineSession
         await LaunchAsync(app, relaunch, configured ? _app.LaunchArguments : null, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>One <c>open</c> of an app, remembered as the session's app.</summary>
+    /// <summary>One <c>open</c> of an app.</summary>
     private async Task LaunchAsync(string app, bool relaunch, IReadOnlyList<string>? launchArguments, CancellationToken cancellationToken)
     {
         var result = await CommandAsync(
@@ -244,35 +222,26 @@ public sealed class DeviceSession : IEngineSession
                 ("relaunch", relaunch ? JsonValue.Create(true) : null),
                 ("launchArgs", launchArguments is { Count: > 0 } ? new JsonArray([.. launchArguments.Select(argument => (JsonNode?)JsonValue.Create(argument))]) : null)),
             cancellationToken).ConfigureAwait(false);
-        _sessionApp = app;
         _appIdentity = Text(result?["appBundleId"]) ?? Text(result?["appName"]) ?? app;
         Latest = null;
     }
 
     /// <summary>
-    /// Puts an app's permissions in place before it launches. agent-device sets a permission on the app its session is
-    /// on, so a session on another app, or on none yet, is first brought onto this one with a foreground open; the
-    /// warm-up in prepare did that for the pinned app under the session this worker resumed, so its first launch needs
-    /// none. Before the launch, never after: iOS terminates a running app whose permission changed.
+    /// Puts an app's permissions in place before it launches, never after: iOS terminates a running app whose
+    /// permission changed. Each change names the app, so it needs no open in the session first.
     /// </summary>
     private async Task PresetPermissionsAsync(string app, IReadOnlyDictionary<DevicePermission, PermissionState> permissions, CancellationToken cancellationToken)
     {
-        if (permissions.Count == 0)
-        {
-            return;
-        }
-
-        if (_sessionApp != app)
-        {
-            await LaunchAsync(app, relaunch: false, null, cancellationToken).ConfigureAwait(false);
-        }
-
         foreach (var (permission, state) in permissions)
         {
             await CommandAsync(
                 $"permission {permission.WireName()} {state.WireName()}",
                 DeviceMethods.SettingsUpdate,
-                DeviceArgs.Of(("setting", JsonValue.Create("permission")), ("permission", JsonValue.Create(permission.WireName())), ("state", JsonValue.Create(state.WireName()))),
+                Selection.ToArgs(
+                    ("setting", JsonValue.Create("permission")),
+                    ("permission", JsonValue.Create(permission.WireName())),
+                    ("state", JsonValue.Create(state.WireName())),
+                    ("app", JsonValue.Create(app))),
                 cancellationToken).ConfigureAwait(false);
         }
     }
@@ -409,8 +378,12 @@ public sealed class DeviceSession : IEngineSession
         node is JsonValue && JsonSerializer.SerializeToElement(node) is { ValueKind: JsonValueKind.Number } element ? element.GetDouble() : null;
 
     /// <summary>The snapshot fields this engine reads off agent-device's response.</summary>
-    private sealed record RawSnapshot(IReadOnlyList<RawNode> Nodes, bool Truncated, string? AppName, string? AppBundleId, bool Sparse)
+    private sealed record RawSnapshot(IReadOnlyList<RawNode> Nodes, bool Truncated, string? AppName, string? AppBundleId, bool Sparse, ViewportSize? Viewport = null)
     {
+        /// <summary>The viewport agent-device measured, when it is a usable size: the same bar <c>ViewportOf</c> sets for a tree.</summary>
+        private static ViewportSize? PublishedViewport(JsonObject? viewport) =>
+            Number(viewport?["width"]) is > 0 and var width && Number(viewport?["height"]) is > 0 and var height ? new ViewportSize(width, height) : null;
+
         public static RawSnapshot Read(JsonNode? response)
         {
             if (response is not JsonObject data)
@@ -433,7 +406,8 @@ public sealed class DeviceSession : IEngineSession
                 data["truncated"] is JsonValue truncated && truncated.TryGetValue<bool>(out var cut) && cut,
                 Text(data["appName"]),
                 Text(data["appBundleId"]),
-                Text(data["snapshotQuality"]?["state"]) == "sparse");
+                Text(data["snapshotQuality"]?["state"]) == "sparse",
+                PublishedViewport(data["viewport"] as JsonObject));
         }
     }
 }

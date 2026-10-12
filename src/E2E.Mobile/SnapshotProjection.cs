@@ -212,12 +212,13 @@ public static partial class SnapshotProjection
 
     /// <summary>
     /// Projects one snapshot. <paramref name="mintId"/> is called once per node in document order, so the
-    /// surface's id space stays unique across observations. Android's system bars are left out with their
-    /// children, see <see cref="IsSystemBar"/>.
+    /// surface's id space stays unique across observations. <paramref name="publishedViewport"/> is the one
+    /// agent-device published with the snapshot; a producer that measured none leaves it to <see cref="ViewportOf"/>.
+    /// Android's system bars are left out with their children, see <see cref="IsSystemBar"/>.
     /// </summary>
-    public static ProjectedSnapshot ProjectSnapshot(IReadOnlyList<RawNode> raw, Func<string> mintId)
+    public static ProjectedSnapshot ProjectSnapshot(IReadOnlyList<RawNode> raw, Func<string> mintId, ViewportSize? publishedViewport = null)
     {
-        var viewport = ViewportOf(raw);
+        var viewport = publishedViewport ?? ViewportOf(raw);
         var parents = ParentPositions(raw);
         var children = new Dictionary<int, List<int>>();
         var roots = new List<int>();
