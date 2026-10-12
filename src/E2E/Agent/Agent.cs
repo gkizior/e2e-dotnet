@@ -307,7 +307,7 @@ public sealed class Agent
         var last = "the statement did not hold";
         try
         {
-            var snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Redactor);
+            var snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Redactor, _scope.AppOrigin);
             while (true)
             {
                 var verdict = await JudgeOnceAsync(statement, snapshot, agent, maxCalls - (_scope.ModelCalls - callsBefore), token).ConfigureAwait(false);
@@ -342,7 +342,7 @@ public sealed class Agent
                         await Task.Delay(wait < remaining ? wait : remaining, token).ConfigureAwait(false);
                     }
 
-                    snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Redactor);
+                    snapshot = SnapshotText.Render(await _scope.Session.ObserveAsync(token).ConfigureAwait(false), _scope.Redactor, _scope.AppOrigin);
                     if (DateTime.UtcNow - judgedAt >= interval && !string.Equals(snapshot, judged, StringComparison.Ordinal))
                     {
                         break;
@@ -372,7 +372,7 @@ public sealed class Agent
         using var linked = Link(cancellationToken, ResolveTimeout(options?.Timeout, agent.JudgmentTimeout));
         var token = linked.Token;
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-        var snapshot = SnapshotText.Render(observation, _scope.Redactor);
+        var snapshot = SnapshotText.Render(observation, _scope.Redactor, _scope.AppOrigin);
         var schema = JsonSchemaExporter.GetJsonSchemaAsNode(ExtractJson, typeof(T));
         var tools = AgentTools.ExtractFor(schema);
         var messages = new List<ModelMessage>
@@ -455,7 +455,7 @@ public sealed class Agent
         using var linked = Link(cancellationToken, timeout);
         var token = linked.Token;
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
-        var verdict = await JudgeOnceAsync(statement, SnapshotText.Render(observation, _scope.Redactor), agent, JudgmentModelCalls, token).ConfigureAwait(false);
+        var verdict = await JudgeOnceAsync(statement, SnapshotText.Render(observation, _scope.Redactor, _scope.AppOrigin), agent, JudgmentModelCalls, token).ConfigureAwait(false);
         if (string.Equals(verdict.Status, "passed", StringComparison.Ordinal))
         {
             _scope.MarkVerified();
@@ -1512,7 +1512,7 @@ public sealed class Agent
         }
 
         var observation = await _feed.ObserveAsync(SettleMode.HeldStill, token).ConfigureAwait(false);
-        return action + "\n" + SnapshotText.Render(observation, _scope.Redactor);
+        return action + "\n" + SnapshotText.Render(observation, _scope.Redactor, _scope.AppOrigin);
     }
 
     private string Opening(
@@ -1553,7 +1553,7 @@ public sealed class Agent
             }
         }
 
-        builder.Append('\n').Append(SnapshotText.Render(start, _scope.Redactor));
+        builder.Append('\n').Append(SnapshotText.Render(start, _scope.Redactor, _scope.AppOrigin));
         return _scope.Redactor.Redact(builder.ToString());
     }
 
@@ -2130,6 +2130,9 @@ internal sealed class AttemptScope
 
     /// <summary>The base URL a navigate action resolves against, under the same URL rule as <c>app.open</c>.</summary>
     public string? BaseUrl { get; init; }
+
+    /// <summary>The origin of <see cref="BaseUrl"/>, which a link target on it shows without.</summary>
+    public string? AppOrigin => Uri.TryCreate(BaseUrl, UriKind.Absolute, out var url) ? url.GetLeftPart(UriPartial.Authority) : null;
 
     /// <summary>The agents by name. <c>default</c> is always present.</summary>
     public required IReadOnlyDictionary<string, ResolvedAgent> Agents { get; init; }
