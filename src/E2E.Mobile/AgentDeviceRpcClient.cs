@@ -63,19 +63,25 @@ public sealed class AgentDeviceRpcClient : IDeviceClient
             }
         }
 
+        var parameters = new JsonObject
+        {
+            ["session"] = _session,
+            ["command"] = command.Name,
+            ["positionals"] = new JsonArray([.. command.Positionals.Select(text => (JsonNode?)JsonValue.Create(text))]),
+        };
+        if (command.Input is { } input)
+        {
+            parameters["input"] = input;
+        }
+
+        parameters["flags"] = flags;
+        parameters["meta"] = meta;
         var request = new JsonObject
         {
             ["jsonrpc"] = "2.0",
             ["id"] = Interlocked.Increment(ref _requests),
             ["method"] = "agent_device.command",
-            ["params"] = new JsonObject
-            {
-                ["session"] = _session,
-                ["command"] = command.Name,
-                ["positionals"] = new JsonArray([.. command.Positionals.Select(text => (JsonNode?)JsonValue.Create(text))]),
-                ["flags"] = flags,
-                ["meta"] = meta,
-            },
+            ["params"] = parameters,
         };
         using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint.BaseUrl.AbsoluteUri.TrimEnd('/') + "/rpc"))
         {

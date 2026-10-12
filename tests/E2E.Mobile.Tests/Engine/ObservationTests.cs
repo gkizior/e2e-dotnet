@@ -141,6 +141,51 @@ public sealed class ObservationTests
     }
 
     [Fact]
+    public async Task Holds_the_status_bar_in_a_fixed_state_for_a_screenshot_taken_for_comparison_and_only_then()
+    {
+        var h = Harness.Create();
+        var png = PngCodec.Encode(PngCodec.Solid(195, 422, 4, 255));
+        var asked = new List<bool?>();
+        h.Fake.Respond(DeviceMethods.CaptureScreenshot, options =>
+        {
+            asked.Add(options?["normalizeStatusBar"]?.GetValue<bool>());
+            File.WriteAllBytes(options!["path"]!.GetValue<string>(), png);
+            return new JsonObject { ["path"] = options["path"]!.GetValue<string>(), ["logicalWidth"] = 390, ["logicalHeight"] = 844 };
+        });
+
+        // No geometry in the tree: the viewport probe is the one capture that is not a comparison.
+        h.Fake.Respond(DeviceMethods.CaptureSnapshot, _ => FakeDeviceClient.NodesOnly(RawNodes.SettingsNodes.Where(node => node.Password != true && node.Type != "secure-text-field").Select(node => node with { Rect = null })));
+        var session = await OpenAttempt(h);
+        await session.ObserveAsync(CancellationToken.None);
+        await session.ScreenshotAsync(CancellationToken.None);
+        Assert.Equal([null, true], asked);
+    }
+
+    [Fact]
+    public async Task Withholds_the_pixels_of_a_screen_with_a_secure_field_when_the_image_cannot_be_read_or_decoded()
+    {
+        var h = Harness.Create();
+
+        // A PNG signature and header naming the size, with no image data behind them: the size reads, the decode fails.
+        var headerOnly = PngCodec.Encode(PngCodec.Solid(195, 422, 4, 0))[..33];
+        byte[] shot = [1, 2, 3];
+        h.Fake.Respond(DeviceMethods.CaptureScreenshot, options =>
+        {
+            File.WriteAllBytes(options!["path"]!.GetValue<string>(), shot);
+            return new JsonObject { ["path"] = options["path"]!.GetValue<string>() };
+        });
+        var session = await OpenAttempt(h);
+        foreach (var bytes in new[] { new byte[] { 1, 2, 3 }, headerOnly })
+        {
+            shot = bytes;
+            var observation = await session.ObserveAsync(CancellationToken.None);
+            Assert.Single(observation.Roots[0].Children);
+            var withheld = await Assert.ThrowsAsync<EngineException>(() => session.ScreenshotAsync(CancellationToken.None));
+            Assert.Equal("ENGINE_FAILURE", withheld.Code);
+        }
+    }
+
+    [Fact]
     public async Task Is_an_empty_screen_before_any_app_is_open_when_no_app_is_pinned_and_a_fault_when_one_is()
     {
         var free = Harness.Create(pinned: false);

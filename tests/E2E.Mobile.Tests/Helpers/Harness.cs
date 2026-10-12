@@ -17,8 +17,10 @@ internal sealed class Harness
     /// <summary>Deliberately not the working directory: relative build paths must resolve here, not there.</summary>
     public static readonly string ProjectRoot = Path.GetFullPath("/project");
 
-    private Harness(MobileEngine engine, FakeDeviceClient fake, List<string> sessions, List<DeviceConnection?> connections, List<TimeSpan> delays, MobileApp app)
+    private Harness(MobileEngine engine, FakeDeviceClient fake, List<string> sessions, List<DeviceConnection?> connections, List<TimeSpan> delays, MobileApp app, FakeClock clock, DelayHook hook)
     {
+        Clock = clock;
+        Waits = hook;
         Engine = engine;
         Fake = fake;
         Sessions = sessions;
@@ -36,8 +38,14 @@ internal sealed class Harness
     /// <summary>The connection each client was minted with. Null is the local daemon with defaults.</summary>
     public List<DeviceConnection?> Connections { get; }
 
-    /// <summary>The delays the engine asked for between snapshot retries.</summary>
+    /// <summary>The delays the engine asked for: the waits between snapshot retries and the transition waits. Each one moves <see cref="Clock"/> and costs no time.</summary>
     public List<TimeSpan> Delays { get; }
+
+    /// <summary>Where a test makes the next delays take as long as the caller lets them: until their token is cancelled.</summary>
+    public DelayHook Waits { get; }
+
+    /// <summary>The clock the transition budget counts on. A delay advances it, as the wait it stands for would.</summary>
+    public FakeClock Clock { get; }
 
     /// <summary>The target's app, as the runner hands it to prepare.</summary>
     public MobileApp App { get; }
@@ -54,6 +62,8 @@ internal sealed class Harness
         var sessions = new List<string>();
         var connections = new List<DeviceConnection?>();
         var delays = new List<TimeSpan>();
+        var clock = new FakeClock();
+        var hook = new DelayHook();
         var appInfo = (app ?? (current => current))(new MobileApp { BundleId = pinned ? "Settings" : null });
         var options = new MobileOptions { Platform = MobilePlatform.Ios, TargetName = "ios-simulator", App = appInfo };
         options = configure?.Invoke(options) ?? options;
@@ -66,13 +76,20 @@ internal sealed class Harness
                 return fake;
             })
         {
-            Delay = (span, _) =>
+            Delay = (span, token) =>
             {
                 delays.Add(span);
-                return Task.CompletedTask;
+                clock.Advance(span);
+                if (hook.Wait is { } wait)
+                {
+                    return wait(span, token);
+                }
+
+                return token.IsCancellationRequested ? Task.FromCanceled(token) : Task.CompletedTask;
             },
+            Clock = clock,
         };
-        return new Harness(engine, fake, sessions, connections, delays, options.App);
+        return new Harness(engine, fake, sessions, connections, delays, options.App, clock, hook);
     }
 
     /// <summary>Starts the worker of one slot, as its init does, with the environment the runner left.</summary>
@@ -112,4 +129,20 @@ internal sealed class Harness
         var pattern = new Regex($"^E2E_AGENT_DEVICE_POOL_{readable}_[0-9A-F]{{8}}$");
         return env.Keys.FirstOrDefault(key => pattern.IsMatch(key)) ?? throw new InvalidOperationException($"no pool variable for {readable} in {string.Join(", ", env.Keys)}");
     }
+}
+
+/// <summary>A clock only a test moves.</summary>
+internal sealed class FakeClock : TimeProvider
+{
+    private DateTimeOffset _now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    public override DateTimeOffset GetUtcNow() => _now;
+
+    public void Advance(TimeSpan span) => _now += span;
+}
+
+/// <summary>What a delay does besides moving the clock. Unset, it ends at once.</summary>
+internal sealed class DelayHook
+{
+    public Func<TimeSpan, CancellationToken, Task>? Wait { get; set; }
 }

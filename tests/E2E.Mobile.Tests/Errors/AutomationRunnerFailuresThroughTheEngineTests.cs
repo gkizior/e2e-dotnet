@@ -133,6 +133,30 @@ public sealed class AutomationRunnerFailuresThroughTheEngineTests
     }
 
     [Fact]
+    public async Task Names_the_session_and_device_when_a_node_action_or_the_screen_scroll_meets_a_busy_runner()
+    {
+        var h = Harness.Create(options => options with { Device = "iPhone 17 Pro" });
+        var session = await h.Boot();
+        var screen = (await session.ObserveAsync(CancellationToken.None)).Roots[0];
+        var about = Screens.Named(screen, "About");
+        h.Fake.Respond(DeviceMethods.InteractionsPress, _ => throw RunnerBusy());
+        var tap = await Assert.ThrowsAsync<EngineException>(() => session.PerformAsync(about, new LocatorAction.Tap(), CancellationToken.None));
+        Assert.Equal("ENGINE_FAILURE", tap.Code);
+        Assert.False(tap.Retryable);
+        Assert.Contains(
+            "perform tap failed: the iOS automation runner is still finishing a command that overran its watchdog (session e2e-ios-simulator-0 on iPhone 17 Pro)",
+            tap.Message,
+            StringComparison.Ordinal);
+        h.Fake.Respond(DeviceMethods.InteractionsScroll, _ => throw RunnerBusy());
+        var scroll = await Assert.ThrowsAsync<EngineException>(() => session.PerformAsync(screen, new LocatorAction.Swipe(ScrollDirection.Down), CancellationToken.None));
+        Assert.Equal("ENGINE_FAILURE", scroll.Code);
+        Assert.Contains(
+            "swipe failed: the iOS automation runner is still finishing a command that overran its watchdog (session e2e-ios-simulator-0 on iPhone 17 Pro)",
+            scroll.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Does_not_retake_a_snapshot_that_failed_for_any_other_reason()
     {
         var h = Harness.Create();

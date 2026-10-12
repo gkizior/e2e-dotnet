@@ -8,9 +8,8 @@ namespace E2E.Mobile;
 
 /// <summary>What <see cref="MobileEngine"/> hands the code that turns a node and an action into device commands.</summary>
 /// <remarks>
-/// This is the seam for the device surface. Upstream's <c>AgentDeviceSurface</c> owns these members next to observe and the
-/// session hooks. The engine here ports the lifecycle, observation, and session hooks, and leaves these four to the change
-/// that ports the rest of the surface: without an implementation each answers <c>UNSUPPORTED_CAPABILITY</c>.
+/// Upstream's <c>AgentDeviceSurface</c> owns these members next to observe and the session hooks. <see cref="DeviceActions"/> is
+/// the implementation the engine uses unless a caller sets another through <see cref="MobileEngine.Actions"/>.
 /// </remarks>
 public interface IDeviceActions
 {
@@ -81,8 +80,41 @@ public sealed class MobileEngine : IEngine
     /// <summary>The target's devices, one per worker slot.</summary>
     public DevicePool Pool { get; }
 
-    /// <summary>The code that performs node actions, keys, scrolls, and screenshots. Without one each is <c>UNSUPPORTED_CAPABILITY</c>.</summary>
-    public IDeviceActions? Actions { get; init; }
+    /// <summary>The code that performs node actions, keys, scrolls, and screenshots.</summary>
+    public IDeviceActions Actions { get; init; } = new DeviceActions();
+
+    /// <summary>The clock the transition budget counts on. Tests replace it with one the delays advance.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    private readonly List<DeviceSession> _sessions = [];
+
+    /// <summary>The sessions this engine started that have not closed: the attempts running on it right now.</summary>
+    public IReadOnlyList<DeviceSession> ActiveSessions
+    {
+        get
+        {
+            lock (_sessions)
+            {
+                return [.. _sessions];
+            }
+        }
+    }
+
+    internal void Register(DeviceSession session)
+    {
+        lock (_sessions)
+        {
+            _sessions.Add(session);
+        }
+    }
+
+    internal void Unregister(DeviceSession session)
+    {
+        lock (_sessions)
+        {
+            _sessions.Remove(session);
+        }
+    }
 
     /// <summary>The wait between two attempts at a sparse snapshot. Tests replace it to spend no time.</summary>
     internal Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = static (span, token) => Task.Delay(span, token);

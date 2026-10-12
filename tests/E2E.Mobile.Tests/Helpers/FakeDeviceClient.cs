@@ -31,6 +31,29 @@ internal sealed class FakeDeviceClient : IDeviceClient
         ["truncated"] = false,
     };
 
+    /// <summary>The Settings screen with more nodes under the application, as a snapshot.</summary>
+    public static JsonObject SettingsSnapshotWith(params RawNode[] extra)
+    {
+        var snapshot = SettingsSnapshot();
+        snapshot["nodes"] = JsonSerializer.SerializeToNode(RawNodes.SettingsNodes.Concat(extra), CamelCase);
+        return snapshot;
+    }
+
+    /// <summary>A snapshot of the given nodes alone: it names no app.</summary>
+    public static JsonObject NodesOnly(IEnumerable<RawNode> nodes) => new() { ["nodes"] = JsonSerializer.SerializeToNode(nodes, CamelCase) };
+
+    /// <summary>A snapshot of the given nodes, answered with the Settings screen's app identity.</summary>
+    public static JsonObject SnapshotOf(IEnumerable<RawNode> nodes, params (string Key, JsonNode? Value)[] more)
+    {
+        var snapshot = new JsonObject { ["nodes"] = JsonSerializer.SerializeToNode(nodes, CamelCase), ["appName"] = "Settings", ["appBundleId"] = "com.apple.Preferences" };
+        foreach (var (key, value) in more)
+        {
+            snapshot[key] = value;
+        }
+
+        return snapshot;
+    }
+
     public List<RecordedCall> Calls { get; } = [];
 
     /// <summary>Registers or replaces the responder for one <c>namespace.method</c>.</summary>
@@ -59,4 +82,15 @@ internal static class JsonAssert
     /// <summary>Asserts a recorded options object equals the JSON text, whatever the order of its keys.</summary>
     public static void Args(string expected, JsonNode? actual) =>
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse(expected), actual), $"expected {expected} but was {actual?.ToJsonString() ?? "null"}");
+
+    /// <summary>Asserts the calls after the first <paramref name="skip"/> are exactly these methods with these options, in order.</summary>
+    public static void Calls(IEnumerable<RecordedCall> recorded, int skip, params (string Method, string Args)[] expected)
+    {
+        var actual = recorded.Skip(skip).ToList();
+        Assert.Equal(expected.Select(call => call.Method), actual.Select(call => call.Method));
+        for (var i = 0; i < expected.Length; i++)
+        {
+            Args(expected[i].Args, actual[i].Args);
+        }
+    }
 }

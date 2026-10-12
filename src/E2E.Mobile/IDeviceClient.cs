@@ -36,6 +36,22 @@ public static class DeviceMethods
     public const string SettingsUpdate = "settings.update";
     public const string CaptureSnapshot = "capture.snapshot";
     public const string CaptureScreenshot = "capture.screenshot";
+    public const string InteractionsPress = "interactions.press";
+    public const string InteractionsLongPress = "interactions.longPress";
+    public const string InteractionsHover = "interactions.hover";
+    public const string InteractionsFill = "interactions.fill";
+    public const string InteractionsType = "interactions.type";
+    public const string InteractionsSwipe = "interactions.swipe";
+    public const string InteractionsScroll = "interactions.scroll";
+    public const string InteractionsPan = "interactions.pan";
+    public const string InteractionsDrag = "interactions.drag";
+    public const string CommandKeyboard = "command.keyboard";
+    public const string CommandAlert = "command.alert";
+    public const string CommandHome = "command.home";
+    public const string CommandOrientation = "command.orientation";
+    public const string CommandFold = "command.fold";
+    public const string CommandAppState = "command.appState";
+    public const string CommandClipboard = "command.clipboard";
 }
 
 /// <summary>Builds the options objects the client takes. A null value is left out, as upstream leaves out an undefined one.</summary>

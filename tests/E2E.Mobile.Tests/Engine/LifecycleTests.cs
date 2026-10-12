@@ -303,6 +303,91 @@ public sealed class LifecycleTests
     }
 
     [Fact]
+    public async Task Installs_nothing_on_its_own_device_installApp_with_no_path_installs_the_engine_build_and_pins_what_it_installed()
+    {
+        var h = Harness.Create(pinned: false, app: app => app with { AppPath = "./build/App.app" });
+        h.Fake.Respond(DeviceMethods.AppsInstall, _ => new JsonObject { ["app"] = "./build/App.app", ["appPath"] = "/project/build/App.app", ["platform"] = "ios", ["bundleId"] = "com.example.app" });
+        var session = await h.Boot();
+        Assert.Equal(["devices.boot"], h.Fake.Methods());
+
+        Assert.Equal(new InstalledApp("com.example.app", "com.example.app"), await session.InstallAppAsync());
+        JsonAssert.Args("""{"platform":"ios","appPath":"/project/build/App.app"}""", h.Fake.LastArgs("apps.install"));
+
+        // From here on the installed bundle is the pinned app: app.open() launches it, reset clears it.
+        await session.RestartAsync(CancellationToken.None);
+        JsonAssert.Args("""{"app":"com.example.app","platform":"ios","relaunch":true}""", h.Fake.LastArgs("apps.open"));
+        await session.ClearStateAsync(CancellationToken.None);
+        JsonAssert.Args("""{"setting":"clear-app-state","state":"clear","app":"com.example.app"}""", h.Fake.LastArgs("settings.update"));
+        Assert.Single(Methods(h, "apps.install"));
+
+        // A build named by path that is the engine's own counts the same. Another path pins nothing.
+        await session.InstallAppAsync("build/App.app");
+        JsonAssert.Args("""{"platform":"ios","appPath":"/project/build/App.app"}""", h.Fake.LastArgs("apps.install"));
+        await session.InstallAppAsync("other/Other.app");
+        JsonAssert.Args("""{"platform":"ios","appPath":"/project/other/Other.app"}""", h.Fake.LastArgs("apps.install"));
+        Assert.Equal("com.example.app", session.PinnedApp);
+    }
+
+    [Fact]
+    public async Task Pins_the_package_an_Android_install_reports_and_refuses_the_build_path_as_an_app_id()
+    {
+        var h = Harness.Create(options => options with { Platform = MobilePlatform.Android }, pinned: false, app: app => app with { AppPath = "./build/app.apk" });
+        h.Fake.Respond(DeviceMethods.AppsInstall, _ => new JsonObject { ["app"] = "/project/build/app.apk", ["appPath"] = "/project/build/app.apk", ["platform"] = "android", ["appId"] = "dev.example.app", ["package"] = "dev.example.app" });
+        var session = await h.Boot();
+        Assert.Equal(new InstalledApp("dev.example.app", "dev.example.app"), await session.InstallAppAsync());
+        await session.RestartAsync(CancellationToken.None);
+        JsonAssert.Args("""{"app":"dev.example.app","platform":"android","relaunch":true}""", h.Fake.LastArgs("apps.open"));
+
+        // agent-device 0.21.18 echoes the path as `app` when it cannot read the package. That path is not something `open` can launch.
+        var unnamed = Harness.Create(options => options with { Platform = MobilePlatform.Android }, pinned: false, app: app => app with { AppPath = "./build/app.apk" });
+        unnamed.Fake.Respond(DeviceMethods.AppsInstall, _ => new JsonObject { ["app"] = "/project/build/app.apk", ["appPath"] = "/project/build/app.apk", ["platform"] = "android" });
+        var unnamedSession = await unnamed.Boot();
+        var reported = await Assert.ThrowsAsync<EngineException>(() => unnamedSession.InstallAppAsync());
+        Assert.Equal("ENGINE_FAILURE", reported.Code);
+        Assert.Contains("reported no bundle id or package", reported.Message, StringComparison.Ordinal);
+        Assert.Null(unnamedSession.PinnedApp);
+        var refused = await Assert.ThrowsAsync<EngineException>(() => unnamedSession.RestartAsync(CancellationToken.None));
+        Assert.Equal("UNSUPPORTED_CAPABILITY", refused.Code);
+        Assert.Contains("device.installApp()", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("apps.open", unnamed.Fake.Methods());
+
+        // An `app` passed in is what the build opens by, reported or not.
+        Assert.Equal(new InstalledApp("dev.example.app"), await unnamedSession.InstallAppAsync(null, new InstallAppOptions { App = "dev.example.app" }));
+        Assert.Equal("dev.example.app", unnamedSession.PinnedApp);
+    }
+
+    [Fact]
+    public async Task Installs_the_engine_build_under_the_pinned_app_and_device_and_keeps_opening_the_pinned_app()
+    {
+        var h = Harness.Create(
+            options => options with { Platform = MobilePlatform.Android, Device = "Pixel 8" },
+            app: app => app with { BundleId = "com.example.app", AppPath = "/builds/app.apk" });
+        h.Fake.Respond(DeviceMethods.AppsInstall, _ => new JsonObject { ["app"] = "com.example.app", ["appPath"] = "/builds/app.apk", ["platform"] = "android" });
+        var session = await h.Boot();
+        await session.RestartAsync(CancellationToken.None);
+        Assert.Equal(["devices.boot", "apps.open"], h.Fake.Methods());
+        await session.InstallAppAsync();
+        JsonAssert.Args("""{"platform":"android","device":"Pixel 8","app":"com.example.app","appPath":"/builds/app.apk"}""", h.Fake.LastArgs("apps.install"));
+        JsonAssert.Args("""{"app":"com.example.app","platform":"android","device":"Pixel 8","relaunch":true}""", h.Fake.LastArgs("apps.open"));
+    }
+
+    [Fact]
+    public async Task Refuses_installApp_without_a_build_and_reports_a_build_that_does_not_install_as_the_install_step()
+    {
+        var none = Harness.Create();
+        var noneSession = await none.Boot();
+        var missing = await Assert.ThrowsAsync<EngineException>(() => noneSession.InstallAppAsync());
+        Assert.Equal("INVALID_STATE", missing.Code);
+
+        var h = Harness.Create(pinned: false, app: app => app with { AppPath = "./missing.app" });
+        h.Fake.Respond(DeviceMethods.AppsInstall, _ => throw new InvalidOperationException("no such file: missing.app"));
+        var session = await h.Boot();
+        var failed = await Assert.ThrowsAsync<EngineException>(() => session.InstallAppAsync());
+        Assert.Equal("ENGINE_FAILURE", failed.Code);
+        Assert.Equal(["devices.boot", "apps.install"], h.Fake.Methods());
+    }
+
+    [Fact]
     public async Task Gives_up_on_a_session_close_that_outlives_the_cleanup_budget()
     {
         var h = Harness.Create();

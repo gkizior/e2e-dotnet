@@ -12,9 +12,11 @@ namespace E2E.Mobile;
 /// One simulator or emulator session, driven through an <see cref="IDeviceClient"/>, exposed to the runner as the
 /// contract's session. Its device and session come from the target's <see cref="DevicePool"/>, by worker slot. Every
 /// observation projects the device's accessibility tree under one root of a stable id
-/// (<see cref="SnapshotProjection.RootId"/>), and its node refs are valid for that observation only.
+/// (<see cref="SnapshotProjection.RootId"/>), and its node refs are valid for that observation only. It owns the id
+/// space (one fresh generation per observation), the transition state, and every translation between the contract's
+/// vocabulary and agent-device's commands. The actions themselves are <see cref="DeviceActions"/>.
 /// </summary>
-public sealed class DeviceSession : IEngineSession
+public sealed partial class DeviceSession : IEngineSession
 {
     /// <summary>
     /// The Apple runner defers a full snapshot after slow accessibility work and returns a sparse one-node tree.
@@ -63,8 +65,29 @@ public sealed class DeviceSession : IEngineSession
     /// <summary>The build the target names, resolved against the project root.</summary>
     public string? BuildPath => _app.AppPath is null ? null : Path.GetFullPath(_app.AppPath, _projectRoot);
 
-    /// <summary>The projection of the screen the last observation read. Refs of its nodes are the ones the session hands out.</summary>
-    internal ProjectedSnapshot? Latest { get; private set; }
+    /// <summary>The build the target's <c>appPath</c> names, as declared.</summary>
+    public string? AppPath => _app.AppPath;
+
+    /// <summary>
+    /// Who acts through this session. A test's step never settles, and it waits out a transition. The agent reads the
+    /// screen right after acting, so its actions settle first. The core session does not say who is calling, so the
+    /// caller sets it. The default is the agent's.
+    /// </summary>
+    public ActionOrigin Origin { get; set; } = ActionOrigin.Agent;
+
+    /// <summary>The device fixture of this session: deterministic device management for a test.</summary>
+    public Device Device => _device ??= new Device(this);
+
+    private Device? _device;
+
+    /// <summary>The agent-device client of the live session, or <c>INVALID_STATE</c> once it closed.</summary>
+    internal IDeviceClient Client => _client ?? throw DeviceSupport.InvalidState("the agent-device engine is not initialized");
+
+    /// <summary>The session and device this worker drives, for the error messages whose recovery is per device.</summary>
+    internal string Where => _where;
+
+    /// <summary>Whether the target pins an app for <c>app.open()</c>, <c>app.restart()</c>, and <c>app.clearState()</c> to launch.</summary>
+    private bool ManagesApp => _app.BundleId is not null || _app.AppPath is not null;
 
     internal static async Task<DeviceSession> StartAsync(MobileEngine engine, MobileStartInfo info, DeviceClientFactory createClient, CancellationToken cancellationToken)
     {
@@ -74,6 +97,7 @@ public sealed class DeviceSession : IEngineSession
         var where = $"session {session}{(label is null ? "" : $" on {label}")}";
         var started = new DeviceSession(engine, info, binding, session, where, createClient(session, binding));
         await started.BootAsync(cancellationToken).ConfigureAwait(false);
+        engine.Register(started);
         return started;
     }
 
@@ -83,7 +107,7 @@ public sealed class DeviceSession : IEngineSession
     /// </summary>
     public Task<T> CommandAsync<T>(string label, Func<IDeviceClient, CancellationToken, Task<T>> run, CancellationToken cancellationToken)
     {
-        var client = _client ?? throw DeviceSupport.InvalidState("the agent-device engine is not initialized");
+        var client = Client;
         return DeviceErrors.RunCommandAsync(label, token => run(client, token), cancellationToken, _where);
     }
 
@@ -93,6 +117,9 @@ public sealed class DeviceSession : IEngineSession
     private async Task BootAsync(CancellationToken cancellationToken)
     {
         await CommandAsync("boot", DeviceMethods.DevicesBoot, Selection.ToArgs(), cancellationToken).ConfigureAwait(false);
+
+        // Nothing is installed here: a device provider that installed the build from appPath says so on the binding,
+        // and otherwise the suite installs it where it wants to, with device.installApp().
     }
 
     public Task OpenAsync(string url, CancellationToken cancellationToken)
@@ -110,7 +137,7 @@ public sealed class DeviceSession : IEngineSession
     public async Task RestartAsync(CancellationToken cancellationToken)
     {
         var app = PinnedApp ?? throw DeviceSupport.Unsupported($"launching the app needs the target's `app.bundleId`, or {UninstalledBuild}");
-        await OpenAppAsync(app, relaunch: true, cancellationToken).ConfigureAwait(false);
+        await OpenAppAsync(app, new OpenAppOptions { Relaunch = true }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Clears the pinned app's persisted state and relaunches it: the device equivalent of a fresh context.</summary>
@@ -122,25 +149,21 @@ public sealed class DeviceSession : IEngineSession
             DeviceMethods.SettingsUpdate,
             DeviceArgs.Of(("setting", JsonValue.Create("clear-app-state")), ("state", JsonValue.Create("clear")), ("app", JsonValue.Create(app))),
             cancellationToken).ConfigureAwait(false);
-        await OpenAppAsync(app, relaunch: true, cancellationToken).ConfigureAwait(false);
+        await OpenAppAsync(app, new OpenAppOptions { Relaunch = true }, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task BackAsync(CancellationToken cancellationToken)
     {
-        var settle = Options.Settle ? DeviceArgs.Of(("settle", JsonValue.Create(true)), ("settleQuietMs", JsonValue.Create(Options.SettleMilliseconds))) : new JsonObject();
-        await CommandAsync("back", DeviceMethods.CommandBack, settle, cancellationToken).ConfigureAwait(false);
+        var before = _latestIndex;
+        await CommandAsync("back", DeviceMethods.CommandBack, ActionSettle(), cancellationToken).ConfigureAwait(false);
+        MarkAction(before);
     }
 
     public async Task<Observation> ObserveAsync(CancellationToken cancellationToken)
     {
         var raw = await SnapshotOrEmptyAsync(Options.Snapshot == SnapshotMode.Interactive, cancellationToken).ConfigureAwait(false);
-        var projected = SnapshotProjection.ProjectSnapshot(raw.Nodes, () => $"n{++_idCounter}", raw.Viewport);
-        Latest = projected;
-        if (projected.Viewport is { } measured)
-        {
-            _knownViewport = measured;
-        }
-
+        var projected = Project(raw);
+        _generation = projected.Index.ToDictionary(entry => entry.Id, entry => Bind(entry, projected.Index));
         var viewport = await ViewportForAsync(projected, cancellationToken).ConfigureAwait(false);
         Route = DeviceSupport.ScreenLocation(raw.AppBundleId ?? raw.AppName ?? _appIdentity, SnapshotProjection.ScreenTitle(projected)) ?? "";
         return new Observation
@@ -152,17 +175,16 @@ public sealed class DeviceSession : IEngineSession
     }
 
     public Task PerformAsync(SemanticNode node, LocatorAction action, CancellationToken cancellationToken) =>
-        _engine.Actions?.PerformAsync(this, node, action, cancellationToken) ?? Unsupported("node actions");
+        _engine.Actions.PerformAsync(this, node, action, cancellationToken);
 
     public Task PressAsync(string key, CancellationToken cancellationToken) =>
-        _engine.Actions?.PressAsync(this, key, cancellationToken) ?? Unsupported("pressing a key");
+        _engine.Actions.PressAsync(this, key, cancellationToken);
 
     public Task SwipeAsync(ScrollDirection direction, CancellationToken cancellationToken) =>
-        _engine.Actions?.SwipeAsync(this, direction, cancellationToken) ?? Unsupported("scrolling");
+        _engine.Actions.SwipeAsync(this, direction, cancellationToken);
 
     public Task<EngineScreenshot> ScreenshotAsync(CancellationToken cancellationToken) =>
-        _engine.Actions?.ScreenshotAsync(this, cancellationToken)
-        ?? Task.FromException<EngineScreenshot>(DeviceSupport.Unsupported("screenshots are not available on a device yet"));
+        _engine.Actions.ScreenshotAsync(this, cancellationToken);
 
     public ValueTask DisposeAsync() => new(CloseAsync(E2EDefaults.CleanupTimeout, CancellationToken.None));
 
@@ -171,10 +193,12 @@ public sealed class DeviceSession : IEngineSession
     {
         var client = _client;
         _client = null;
+        _engine.Unregister(this);
         _appIdentity = null;
         InstalledApp = null;
         _knownViewport = null;
-        Latest = null;
+        _latestIndex = null;
+        _generation = [];
         if (client is null)
         {
             return;
@@ -196,57 +220,6 @@ public sealed class DeviceSession : IEngineSession
     }
 
     /// <summary>
-    /// Opens an app in the session. The engine's own launch options belong to a fresh launch of the pinned app: a
-    /// foreground-only open of a running app takes no arguments, and a permission change there would terminate the
-    /// app it means to keep.
-    /// </summary>
-    private async Task OpenAppAsync(string app, bool relaunch, CancellationToken cancellationToken)
-    {
-        var configured = relaunch && app == PinnedApp;
-        if (configured && _app.Permissions is { } permissions)
-        {
-            await PresetPermissionsAsync(app, permissions, cancellationToken).ConfigureAwait(false);
-        }
-
-        await LaunchAsync(app, relaunch, configured ? _app.LaunchArguments : null, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>One <c>open</c> of an app.</summary>
-    private async Task LaunchAsync(string app, bool relaunch, IReadOnlyList<string>? launchArguments, CancellationToken cancellationToken)
-    {
-        var result = await CommandAsync(
-            $"open {app}",
-            DeviceMethods.AppsOpen,
-            Selection.ToArgs(
-                ("app", JsonValue.Create(app)),
-                ("relaunch", relaunch ? JsonValue.Create(true) : null),
-                ("launchArgs", launchArguments is { Count: > 0 } ? new JsonArray([.. launchArguments.Select(argument => (JsonNode?)JsonValue.Create(argument))]) : null)),
-            cancellationToken).ConfigureAwait(false);
-        _appIdentity = Text(result?["appBundleId"]) ?? Text(result?["appName"]) ?? app;
-        Latest = null;
-    }
-
-    /// <summary>
-    /// Puts an app's permissions in place before it launches, never after: iOS terminates a running app whose
-    /// permission changed. Each change names the app, so it needs no open in the session first.
-    /// </summary>
-    private async Task PresetPermissionsAsync(string app, IReadOnlyDictionary<DevicePermission, PermissionState> permissions, CancellationToken cancellationToken)
-    {
-        foreach (var (permission, state) in permissions)
-        {
-            await CommandAsync(
-                $"permission {permission.WireName()} {state.WireName()}",
-                DeviceMethods.SettingsUpdate,
-                Selection.ToArgs(
-                    ("setting", JsonValue.Create("permission")),
-                    ("permission", JsonValue.Create(permission.WireName())),
-                    ("state", JsonValue.Create(state.WireName())),
-                    ("app", JsonValue.Create(app))),
-                cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
     /// Snapshot for an observation. Without a pinned app, an observation before anything is open is an empty screen
     /// rather than a fault: the model's next move is the open tool, and failing the step would take that move away.
     /// </summary>
@@ -256,15 +229,15 @@ public sealed class DeviceSession : IEngineSession
         {
             return await SnapshotAsync(interactiveOnly, cancellationToken).ConfigureAwait(false);
         }
-        catch (EngineException cause) when (_client is not null && PinnedApp is null && cause.Code == EngineErrorCodes.InvalidState)
+        catch (EngineException cause) when (_client is not null && !ManagesApp && cause.Code == EngineErrorCodes.InvalidState)
         {
-            return new RawSnapshot([], false, null, null, false);
+            return RawSnapshot.Empty;
         }
     }
 
-    private async Task<RawSnapshot> SnapshotAsync(bool interactiveOnly, CancellationToken cancellationToken)
+    internal async Task<RawSnapshot> SnapshotAsync(bool interactiveOnly, CancellationToken cancellationToken)
     {
-        var last = new RawSnapshot([], false, null, null, false);
+        var last = RawSnapshot.Empty;
         foreach (var backoff in SparseRetryBackoffMilliseconds)
         {
             if (backoff > 0)
@@ -311,6 +284,19 @@ public sealed class DeviceSession : IEngineSession
         }
     }
 
+    /// <summary>Projects a snapshot, and remembers it as the screen the session last looked at.</summary>
+    private ProjectedSnapshot Project(RawSnapshot raw)
+    {
+        var projected = SnapshotProjection.ProjectSnapshot(raw.Nodes, () => $"n{++_idCounter}", raw.Viewport);
+        _latestIndex = projected.Index;
+        if (projected.Viewport is { } measured)
+        {
+            _knownViewport = measured;
+        }
+
+        return projected;
+    }
+
     /// <summary>
     /// The viewport of a snapshot: its own geometry, else the last one this session learned, else the device's logical
     /// screen size read off one screenshot. A device whose size cannot be learned fails the observation: the harness
@@ -333,43 +319,10 @@ public sealed class DeviceSession : IEngineSession
     }
 
     /// <summary>The device's logical screen size as its screenshot reports it. Null when it reports none.</summary>
-    private async Task<ViewportSize?> ProbeViewportAsync(CancellationToken cancellationToken)
-    {
-        var directory = Directory.CreateTempSubdirectory("e2e-agent-device-");
-        try
-        {
-            var shot = await CommandAsync(
-                "screenshot",
-                DeviceMethods.CaptureScreenshot,
-                DeviceArgs.Of(("path", JsonValue.Create(Path.Combine(directory.FullName, "screenshot.png")))),
-                cancellationToken).ConfigureAwait(false);
-            return DeviceSupport.LogicalScreenSize(new RawScreenshotResult
-            {
-                Path = Text(shot?["path"]),
-                Width = Number(shot?["width"]),
-                Height = Number(shot?["height"]),
-                LogicalWidth = Number(shot?["logicalWidth"]),
-                LogicalHeight = Number(shot?["logicalHeight"]),
-                PixelDensity = Number(shot?["pixelDensity"]),
-            });
-        }
-        finally
-        {
-            try
-            {
-                directory.Delete(recursive: true);
-            }
-            catch (IOException)
-            {
-                // The probe is best effort and so is its cleanup.
-            }
-        }
-    }
+    private Task<ViewportSize?> ProbeViewportAsync(CancellationToken cancellationToken) =>
+        CaptureScreenshotAsync((shot, _) => Task.FromResult(DeviceSupport.LogicalScreenSize(shot)), normalizeStatusBar: false, cancellationToken);
 
     private const string UninstalledBuild = "the build the target's `app.appPath` names installed first with `device.installApp()`";
-
-    private static Task Unsupported(string what) =>
-        Task.FromException(DeviceSupport.Unsupported($"{what} are not available on a device yet"));
 
     private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
@@ -378,17 +331,22 @@ public sealed class DeviceSession : IEngineSession
         node is JsonValue && JsonSerializer.SerializeToElement(node) is { ValueKind: JsonValueKind.Number } element ? element.GetDouble() : null;
 
     /// <summary>The snapshot fields this engine reads off agent-device's response.</summary>
-    private sealed record RawSnapshot(IReadOnlyList<RawNode> Nodes, bool Truncated, string? AppName, string? AppBundleId, bool Sparse, ViewportSize? Viewport = null)
+    internal sealed record RawSnapshot(
+        IReadOnlyList<RawNode> Nodes,
+        bool Truncated,
+        string? AppName,
+        string? AppBundleId,
+        bool Sparse,
+        ViewportSize? Viewport = null,
+        string? KeyboardKind = null)
     {
-        /// <summary>The viewport agent-device measured, when it is a usable size: the same bar <c>ViewportOf</c> sets for a tree.</summary>
-        private static ViewportSize? PublishedViewport(JsonObject? viewport) =>
-            Number(viewport?["width"]) is > 0 and var width && Number(viewport?["height"]) is > 0 and var height ? new ViewportSize(width, height) : null;
+        public static RawSnapshot Empty { get; } = new([], false, null, null, false);
 
         public static RawSnapshot Read(JsonNode? response)
         {
             if (response is not JsonObject data)
             {
-                return new RawSnapshot([], false, null, null, false);
+                return Empty;
             }
 
             IReadOnlyList<RawNode> nodes;
@@ -401,13 +359,17 @@ public sealed class DeviceSession : IEngineSession
                 throw new EngineException(EngineErrorCodes.EngineFailure, $"the device returned a snapshot this engine cannot read: {cause.Message}", retryable: false, cause);
             }
 
+            ViewportSize? viewport = Number(data["viewport"]?["width"]) is > 0 and var width && Number(data["viewport"]?["height"]) is > 0 and var height
+                ? new ViewportSize(width, height)
+                : null;
             return new RawSnapshot(
                 nodes,
                 data["truncated"] is JsonValue truncated && truncated.TryGetValue<bool>(out var cut) && cut,
                 Text(data["appName"]),
                 Text(data["appBundleId"]),
                 Text(data["snapshotQuality"]?["state"]) == "sparse",
-                PublishedViewport(data["viewport"] as JsonObject));
+                viewport,
+                Text(data["keyboard"]?["kind"]));
         }
     }
 }
