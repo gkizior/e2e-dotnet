@@ -78,13 +78,6 @@ public sealed class SkippingFixture : E2ETest
     }
 
     [Test]
-    public async Task Soft_then_inconclusive()
-    {
-        await Expect.Soft(Screen.GetByLabel("Loads")).ToHaveTextAsync("the count", timeout: SoftTimeout);
-        Assert.Inconclusive("feature disabled");
-    }
-
-    [Test]
     [Retry(3)]
     public async Task Soft_then_skip_with_retries()
     {

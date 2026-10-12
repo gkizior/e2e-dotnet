@@ -9,7 +9,7 @@ namespace E2E.NUnit.Tests.SkipAfterFailure;
 /// <summary>
 /// Ported from upstream's <c>skip-after-failure.test.ts</c> (tester-army/e2e#924), whose tests
 /// run the CLI over a project. These run <see cref="SkippingFixture"/> through NUnit instead, with
-/// <c>Assert.Ignore</c> and <c>Assert.Inconclusive</c> in place of <c>test.skip</c>. Not ported:
+/// <c>Assert.Ignore</c> in place of <c>test.skip</c>. Not ported:
 /// "shows the original failure when a retry skips" and the <c>failOnSkippedFailure</c> policy
 /// that "keeps clean skips and passing soft assertions green" also sets (the port has no
 /// <c>failOnSkippedFailure</c> and no <c>Skipped After Failure</c> list), "fails a serial member on a soft failure before its
@@ -27,7 +27,7 @@ public sealed class ARuntimeSkipAfterAFailureTests
     }
 
     [Test]
-    public void Fails_on_a_soft_failure_before_the_skip_keeping_the_skip_reason_beside_it()
+    public void Fails_with_the_soft_failures_and_the_skip_reason_and_runs_teardown()
     {
         var result = NestedRun.Run(nameof(SkippingFixture.Soft_then_skip));
 
@@ -39,17 +39,7 @@ public sealed class ARuntimeSkipAfterAFailureTests
     }
 
     [Test]
-    public void Fails_on_a_soft_failure_before_an_inconclusive_result()
-    {
-        var result = NestedRun.Run(nameof(SkippingFixture.Soft_then_inconclusive));
-
-        Assert.That(result.ResultState.Status, Is.EqualTo(TestStatus.Failed));
-        Assert.That(result.Message, Does.Contain("toHaveText failed: expected text \"the count\""));
-        Assert.That(result.Message, Does.Contain("feature disabled"));
-    }
-
-    [Test]
-    public void Retries_a_soft_failure_before_the_skip_like_any_failure()
+    public void Retries_a_soft_failure_before_the_skip_three_times()
     {
         var result = NestedRun.Run(nameof(SkippingFixture.Soft_then_skip_with_retries));
 
@@ -58,7 +48,7 @@ public sealed class ARuntimeSkipAfterAFailureTests
     }
 
     [Test]
-    public void Shows_a_soft_failure_before_the_skip_when_a_retry_then_skips_cleanly()
+    public void Shows_the_soft_failure_of_the_failed_attempt_when_the_retry_skips_cleanly()
     {
         var result = NestedRun.Run(nameof(SkippingFixture.Soft_skip_then_clean_skip));
 

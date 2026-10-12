@@ -265,18 +265,31 @@ public sealed class ToHaveScreenshotTests
         Assert.True(System.Text.Encoding.UTF8.GetByteCount(file) <= 150);
     }
 
-    [Theory]
-    [InlineData("../home", null, null, "name must be a file name")]
-    [InlineData("home", 2.0, null, "threshold must be a number from 0 to 1")]
-    [InlineData("home", null, "red", "maskColor must be a color written #rrggbb")]
-    [InlineData("home", null, null, "mask must be an array of locators", true)]
-    [InlineData("ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ", null, null, "at most 150 bytes")]
-    public async Task Refuses_an_invalid_call_before_it_reads_the_screen(string name, double? threshold, string? maskColor, string message, bool nullMask = false)
+    [Fact]
+    public Task Refuses_a_name_with_a_path_separator_before_it_reads_the_screen() =>
+        RefusesBeforeItReadsTheScreen("../home", new ScreenshotOptions(), "name must be a file name");
+
+    [Fact]
+    public Task Refuses_a_threshold_above_1_before_it_reads_the_screen() =>
+        RefusesBeforeItReadsTheScreen("home", new ScreenshotOptions { Threshold = 2 }, "threshold must be a number from 0 to 1");
+
+    [Fact]
+    public Task Refuses_a_mask_that_is_not_a_locator_before_it_reads_the_screen() =>
+        RefusesBeforeItReadsTheScreen("home", new ScreenshotOptions { Mask = [null!] }, "mask must be an array of locators");
+
+    [Fact]
+    public Task Refuses_a_mask_color_that_is_not_rrggbb_before_it_reads_the_screen() =>
+        RefusesBeforeItReadsTheScreen("home", new ScreenshotOptions { MaskColor = "red" }, "maskColor must be a color written #rrggbb");
+
+    [Fact]
+    public Task Refuses_a_name_too_long_for_a_file_name_before_it_reads_the_screen() =>
+        RefusesBeforeItReadsTheScreen(string.Concat(Enumerable.Repeat("あ", 60)), new ScreenshotOptions(), "at most 150 bytes");
+
+    private static async Task RefusesBeforeItReadsTheScreen(string name, ScreenshotOptions options, string message)
     {
         var engine = new ScreenEngine();
         using var project = new ScreenProject(engine);
-        var error = await project.RunAsync("invalid", "invalid", screen =>
-            Expect.That(screen).ToHaveScreenshotAsync(name, new ScreenshotOptions { Threshold = threshold, MaskColor = maskColor, Mask = nullMask ? [null!] : null }));
+        var error = await project.RunAsync("invalid", "invalid", screen => Expect.That(screen).ToHaveScreenshotAsync(name, options));
         Assert.Equal("INVALID_ARGUMENT", error?.Code);
         Assert.Contains(message, error!.Message, StringComparison.Ordinal);
         Assert.Equal(0, engine.Captures);
