@@ -32,6 +32,9 @@ internal static class ModelHttp
 
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
 
+    /// <summary>How a <c>CONTEXT_OVERFLOW</c> message opens; the agent inserts what its retry did after it.</summary>
+    internal const string OverflowMessage = "The model request exceeded the context window";
+
     /// <summary>The most response body bytes a failure message quotes.</summary>
     private const int MaxProviderBodyBytes = 1024;
 
@@ -75,7 +78,7 @@ internal static class ModelHttp
                 // A request too big is not an outage: the step's observations are what must shrink, and the code says so.
                 if (ContextOverflow.DescribesOverflow((int)response.StatusCode, null, body))
                 {
-                    throw new AgentException("CONTEXT_OVERFLOW", "The model request exceeded the context window: " + failure, blocked: true);
+                    throw new AgentException("CONTEXT_OVERFLOW", OverflowMessage + ": " + failure, blocked: true);
                 }
 
                 throw new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed: " + failure);
@@ -89,7 +92,7 @@ internal static class ModelHttp
     public static AgentException ResponseFailed(string error)
     {
         return ContextOverflow.DescribesOverflow(null, error, null)
-            ? new AgentException("CONTEXT_OVERFLOW", "The model request exceeded the context window: " + error, blocked: true)
+            ? new AgentException("CONTEXT_OVERFLOW", OverflowMessage + ": " + error, blocked: true)
             : new AgentException("MODEL_PROVIDER_FAILED", "The model provider failed the response. " + error);
     }
 

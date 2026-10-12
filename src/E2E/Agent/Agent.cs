@@ -160,6 +160,7 @@ public sealed class Agent
         string? summary = null;
         var stopped = false;
         string? noticed = null;
+        var shrunkOnce = false;
         for (var call = 0; call < maxCalls; call++)
         {
             if (failures >= 5)
@@ -183,7 +184,41 @@ public sealed class Agent
             }
 
             var tools = AgentTools.ActFor(_scope.EngineCapabilities);
-            var response = await CallModelAsync(agent.Model, ActSystemFor(agent), messages, stopped ? tools.Where(tool => string.Equals(tool.Name, "done", StringComparison.Ordinal)).ToList() : tools, agent, token).ConfigureAwait(false);
+            var offered = stopped ? tools.Where(tool => string.Equals(tool.Name, "done", StringComparison.Ordinal)).ToList() : tools;
+            ModelResponse response;
+            try
+            {
+                response = await CallModelAsync(agent.Model, ActSystemFor(agent), messages, offered, agent, token).ConfigureAwait(false);
+            }
+            catch (AgentException overflow) when (string.Equals(overflow.Code, "CONTEXT_OVERFLOW", StringComparison.Ordinal))
+            {
+                // One recovery: the history shrinks and the request goes out again. The refused request was no turn,
+                // so it spends no call of the budget, and a second refusal is the step's verdict.
+                if (shrunkOnce)
+                {
+                    throw Overflowed(overflow, " again after the history was shrunk once");
+                }
+
+                var shrunk = OverflowShrink.ShrinkForOverflow(messages);
+                if (OverflowShrink.TextChars(shrunk) >= OverflowShrink.TextChars(messages))
+                {
+                    // Nothing to elide and nothing to clip: sending the same request again would only spend another call on it.
+                    throw Overflowed(overflow, " and the step history had nothing left to shrink");
+                }
+
+                shrunkOnce = true;
+                messages.Clear();
+                messages.AddRange(shrunk);
+                try
+                {
+                    response = await CallModelAsync(agent.Model, ActSystemFor(agent), messages, offered, agent, token).ConfigureAwait(false);
+                }
+                catch (AgentException again) when (string.Equals(again.Code, "CONTEXT_OVERFLOW", StringComparison.Ordinal))
+                {
+                    throw Overflowed(again, " again after the history was shrunk once");
+                }
+            }
+
             if (response.ToolCalls.Count == 0)
             {
                 messages.Add(new ModelMessage { Role = "assistant", Content = response.Content, ReasoningItems = response.ReasoningItems });
@@ -282,6 +317,14 @@ public sealed class Agent
         // Asking for one more call than the budget allows is a hard stop, as upstream: blocked, not a verdict.
         throw new AgentException("STEP_BUDGET_EXHAUSTED", "agent.act exhausted its model-call budget of " + maxCalls.ToString(CultureInfo.InvariantCulture), blocked: true);
     }
+
+    // The step's verdict on a refusal it could not recover from: the same error, saying what the retry did.
+    private static AgentException Overflowed(AgentException refusal, string note) =>
+        new(
+            refusal.Code,
+            ModelHttp.OverflowMessage + note + (refusal.Message.StartsWith(ModelHttp.OverflowMessage, StringComparison.Ordinal) ? refusal.Message[ModelHttp.OverflowMessage.Length..] : ": " + refusal.Message),
+            blocked: true,
+            refusal);
 
     public Task AssertAsync(string statement, AssertOptions? options = null, CancellationToken cancellationToken = default)
     {
