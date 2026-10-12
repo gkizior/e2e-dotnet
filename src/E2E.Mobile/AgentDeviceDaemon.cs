@@ -36,11 +36,15 @@ public static partial class AgentDeviceDaemon
     public static string DefaultStateDirectory { get; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agent-device", "e2e-dotnet");
 
-    /// <summary>The local daemon for a state directory: found if one runs there, else started. One start per directory per process.</summary>
-    public static async Task<DaemonEndpoint> LocalAsync(string? stateDirectory, CancellationToken cancellationToken)
+    /// <summary>
+    /// The local daemon for a state directory: found if one runs there, else started. One start per directory per
+    /// process. A provider's own daemon is started with the <paramref name="environment"/> it needs and nothing else
+    /// from this process (its credentials and its device's address); a daemon already running keeps the one it started with.
+    /// </summary>
+    public static async Task<DaemonEndpoint> LocalAsync(string? stateDirectory, CancellationToken cancellationToken, IReadOnlyDictionary<string, string?>? environment = null)
     {
         var directory = stateDirectory ?? DefaultStateDirectory;
-        var starting = Local.GetOrAdd(directory, key => new Lazy<Task<DaemonEndpoint>>(() => StartAsync(key)));
+        var starting = Local.GetOrAdd(directory, key => new Lazy<Task<DaemonEndpoint>>(() => StartAsync(key, environment)));
         try
         {
             return await starting.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -87,7 +91,47 @@ public static partial class AgentDeviceDaemon
         return match.Success ? new Version(int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)) : null;
     }
 
-    private static async Task<DaemonEndpoint> StartAsync(string stateDirectory)
+    /// <summary>
+    /// Stops the daemon of a state directory and removes the directory, as <c>agent-device daemon stop --clean</c> does,
+    /// and forgets it. Throws when the command fails, so a caller can report a daemon left running.
+    /// </summary>
+    public static async Task StopAsync(string stateDirectory, IReadOnlyDictionary<string, string?>? environment, CancellationToken cancellationToken)
+    {
+        var (program, arguments) = Launcher();
+        var start = new ProcessStartInfo(program) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in arguments.Concat(["daemon", "stop", "--state-dir", stateDirectory, "--clean", "--json"]))
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        if (environment is not null)
+        {
+            Isolate(start, environment);
+        }
+
+        var (exitCode, output, error) = await RunAsync(start, TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException($"`agent-device daemon stop` for {stateDirectory} exited with code {exitCode}: {FirstLine(error.Length > 0 ? error : output)}");
+        }
+
+        Local.TryRemove(stateDirectory, out _);
+    }
+
+    /// <summary>A child that sees exactly <paramref name="environment"/>, not this process's own variables.</summary>
+    private static void Isolate(ProcessStartInfo start, IReadOnlyDictionary<string, string?> environment)
+    {
+        start.Environment.Clear();
+        foreach (var (key, value) in environment)
+        {
+            if (value is not null)
+            {
+                start.Environment[key] = value;
+            }
+        }
+    }
+
+    private static async Task<DaemonEndpoint> StartAsync(string stateDirectory, IReadOnlyDictionary<string, string?>? environment)
     {
         Directory.CreateDirectory(stateDirectory);
         if (ReadEndpoint(stateDirectory) is { } running && await IsHealthyAsync(running).ConfigureAwait(false))
@@ -108,6 +152,11 @@ public static partial class AgentDeviceDaemon
         foreach (var argument in new[] { "session", "list", "--json" })
         {
             start.ArgumentList.Add(argument);
+        }
+
+        if (environment is not null)
+        {
+            Isolate(start, environment);
         }
 
         start.Environment["AGENT_DEVICE_STATE_DIR"] = stateDirectory;
@@ -204,7 +253,7 @@ public static partial class AgentDeviceDaemon
             ? ("node", [binary])
             : (OperatingSystem.IsWindows() ? "npx.cmd" : "npx", ["--yes", $"agent-device@{AgentDeviceVersion.Pinned}"]);
 
-    private static async Task<(int ExitCode, string Output, string Error)> RunAsync(ProcessStartInfo start, TimeSpan timeout)
+    private static async Task<(int ExitCode, string Output, string Error)> RunAsync(ProcessStartInfo start, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         using var process = new Process { StartInfo = start };
         try
@@ -216,7 +265,8 @@ public static partial class AgentDeviceDaemon
             throw new ConfigurationException("INVALID_CONFIG", $"Could not run `{start.FileName}`: {cause.Message}. agent-device needs Node {AgentDeviceVersion.MinimumNode} or newer, and npx comes with it.", cause);
         }
 
-        using var expiry = new CancellationTokenSource(timeout);
+        using var expiry = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        expiry.CancelAfter(timeout);
         var output = process.StandardOutput.ReadToEndAsync(expiry.Token);
         var error = process.StandardError.ReadToEndAsync(expiry.Token);
         try
@@ -227,6 +277,7 @@ public static partial class AgentDeviceDaemon
         catch (OperationCanceledException)
         {
             process.Kill(entireProcessTree: true);
+            cancellationToken.ThrowIfCancellationRequested();
             throw new ConfigurationException("INVALID_CONFIG", $"`{start.FileName}` did not finish within {timeout.TotalSeconds:0} seconds.");
         }
     }

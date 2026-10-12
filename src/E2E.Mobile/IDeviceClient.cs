@@ -52,6 +52,9 @@ public static class DeviceMethods
     public const string CommandFold = "command.fold";
     public const string CommandAppState = "command.appState";
     public const string CommandClipboard = "command.clipboard";
+    public const string LeasesAllocate = "leases.allocate";
+    public const string LeasesHeartbeat = "leases.heartbeat";
+    public const string LeasesRelease = "leases.release";
 }
 
 /// <summary>Builds the options objects the client takes. A null value is left out, as upstream leaves out an undefined one.</summary>

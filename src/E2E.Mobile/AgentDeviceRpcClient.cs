@@ -54,6 +54,7 @@ public sealed class AgentDeviceRpcClient : IDeviceClient
         }
 
         var requestId = $"e2e-{Guid.NewGuid():N}"[..20];
+        var lease = DeviceCommands.IsLease(command.Name);
         var meta = new JsonObject { ["requestId"] = requestId };
         foreach (var key in LeaseMetaKeys)
         {
@@ -63,24 +64,33 @@ public sealed class AgentDeviceRpcClient : IDeviceClient
             }
         }
 
-        var parameters = new JsonObject
+        JsonObject parameters;
+        if (lease)
         {
-            ["session"] = _session,
-            ["command"] = command.Name,
-            ["positionals"] = new JsonArray([.. command.Positionals.Select(text => (JsonNode?)JsonValue.Create(text))]),
-        };
-        if (command.Input is { } input)
+            parameters = DeviceCommands.LeaseParameters(command, _settings);
+        }
+        else
         {
-            parameters["input"] = input;
+            parameters = new JsonObject
+            {
+                ["session"] = _session,
+                ["command"] = command.Name,
+                ["positionals"] = new JsonArray([.. command.Positionals.Select(text => (JsonNode?)JsonValue.Create(text))]),
+            };
+            if (command.Input is { } input)
+            {
+                parameters["input"] = input;
+            }
+
+            parameters["flags"] = flags;
+            parameters["meta"] = meta;
         }
 
-        parameters["flags"] = flags;
-        parameters["meta"] = meta;
         var request = new JsonObject
         {
             ["jsonrpc"] = "2.0",
             ["id"] = Interlocked.Increment(ref _requests),
-            ["method"] = "agent_device.command",
+            ["method"] = command.RpcMethod,
             ["params"] = parameters,
         };
         using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint.BaseUrl.AbsoluteUri.TrimEnd('/') + "/rpc"))
@@ -121,6 +131,8 @@ public sealed class AgentDeviceRpcClient : IDeviceClient
         {
             DeviceMethods.DevicesList => (data as JsonObject)?["devices"] as JsonArray ?? [],
             DeviceMethods.SessionsList => (data as JsonObject)?["sessions"] as JsonArray ?? [],
+            DeviceMethods.LeasesAllocate or DeviceMethods.LeasesHeartbeat => (data as JsonObject)?["lease"] as JsonObject
+                ?? throw new AgentDeviceError("COMMAND_FAILED", "Invalid lease response from daemon"),
             _ => data ?? new JsonObject(),
         };
     }

@@ -8,7 +8,14 @@ using System.Text.Json.Nodes;
 namespace E2E.Mobile;
 
 /// <summary>One daemon request: the command, its positional arguments, its flags, and the structured input a few commands take beside them.</summary>
-public sealed record DeviceCommand(string Name, IReadOnlyList<string> Positionals, JsonObject Flags, JsonObject? Input = null);
+public sealed record DeviceCommand(string Name, IReadOnlyList<string> Positionals, JsonObject Flags, JsonObject? Input = null)
+{
+    /// <summary>
+    /// The JSON-RPC method that carries it. A lease command has a method of its own, <c>agent_device.lease.allocate</c>
+    /// and its two siblings, and takes its fields as params; every other command goes through <c>agent_device.command</c>.
+    /// </summary>
+    public string RpcMethod => DeviceCommands.IsLease(Name) ? $"agent_device.lease.{Name["lease_".Length..]}" : "agent_device.command";
+}
 
 /// <summary>
 /// The translation of a client call (<c>namespace.method</c> with its options object) into the command, positionals,
@@ -87,9 +94,61 @@ public static class DeviceCommands
                 return new DeviceCommand("appstate", [], flags);
             case DeviceMethods.CommandClipboard:
                 return new DeviceCommand("clipboard", Take(flags, "action", "text"), flags);
+            case DeviceMethods.LeasesAllocate:
+                return new DeviceCommand("lease_allocate", [], flags);
+            case DeviceMethods.LeasesHeartbeat:
+                return new DeviceCommand("lease_heartbeat", [], flags);
+            case DeviceMethods.LeasesRelease:
+                return new DeviceCommand("lease_release", [], flags);
             default:
                 throw new NotSupportedException($"The device client does not support {method} yet.");
         }
+    }
+
+    public static bool IsLease(string command) => command.StartsWith("lease_", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The params of a lease request, as the client's lease writer sends them. Each field is the call's option, else the
+    /// client configuration's: <c>tenant</c> is <c>tenantId</c> on the wire and <c>leaseBackend</c> is <c>backend</c>.
+    /// Allocate carries the lease's life (<c>ttlMs</c>, <c>retainOnClose</c>) and its backend, heartbeat and release the
+    /// lease id, heartbeat also <c>ttlMs</c>. No session is named, so the daemon takes <c>default</c>, as it does for the
+    /// upstream client the engine hands no session to.
+    /// </summary>
+    public static JsonObject LeaseParameters(DeviceCommand command, JsonObject settings)
+    {
+        JsonNode? Field(string name) => command.Flags[name] ?? settings[name];
+
+        var parameters = new JsonObject();
+        void Put(string key, JsonNode? value)
+        {
+            if (value is not null)
+            {
+                parameters[key] = value.DeepClone();
+            }
+        }
+
+        Put("tenantId", Field("tenant"));
+        Put("runId", Field("runId"));
+        Put("leaseProvider", Field("leaseProvider"));
+        Put("clientId", Field("clientId"));
+        Put("deviceKey", Field("deviceKey"));
+        switch (command.Name)
+        {
+            case "lease_allocate":
+                Put("ttlMs", command.Flags["ttlMs"]);
+                Put("retainOnClose", command.Flags["retainOnClose"]);
+                Put("backend", Field("leaseBackend"));
+                break;
+            case "lease_heartbeat":
+                Put("leaseId", Field("leaseId"));
+                Put("ttlMs", command.Flags["ttlMs"]);
+                break;
+            default:
+                Put("leaseId", Field("leaseId"));
+                break;
+        }
+
+        return parameters;
     }
 
     /// <summary>Moves the named options out of the flags, in order, as positional arguments. A missing one is skipped.</summary>
