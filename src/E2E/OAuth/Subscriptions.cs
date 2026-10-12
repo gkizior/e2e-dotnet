@@ -85,9 +85,17 @@ public static class OAuthProviders
     /// <summary>Upstream's provider ids, in its order.</summary>
     public static IReadOnlyList<string> Ids { get; } = ["openai", "github-copilot", "opencode-console", "spacexai"];
 
+    /// <summary>Test seam: providers that stand in for the built-in ones, by id.</summary>
+    internal static Dictionary<string, IOAuthProvider> Replacements { get; } = new(StringComparer.Ordinal);
+
     /// <summary>The provider for <paramref name="id"/>; <see cref="OAuthException.Misconfigured"/> for an unknown id.</summary>
     public static IOAuthProvider Get(string id)
     {
+        if (Replacements.TryGetValue(id, out var replacement))
+        {
+            return replacement;
+        }
+
         return id switch
         {
             "openai" => new CodexProvider(),

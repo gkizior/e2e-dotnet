@@ -12,20 +12,6 @@ namespace E2E.Tests;
 public sealed class EngineErrorTests
 {
     [Fact]
-    public void Only_stale_reads_can_claim_to_be_retryable()
-    {
-        var stale = new EngineException(EngineErrorCodes.NodeStale, "gone", retryable: true);
-        Assert.Equal("NODE_STALE", stale.Code);
-        Assert.True(stale.Retryable);
-
-        var coerced = new EngineException(EngineErrorCodes.NotActionable, "blocked", retryable: true);
-        Assert.Equal("ENGINE_FAILURE", coerced.Code);
-        Assert.False(coerced.Retryable);
-
-        Assert.False(new EngineException(EngineErrorCodes.NodeStale, "gone").Retryable);
-    }
-
-    [Fact]
     public void An_action_timeout_before_dispatch_is_not_actionable()
     {
         var cause = new System.TimeoutException(

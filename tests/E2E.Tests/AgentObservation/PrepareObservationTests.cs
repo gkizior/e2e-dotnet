@@ -9,13 +9,11 @@ namespace E2E.Tests.AgentObservation;
 
 /// <summary>
 /// The port renders the screen as one text block in its own format, with no pixel evidence, executor tree, node
-/// index, byte budget, cut fields, or route path. So these upstream its are not ported: "keeps unavailable semantics
-/// separate from an empty tree and requires permitted masked evidence", "keeps the whole address after the origin as
-/// the path, fragment included, for the route check to read", "returns evidence without a comparable shape without
+/// index, byte budget, or cut fields. So these upstream its are not ported: "keeps unavailable semantics separate from
+/// an empty tree and requires permitted masked evidence", "returns evidence without a comparable shape without
 /// repeating capture", "withholds pixels whose masking the engine cannot prove and keeps the tree", "redacts the leading
 /// part of a secret a field cut at its limit ends with, and leaves a cut plain value and a whole field alone", "redacts
-/// every string field a node carries, in the text, the executor tree, and the node index alike", "collapses a field
-/// whose collapsed form shows a secret its written form hides, so no later reader brings it back", "redacts an earlier
+/// every string field a node carries, in the text, the executor tree, and the node index alike", "redacts an earlier
 /// capture again with a secret resolved since, keeping which nodes are leaves", "truncates at the byte limit while
 /// keeping the root and flagging truncation", and "reports the byte cut, not the engine cut, when both apply".
 /// </summary>
@@ -87,5 +85,29 @@ public sealed class PrepareObservationTests
     {
         var text = SnapshotText.Render(new Observation { Route = "/", Roots = [new SemanticNode { Ref = "n1", Role = "status", Text = "line\u0007one\n   two  " }] }, Redactor.None);
         Assert.Contains("\"line\uFFFDone two\"", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>Partial: the port reads the route from <c>Routes.LocationOf</c>, and a bare word becomes a rooted path.</summary>
+    [Theory]
+    [InlineData("https://app.example.test/companies?search=a#/orders/42", "/companies?search=a#/orders/42")]
+    [InlineData("https://app.example.test/companies#top", "/companies#top")]
+    [InlineData("Settings", "/Settings")]
+    public void Keeps_the_query_and_fragment_after_the_origin_in_the_route(string location, string route)
+    {
+        Assert.Equal(route, E2E.Internal.Routes.LocationOf(location));
+    }
+
+    /// <summary>Partial: the port renders the name and text, with no test id, anchors, or node index to read back.</summary>
+    [Fact]
+    public void Collapses_a_name_so_a_secret_its_written_form_hides_is_replaced()
+    {
+        var tree = new SemanticNode
+        {
+            Ref = "n1",
+            Children = [new SemanticNode { Ref = "n2", Role = "heading", Name = "say correct\n\n  horse battery   staple now", TestId = "correct\t\thorse battery staple" }],
+        };
+        var text = SnapshotText.Render(new Observation { Route = "/", Roots = [tree] }, Redactor.For([Secret.Create("phrase", "correct horse battery staple")]));
+        Assert.Contains("heading \"say <secret:phrase> now\"", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("horse", text, StringComparison.Ordinal);
     }
 }
