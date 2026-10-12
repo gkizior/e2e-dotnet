@@ -19,6 +19,10 @@ This repo is a .NET port of [tester-army/e2e](https://github.com/tester-army/e2e
 - .NET-only code may keep tests that have no upstream `it`, when no upstream `it` covers that behavior. Examples: model providers, the SigV4 signer, launch timeouts, adapters. Name each such test in the PR report.
 - The sample tests under `samples/` (the TodoMvc and Dariten samples) have no upstream `it`. They are required. Do not remove them.
 - A ported test checks everything its upstream `it` checks. If a part needs a feature the port does not have, name it in the PR report. Do not keep an upstream name on a test that checks only part of it.
+- A port follows upstream's structure and names. Every new type, method, field, constant, or file in `src/` must map to an upstream function, class, or constant (in C# casing). It lives in the equivalent file, with the same owner, and keeps upstream's split of responsibilities.
+  - Before you add a symbol, find its upstream counterpart. Read tester-army/e2e with `gh api`. Reuse its name and place.
+  - A name upstream does not have is allowed only for a .NET-only concern (dependency injection, nullable handling, test fixtures, and the .NET-only code listed above, such as model providers and the SigV4 signer). An `Async` suffix is fine. The PR report names each such symbol and the reason.
+  - Example: PR #249 first added `PerformTargetedAsync`. Upstream has `commitTargeted` calling a private `targeted` in `agent/action-dispatcher.ts`, and `feed.relocate` on the observation feed. The port uses those.
 
 ## Before you push
 
