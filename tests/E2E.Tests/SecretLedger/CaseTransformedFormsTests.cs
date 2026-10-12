@@ -32,7 +32,7 @@ public sealed class CaseTransformedFormsTests
     {
         var ledger = Ledger.Of(("accent", "café-crème-42"));
         Assert.Equal("<secret:accent>", ledger.Redact("CAF&#201;-CR&#xC8;ME-42"));
-        Assert.Equal("""{"v":"<secret:accent>"}""", ledger.Redact("""{"v":"CAFÉ-CRÈME-42"}"""));
+        Assert.Equal("""{"v":"<secret:accent>"}""", ledger.Redact("""{"v":"CAF\u00C9-CR\u00c8ME-42"}"""));
     }
 
     [Fact]

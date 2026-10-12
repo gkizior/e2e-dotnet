@@ -172,8 +172,8 @@ public sealed class ConfigTests
             """{ "secrets": { "stripe-key": "from-config", "token": null } }""",
             Env(("E2E_SECRET_STRIPE_KEY", "from-environment"), ("E2E_SECRET_TOKEN", "token-value")));
 
-        Assert.Equal("E2E_SECRET_STRIPE_KEY", Secrets.EnvironmentVariable("stripe-key"));
-        Assert.Equal("E2E_SECRET_A_B_C", Secrets.EnvironmentVariable("a.b c"));
+        Assert.Equal("E2E_SECRET_STRIPE_KEY", E2E.Secrets.EnvironmentVariable("stripe-key"));
+        Assert.Equal("E2E_SECRET_A_B_C", E2E.Secrets.EnvironmentVariable("a.b c"));
         Assert.Equal(
             ["stripe-key", "token"],
             config.Secrets.Names.Order(StringComparer.Ordinal).ToArray());

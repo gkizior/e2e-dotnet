@@ -61,7 +61,7 @@ public sealed class EncodedFormsTests
     public void Redacts_uXXXX_JSON_escapes_in_either_hex_case_once_and_twice_quoted()
     {
         var quoted = Ledger.Of(("quoted", "it's <ok>"));
-        Assert.Equal("""{"v":"<secret:quoted>"}""", quoted.Redact("""{"v":"it's <ok>"}"""));
+        Assert.Equal("""{"v":"<secret:quoted>"}""", quoted.Redact("""{"v":"it\u0027s \u003cok\u003E"}"""));
         Assert.Equal(
             """{"t":"{\"v\":\"<secret:quoted>\"}"}""",
             quoted.Redact("""{"t":"{\"v\":\"it\\u0027s \\u003cok\\u003e\"}"}"""));

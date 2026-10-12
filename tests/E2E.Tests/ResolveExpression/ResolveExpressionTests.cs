@@ -11,8 +11,7 @@ namespace E2E.Tests.ResolveExpression;
 /// The reference locator semantics. The screen is an iOS Settings page as the
 /// mobile engine projects one: an application node, a navigation bar with a
 /// button, a cell echoing its static text, a switch, two fields, a hidden button.
-/// Not ported: "refuses a role query whose value is not a string" (the port's role is a typed string), "drops hidden
-/// nodes from any query kind when it says visible" (the port's role options cannot ask for the hidden state), "hands a
+/// Not ported: "refuses a role query whose value is not a string" (the port's role is a typed string), "hands a
 /// selector to the platform hook, and refuses one without it" (no selector queries), and "rejects frames, since a
 /// semantic tree has no nested documents" (no frame queries).
 /// </summary>
@@ -77,6 +76,16 @@ public sealed class ResolveExpressionTests
         Assert.Equal(["h2"], await Ids(headings.GetByRole("heading", new RoleOptions { Level = 2 })));
         Assert.Equal(["h1", "h2", "h"], await Ids(headings.GetByRole("heading")));
         Assert.Empty(await Ids(Screen.GetByRole("listitem", new RoleOptions { Level = 1 })));
+    }
+
+    /// <summary>Partial: the port's role options cannot ask for the hidden state, so the role part is not checked.</summary>
+    [Fact]
+    public async Task Drops_hidden_nodes_from_the_text_label_and_index_queries_when_it_says_visible()
+    {
+        Assert.Equal(["hidden"], await Ids(Screen.GetByText("Hidden")));
+        Assert.Empty(await Ids(Screen.GetByText("Hidden", new TextMatchOptions { Visible = true })));
+        Assert.Equal(["search"], await Ids(Screen.GetByLabel("Search", new TextMatchOptions { Visible = true })));
+        Assert.Equal(["about-text"], await Ids(Screen.GetByText("About", new TextMatchOptions { Visible = true }).Last()));
     }
 
     [Fact]
