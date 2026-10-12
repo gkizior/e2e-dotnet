@@ -11,19 +11,21 @@ namespace E2E.Tests.ScriptedReads;
 /// Locator reads over the scripted reference screen: every read answers from the current tree without
 /// waiting, secure fields refuse value reads, and malformed refinements are refused before any query runs.
 /// Upstream runs each case as a test in the real runner and reads the report. The port has no runner and no
-/// report, so each case runs in the test body. Not ported: <c>textContent</c> of an image is <c>null</c> upstream, but the port answers the node's name; <c>inputValue</c> of a heading is the empty string upstream, but the port answers <c>null</c>; and the report checks (valid report, the four
+/// report, so each case runs in the test body. Not ported: the report checks (valid report, the four
 /// <c>locator.waitFor</c> steps and the label of the first) and the error <c>category</c>. A <c>filter</c>
 /// with no predicate cannot be written with the typed overloads, so the port refuses a null one.
 /// </summary>
 public sealed class ScriptedEngineLocatorReadsAndQueriesTests
 {
     [Fact]
-    public async Task Reads_every_field_count_and_list_without_waiting_except_the_text_of_an_image_and_the_value_of_a_heading()
+    public async Task Reads_every_field_count_and_list_without_waiting_but_not_the_report_steps()
     {
         using var scene = ReferenceScene.Create();
         var screen = scene.Screen;
         Assert.Equal("Dashboard", await screen.GetByRole("heading", new RoleOptions { Level = 1 }).TextContentAsync());
+        Assert.Null(await screen.GetByRole("image", "Map").TextContentAsync());
         Assert.Equal("hello-value", await screen.GetByLabel("Search").InputValueAsync());
+        Assert.Equal("", await screen.GetByRole("heading", new RoleOptions { Level = 1 }).InputValueAsync());
         Assert.Equal("card active", await screen.GetByTestId("card").GetAttributeAsync("class"));
         Assert.Null(await screen.GetByTestId("card").GetAttributeAsync("missing"));
         Assert.True(await screen.GetByRole("button", "Submit").IsVisibleAsync());

@@ -302,25 +302,24 @@ public sealed class Locator
     }
 
     /// <summary>
-    /// Reads whitespace-normalized text once: the node's rendered text (<c>innerText</c> on the web), not its label.
+    /// Reads whitespace-normalized text once: the node's rendered text (<c>innerText</c> on the web), not its label. Null when the node has no text.
     /// Does not retry and does not verify an earlier <c>act</c>. Fails with <c>POLICY_DENIED</c> on a secure field.
     /// </summary>
     public async Task<string?> TextContentAsync(CancellationToken cancellationToken = default)
     {
         var node = await ResolveReadableAsync(cancellationToken).ConfigureAwait(false);
-        var text = node.Text ?? node.Name;
-        return text is null ? null : TextRules.Normalize(text);
+        return node.Text is null ? null : TextRules.Normalize(node.Text);
     }
 
     /// <summary>
-    /// Reads an input value once. Does not retry and does not verify an earlier <c>act</c>. A checkbox or
+    /// Reads an input value once, the empty string when the node has none. Does not retry and does not verify an earlier <c>act</c>. A checkbox or
     /// radio reads its value attribute, <c>on</c> when it has none, whatever its checked state. Fails with
     /// <c>POLICY_DENIED</c> on a secure field.
     /// </summary>
-    public async Task<string?> InputValueAsync(CancellationToken cancellationToken = default)
+    public async Task<string> InputValueAsync(CancellationToken cancellationToken = default)
     {
         var node = await ResolveReadableAsync(cancellationToken).ConfigureAwait(false);
-        return node.Value;
+        return node.Value ?? "";
     }
 
     /// <summary>Reads one platform attribute of exactly one match once, or null when the node does not have it. Fails with <c>POLICY_DENIED</c> on a secure field.</summary>
@@ -401,7 +400,7 @@ public sealed class Locator
     {
         var matches = await ResolveAsync(_screen.Token(cancellationToken)).ConfigureAwait(false);
         DenySecureRead(matches);
-        return matches.Select(node => TextRules.Normalize(node.Text ?? node.Name ?? "")).ToList();
+        return matches.Select(node => TextRules.Normalize(node.Text ?? "")).ToList();
     }
 
     /// <summary>

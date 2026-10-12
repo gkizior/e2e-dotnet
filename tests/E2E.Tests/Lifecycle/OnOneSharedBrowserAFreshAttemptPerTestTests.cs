@@ -143,7 +143,7 @@ public sealed class OnOneSharedBrowserAFreshAttemptPerTestTests
             await screen.GetByRole("button", "Insert a field").TapAsync();
             await displayName.FillAsync("pinned");
             Assert.Equal("pinned", await screen.GetByLabel("Display name").InputValueAsync());
-            Assert.Equal("", await screen.GetByLabel("Inserted").InputValueAsync() ?? "");
+            Assert.Equal("", await screen.GetByLabel("Inserted").InputValueAsync());
 
             // A visibility: hidden twin is hidden.
             Assert.Equal(2, await screen.GetByText("Decorative twin").CountAsync());
