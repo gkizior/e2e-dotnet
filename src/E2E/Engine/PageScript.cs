@@ -80,6 +80,22 @@ internal static class PageScript
             && !(el.parentElement instanceof HTMLElement && el.parentElement.isContentEditable)
             // Port only: a document in designMode makes <html> editable, and the page is not a control.
             && el !== el.ownerDocument.documentElement;
+          // The text selected inside a focused field: the slice between a field's
+          // selection ends, or the document selection inside an editing host.
+          // Null for a collapsed caret.
+          const selectedTextOf = (el) => {
+            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+              const start = el.selectionStart;
+              const end = el.selectionEnd;
+              if (start === null || end === null || start === end) return null;
+              return el.value.slice(Math.min(start, end), Math.max(start, end));
+            }
+            if (!isEditingHost(el)) return null;
+            const selection = el.ownerDocument.getSelection();
+            if (selection === null || selection.rangeCount === 0 || selection.isCollapsed || !el.contains(selection.getRangeAt(0).commonAncestorContainer)) return null;
+            const text = selection.toString();
+            return text === "" ? null : text;
+          };
           const cut = (value, limit) => {
             const text = (value || "").replace(/\s+/g, " ").trim();
             return text.length > limit ? text.slice(0, limit) : text;
@@ -835,6 +851,7 @@ internal static class PageScript
                 ownText: secure || !ownsChildren ? null : cut(lineTextOf(el), textLimit),
                 inline: secure || !ownsChildren || lineTextOf(el) === "" ? null : inlineNodesOf(el, isHidden),
                 value: secure ? null : el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? String(el.value ?? "") : editorValue,
+                selection: el === focused && !secure ? selectedTextOf(el)?.slice(0, textLimit) ?? null : null,
                 testId,
                 placeholder: el.getAttribute("placeholder"),
                 inputPurpose: secure ? "password" : null,

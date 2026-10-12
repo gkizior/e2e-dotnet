@@ -214,6 +214,8 @@ The tree is a subset of upstream's: names follow upstream's accname rules, excep
 
 The snapshot leaves out a checkbox's or radio's value, which `inputValue` still reads (`on` by default).
 
+The page script reads the text selected inside the focused input, textarea, or `contenteditable` host into `SemanticNode.Selection`, as upstream does. A caret, an unfocused field, and a secure field have none. The agent snapshot does not show it, and the port does not read a `contenteditable` host as a `textbox` with a value, so the ported selection test does not check those two.
+
 Upstream leaves an `aria-hidden` subtree out of its tree walk, and its text and visibility reads go through Playwright. Here every locator read comes from the tree, so the port lists the subtree and marks each node `AriaHidden` (.NET-only), and role queries and the agent skip those nodes. They are not hidden: a painted `aria-hidden` node is visible to `isVisible`, `toBeVisible`, and `toBeHidden`, as upstream, and a `visible` query keeps it. An action on one is not refused as hidden. A box with no size is not hidden here, since role queries skip hidden nodes and an empty landmark has no size. A hidden node reads its DOM text (`textContent`) instead of `innerText`, so a text query still finds a `visibility: hidden` copy.
 
 Password fields and `autocomplete=current-password` fields are marked secure. Their values, and their `value` attribute, are omitted from the snapshot. A text, value, or attribute expectation on a secure field fails with `POLICY_DENIED`, as upstream. So do the `textContent`, `inputValue`, `allTextContents`, and `getAttribute` reads (for any attribute).

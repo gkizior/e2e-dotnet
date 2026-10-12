@@ -69,6 +69,9 @@ public sealed class SemanticNode
 
     public string? Value { get; init; }
 
+    /// <summary>The text selected inside the focused field or editing host. Null for a caret, an unfocused field, or a secure one.</summary>
+    public string? Selection { get; init; }
+
     public string? TestId { get; init; }
 
     public string? Placeholder { get; init; }
