@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>E2E.Mobile</RootNamespace>
+    <AssemblyName>E2E.Mobile</AssemblyName>
+    <Description>Mobile engine for the community .NET port of the e2e agentic testing framework. Not an official TesterArmy product.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\E2E\E2E.csproj" />
+    <InternalsVisibleTo Include="E2E.Mobile.Tests" />
+  </ItemGroup>
+</Project>

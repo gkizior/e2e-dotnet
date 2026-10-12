@@ -7,10 +7,12 @@ This repo is a community .NET port of [tester-army/e2e](https://github.com/teste
 | Path | Role |
 | --- | --- |
 | `src/E2E` | SDK: tests, expect, agent, cache, document engine, Playwright `WebEngine` |
+| `src/E2E.Mobile` | Mobile engine: the snapshot model, locators, errors, and helpers over agent-device snapshots |
 | `src/E2E.NUnit` | NUnit fixture `E2ETest` |
 | `src/E2E.XUnit.V3` | xUnit v3 fixture `E2ETest` |
 | `tests/E2E.Tests` | Unit tests. No API key. The Chromium tests install the browser on the first launch |
 | `tests/E2E.Cli.Tests` | Tests of the `e2e` tool: the bundled skill, the MCP server, its sessions, and its tools. The server tests start `e2e mcp` as a child process, open a session on a fixture app in Chromium, and talk to it over stdio. No API key |
+| `tests/E2E.Mobile.Tests` | Unit tests of `src/E2E.Mobile`, with snapshots captured from a real iOS simulator and Android emulator. No device, no API key |
 | `tests/E2E.Agent.Tests` | Agent tests against a real model, ported from upstream's `apps/testbed/tests-agent`. They serve upstream's playground pages on a loopback port. All are in the `RealModel` category and need a GitHub Copilot login |
 | `samples/E2E.Sample` | NUnit tests against the live Dariten demo. The agent test needs a GitHub Copilot login (`dotnet run --project src/E2E.Cli -- login github-copilot`) |
 | `samples/E2E.XUnit.V3.Sample` | The `samples/E2E.Sample` tests, written for xUnit v3 |

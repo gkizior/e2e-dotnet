@@ -5,6 +5,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/E2E.Cli/E2E.Cli.csproj" />
+    <Project Path="src/E2E.Mobile/E2E.Mobile.csproj" />
     <Project Path="src/E2E.NUnit/E2E.NUnit.csproj" />
     <Project Path="src/E2E.XUnit.V3/E2E.XUnit.V3.csproj" />
     <Project Path="src/E2E/E2E.csproj" />
@@ -12,6 +13,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/E2E.Agent.Tests/E2E.Agent.Tests.csproj" />
     <Project Path="tests/E2E.Cli.Tests/E2E.Cli.Tests.csproj" />
+    <Project Path="tests/E2E.Mobile.Tests/E2E.Mobile.Tests.csproj" />
     <Project Path="tests/E2E.NUnit.Tests/E2E.NUnit.Tests.csproj" />
     <Project Path="tests/E2E.Tests/E2E.Tests.csproj" />
   </Folder>

@@ -637,6 +637,9 @@ internal sealed record LocatorQuery
 
     public int? Index { get; init; }
 
+    /// <summary>The expression of a <c>selector</c> query, in the engine's own selector language. A device engine answers it.</summary>
+    public string? Selector { get; init; }
+
     public static LocatorQuery ForRole(string role, TextMatch? name, RoleOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(role);
@@ -692,6 +695,7 @@ internal sealed record LocatorQuery
             "testid" => "getByTestId(" + Value + visible + ")",
             "placeholder" => "getByPlaceholder(" + Value + visible + ")",
             "displayValue" => "getByDisplayValue(" + Value + visible + ")",
+            "selector" => "locator(\"" + Selector?.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\")",
             _ => Kind,
         };
         return Parent is null ? core : Parent.Describe() + "." + core;

@@ -104,7 +104,7 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 ## Not ported
 
 - The `e2e` command-line tool apart from `login`, `logout`, `models`, `guide`, and `mcp`: the custom runner, `[E2ETest]` discovery, `--grep`, `test.only`, and the JSON report
-- `@e2e-dev/mobile`, `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
+- `@e2e-dev/mobile` apart from its snapshot model (see [Mobile snapshot model](#mobile-snapshot-model)), `@e2e-dev/github`, `@e2e-dev/kernel`, `@e2e-dev/eas`
 - `e2e init`
 - Vision, traces, and video. `app.screenshot()` is not ported either. `ToHaveScreenshotAsync` is: see [Visual comparison](#visual-comparison)
 - Parallel workers and serial suites
@@ -118,6 +118,17 @@ Names are C# versions of the JavaScript API: `agent.act` is `ActAsync`, `screen.
 - Value expectations (`expect(value).toBe`, `toEqual`, `toMatchObject`, `toHaveProperty`, `toMatchSchema`, and the rest) and their `expect.soft` form. Use NUnit `Assert.That` with constraints, and `Assert.EnterMultipleScope` (or `Assert.Multiple`) for soft value checks. `expect.poll` takes NUnit constraints through `ToMatchAsync` in their place
 - Asymmetric matchers (`expect.any`, `anything`, `objectContaining`, `arrayContaining`, `stringContaining`, `stringMatching`). Use NUnit constraints such as `Is.InstanceOf`, `Is.Not.Null`, `Has.Property`, `Is.SupersetOf`, `Does.Contain`, and `Does.Match`
 - The upstream reporter, GitHub pull request comment, and trace viewer
+
+## Mobile snapshot model
+
+`E2E.Mobile` ports the pure logic of `@e2e-dev/mobile`: the projection of an agent-device accessibility snapshot onto `SemanticNode` (`SnapshotProjection`), locator expressions and agent-device selectors over it (`DeviceLocator`, `AgentDeviceSelector`), error translation (`DeviceErrors`), links, screenshot masking, and the shared helpers (`DeviceSupport`). There is no device, client, pool, provider, or engine yet. Differences:
+
+- agent-device is a Node package. `AgentDeviceError` stands in for its `AppError`, and `AgentDeviceSelector` reads the selector grammar of `parseSelectorChain` and applies the term rules of `listSelectorChainMatches` to the raw nodes, for the target's platform (the keys `id`, `role`, `text`, `label`, `value`, `appname`, `windowtitle`, and the flags `visible`, `hidden`, `editable`, `selected`, `focused`, `enabled`, `hittable`).
+- `SemanticNode.States` holds plain booleans, so it cannot tell an unchecked switch from a node with no checked state. `ProjectedNode.States` keeps the states the platform reported, and `ProjectedNode.Selector` keeps the `id=` hint upstream puts on the node.
+- A `filter` with `hasText` matches a substring, as the web locators do. Upstream honors the exactness of the text pattern.
+- A role query has no `hidden` state. Role queries skip hidden nodes, as upstream's do.
+- Link parsing reads a URL with `System.Uri`, after the whitespace rules a browser applies.
+- `MaskPng` refuses a PNG with no end chunk, as upstream's parser does.
 
 ## Browser install command
 
