@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using E2E.Engine;
+using static E2E.Tests.StepCache.StepTraceSessionTests;
 
 namespace E2E.Tests.TraceReplay;
 
@@ -10,8 +11,12 @@ namespace E2E.Tests.TraceReplay;
 /// <c>replayTrace</c>: how far each look of a replay settles. Upstream drives <c>replayTrace</c> with a fake host; the
 /// port replays inside an act, so each test records a flow on a document page, replays it, and reads the act's looks.
 /// They open with the act's held-still start capture, which serves the first action, and close with the end check's
-/// raw look. Only the settle <c>it</c>s are ported here: the port's replay has no gaps, drags, bare points, or lost-list
-/// fallback, and always looks before a free action until it reaches the recorded end route.
+/// raw look. The port's replay has no gaps, drags, bare points, or lost-list
+/// fallback, and always looks before a free action until it reaches the recorded end route, so those <c>it</c>s are not ported.
+/// Not ported either: "relocates by semantic identity when a recorded test id churned" (the port finds a test id exactly),
+/// "surfaces an unknown commit state as action-uncertain" (the port has no such reason), "rethrows runtime hard stops
+/// untouched" (the port hands every step error a replayed action raises off as action-failed), and "hands off with
+/// action-failed when the look before the second action throws" (the port's look before an action is outside the replay's catch).
 /// </summary>
 public sealed class ReplayTraceTests
 {
@@ -67,6 +72,100 @@ public sealed class ReplayTraceTests
 
         // Nothing to relocate, so the first repeat takes no look; each later one holds still first.
         Assert.Equal([SettleMode.HeldStill, SettleMode.HeldStill, SettleMode.HeldStill, SettleMode.HeldStill, SettleMode.Raw], looks);
+    }
+
+    private static readonly ModelResponse[] NavigateThenUpgrade = [ModelResponses.Call("navigate", new { url = "/plan" }), ModelResponses.Tap("button", "Upgrade")];
+
+    private static Task<Step> ReplayStepAsync(DocumentWorld world, string directory, Func<TestContext, Task>? check, params ModelResponse[] steps)
+    {
+        var next = 0;
+        var model = new ScriptedModel(_ => next < steps.Length ? steps[next++] : ModelResponses.Done("passed", "Done."));
+        return StepAsync(world, new FileStepCache(directory), "/home", check, model);
+    }
+
+    private static async Task<string> RecordAsync(Func<DocumentWorld> world, params ModelResponse[] steps)
+    {
+        var directory = CoreTests.TempCache();
+        var recorded = await ReplayStepAsync(world(), directory, ctx => Expect.That(ctx.Screen.GetByRole("status")).ToBeVisibleAsync(), steps);
+        Assert.Null(recorded.Error);
+        Assert.Equal("missed", recorded.Cache?.Mode);
+        return directory;
+    }
+
+    [Fact]
+    public async Task Still_diverges_at_once_on_ambiguity_for_a_target_with_no_recorded_position()
+    {
+        var tapped = 0;
+        var directory = await RecordAsync(
+            () => new DocumentWorld().Map("/home", page =>
+            {
+                var status = page.Status("Idle");
+                page.Button("Upgrade", () => status.Name = status.Text = "Upgraded " + ++tapped);
+            }),
+            ModelResponses.Tap("button", "Upgrade"));
+        tapped = 0;
+        var twins = new DocumentWorld().Map("/home", page =>
+        {
+            page.Status("Idle");
+            page.Button("Upgrade", () => tapped++);
+            page.Button("Upgrade", () => tapped++);
+        });
+
+        var replay = await ReplayStepAsync(twins, directory, null, ModelResponses.Done("passed", "Done."));
+
+        Assert.Equal(("missed", "target-ambiguous", 0), (replay.Cache?.Mode, replay.Cache?.Reason, replay.Cache?.ReplayedActions));
+        Assert.Equal(0, tapped);
+    }
+
+    [Fact]
+    public async Task Absorbs_an_action_failure_as_divergence_never_as_a_step_failure()
+    {
+        var failing = false;
+        DocumentWorld World() => new DocumentWorld().Map("/home", page => page.Heading("Home")).Map("/plan", page =>
+        {
+            var status = page.Status("Idle");
+            page.Button("Upgrade", () =>
+            {
+                if (failing)
+                {
+                    throw new EngineException("ACTION_FAILED", "element detached");
+                }
+
+                status.Name = status.Text = "Upgraded";
+            });
+        });
+        var directory = await RecordAsync(World, NavigateThenUpgrade);
+        failing = true;
+
+        var replay = await ReplayStepAsync(World(), directory, null, ModelResponses.Done("passed", "Done."));
+
+        Assert.Null(replay.Error);
+        Assert.Equal(("agent-concluded", "action-failed", 1), (replay.Cache?.Mode, replay.Cache?.Reason, replay.Cache?.ReplayedActions));
+    }
+
+    [Fact]
+    public async Task Hands_off_when_a_smaller_scrolled_region_cannot_be_re_found_never_scrolling_the_viewport_for_it()
+    {
+        var scrolled = 0;
+        var directory = await RecordAsync(
+            () => new DocumentWorld().Map("/home", page =>
+            {
+                var status = page.Status("Idle");
+                page.Roots.Add(new DocumentElement { Role = "group", Name = "Recommended", OnScroll = _ => status.Name = status.Text = "Scrolled " + ++scrolled });
+            }),
+            ModelResponses.Call("scroll", new { role = "group", name = "Recommended", direction = "right" }));
+        scrolled = 0;
+        var viewportScrolls = 0;
+        var without = new DocumentWorld().Map("/home", page =>
+        {
+            page.Button("Upgrade");
+            page.OnScroll = _ => viewportScrolls++;
+        });
+
+        var replay = await ReplayStepAsync(without, directory, null, ModelResponses.Done("passed", "Done."));
+
+        Assert.Equal(("missed", "target-not-found", 0), (replay.Cache?.Mode, replay.Cache?.Reason, replay.Cache?.ReplayedActions));
+        Assert.Equal((0, 0), (scrolled, viewportScrolls));
     }
 
     // Every action changes what the page shows, so no look waits out a change window.

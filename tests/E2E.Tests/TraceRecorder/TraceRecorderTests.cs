@@ -2,14 +2,16 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
+using E2E.Engine;
+using static E2E.Tests.TraceRecorder.RecordedEntries;
+
 namespace E2E.Tests.TraceRecorder;
 
 /// <summary>
 /// The port records inside the agent, with a plain action list: no summaries, CSS selectors, positions, scroll spans,
 /// truncation flag, action cap, tool gaps, secret names, or entry validation, and no hover, long-press, secondary-tap,
 /// drag, upload, or point-hover verbs. So these upstream its are not ported: "poisons a trace whose target is an unnamed
-/// twin no named row tells apart, and keeps one that a row does", "records durable descriptors and readable summaries",
-/// "always finalizes into a trace the reader accepts", "records a secret fill by name only, with page strings redacted",
+/// twin no named row tells apart, and keeps one that a row does",
 /// "masks a secret resolved after the node was captured", "masks a secret resolved after capture in the container the
 /// node sat within", "poisons the trace instead of bending a replay input", "keeps the smallest coverage when folding
 /// scrolls, and none when a repeat lacks one", "marks a gap that ends replay for a mutating project tool", "truncates
@@ -66,5 +68,57 @@ public sealed class TraceRecorderTests
 
         Assert.Null(result.Error);
         Assert.False(Directory.Exists(directory) && Directory.GetFiles(directory, "*.json").Length > 0);
+    }
+
+    /// <summary>Partial port of "records durable descriptors and readable summaries": the port keeps no summary and no CSS selector.</summary>
+    [Fact]
+    public async Task Records_the_durable_descriptors_of_each_action()
+    {
+        var directory = await RecordAsync(
+            SettingsWorld(),
+            null,
+            ModelResponses.Call("navigate", new { url = "/billing" }),
+            ModelResponses.Tap("button", "Upgrade"),
+            ModelResponses.Fill("textbox", "Plan", "yearly"));
+
+        var entry = ReadEntry(directory);
+
+        Assert.Equal("/settings", entry.Route);
+        Assert.Equal(
+            [("navigate", "/billing", null, null, null, null), ("tap", null, "button", "Upgrade", "upgrade-cta", null), ("fill", null, "textbox", "Plan", null, "yearly")],
+            entry.Actions.Select(action => (action.Kind, action.Url, action.Role, action.Name, action.TestId, action.Value)));
+    }
+
+    /// <summary>Partial port of "always finalizes into a trace the reader accepts": the port has no tool gaps, so a plain recording is read back.</summary>
+    [Fact]
+    public async Task Finalizes_into_an_entry_the_store_reads_back()
+    {
+        var directory = await RecordAsync(SettingsWorld(), null, ModelResponses.Call("navigate", new { url = "/billing" }), ModelResponses.Tap("button", "Upgrade"));
+
+        var read = new FileStepCache(directory).Read(Path.GetFileNameWithoutExtension(Assert.Single(Directory.GetFiles(directory, "*.json"))));
+
+        Assert.NotNull(read.Entry);
+        Assert.Equal(2, read.Entry.Actions.Count);
+    }
+
+    /// <summary>Partial port of "records a secret fill by name only, with page strings redacted": the port has no truncation flag to leave unset.</summary>
+    [Fact]
+    public async Task Records_a_secret_fill_as_its_marker_with_page_strings_redacted()
+    {
+        var parameters = new Dictionary<string, object?> { ["password"] = Secret.Create("member-password", "hunter2", "password") };
+        var directory = await RecordAsync(
+            SettingsWorld("Greeting hunter2"),
+            parameters,
+            ModelResponses.Call("navigate", new { url = "/billing" }),
+            ModelResponses.Call("fill_secret", new { role = "textbox", name = "Password", secret = "member-password" }),
+            ModelResponses.Tap("button", "Greeting <secret:member-password>"));
+
+        var raw = RawEntry(directory);
+        var entry = ReadEntry(directory);
+
+        Assert.DoesNotContain("hunter2", raw, StringComparison.Ordinal);
+        Assert.Contains("<secret:member-password>", raw, StringComparison.Ordinal);
+        Assert.Equal("<secret:member-password>", entry.Actions.Single(action => action.Kind == "fill").Value);
+        Assert.Equal("Greeting <secret:member-password>", entry.Actions[^1].Name);
     }
 }

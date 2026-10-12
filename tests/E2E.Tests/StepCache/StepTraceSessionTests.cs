@@ -16,7 +16,8 @@ public sealed class StepTraceSessionTests
     public async Task Hands_off_on_an_end_route_with_any_literal_that_differs_the_recorded_anchors_on_screen_or_not()
     {
         // A slug the runner cannot recognize, or a link that now lands on a lookalike page: another screen either way.
-        foreach (var (start, recorded, replayed) in new[] { ("/products", "/products/summer-sneaker", "/products/winter-boot"), ("/nav", "/settings-page", "/profile") })
+        // A query literal that differs is another screen too.
+        foreach (var (start, recorded, replayed) in new[] { ("/products", "/products/summer-sneaker", "/products/winter-boot"), ("/nav", "/settings-page", "/profile"), ("/start", "/task?mode=safe", "/task?mode=unsafe") })
         {
             var directory = CoreTests.TempCache();
             DocumentWorld World(string target) => new DocumentWorld()
@@ -262,6 +263,59 @@ public sealed class StepTraceSessionTests
         Assert.Null(step.Error);
         Assert.False(lost, "the failing look was never taken");
         Assert.False(Directory.Exists(directory) && Directory.GetFiles(directory, "*.json").Length > 0);
+    }
+
+    [Fact]
+    public async Task Propagates_a_runtime_hard_stop_raised_while_capturing_the_baseline()
+    {
+        var lost = true;
+        var model = new ScriptedModel(_ => throw new InvalidOperationException("no model call expected"));
+
+        var step = await StepAsync(StorageWorld(), new FileStepCache(CoreTests.TempCache()), "/storage", null, model, wrap: engine => new LosingEngine(engine, () => lost, () => lost = false, () => new AgentException("STEP_TIMEOUT", "out of time")));
+
+        Assert.Equal("STEP_TIMEOUT", Assert.IsType<AgentException>(step.Error).Code);
+        Assert.Equal(0, model.CallCount);
+    }
+
+    [Fact]
+    public async Task Propagates_a_runtime_hard_stop_raised_while_capturing_the_passing_screen()
+    {
+        var directory = CoreTests.TempCache();
+        var lost = false;
+        var model = new ScriptedModel(request =>
+        {
+            if (Text(request).Contains("tapped", StringComparison.Ordinal))
+            {
+                lost = true;
+                return ModelResponses.Done("passed", "Saved.");
+            }
+
+            return ModelResponses.Tap("button", "Save marker");
+        });
+
+        var step = await StepAsync(StorageWorld(), new FileStepCache(directory), "/storage", null, model, wrap: engine => new LosingEngine(engine, () => lost, () => lost = false, () => new AgentException("STEP_TIMEOUT", "out of time")));
+
+        Assert.Equal("STEP_TIMEOUT", Assert.IsType<AgentException>(step.Error).Code);
+        Assert.False(Directory.Exists(directory) && Directory.GetFiles(directory, "*.json").Length > 0);
+    }
+
+    /// <summary>
+    /// Partial port of "keys on the params with each unique() value as a placeholder, stages the recording with the slot, and
+    /// fills it from the next call": the slot and the fill are checked in <c>TemplateTraceAndExpandTraceTests</c>, and the port has no verdict text to read back.
+    /// </summary>
+    [Fact]
+    public async Task Misses_for_a_call_that_did_not_mark_the_param_the_recording_keyed_on()
+    {
+        var directory = CoreTests.TempCache();
+        var recorded = await StepAsync(StorageWorld(), new FileStepCache(directory), "/storage", Saved, Script(ModelResponses.Tap("button", "Save marker")), new Dictionary<string, object?> { ["name"] = Values.Unique("E2E-abc"), ["plan"] = "pro" });
+        Assert.Null(recorded.Error);
+
+        var marked = await StepAsync(StorageWorld(), new FileStepCache(directory), "/storage", null, Script(), new Dictionary<string, object?> { ["name"] = Values.Unique("E2E-xyz"), ["plan"] = "pro" });
+        Assert.Equal(1, marked.Replayed);
+
+        // A call that did not mark the param cannot fill the slot: a miss, never a literal placeholder on screen.
+        var unmarked = await StepAsync(StorageWorld(), new FileStepCache(directory), "/storage", null, Script(), new Dictionary<string, object?> { ["name"] = "E2E-xyz", ["plan"] = "pro" });
+        Assert.Equal(("missed", "no-entry"), (unmarked.Cache?.Mode, unmarked.Cache?.Reason));
     }
 
     [Fact]
@@ -716,7 +770,7 @@ public sealed class StepTraceSessionTests
     }
 
     /// <summary>An engine whose next look fails once <paramref name="lost"/> says so, as a surface that went away can.</summary>
-    private sealed class LosingEngine(IEngine inner, Func<bool> lost, Action recover) : IEngine
+    internal sealed class LosingEngine(IEngine inner, Func<bool> lost, Action recover, Func<Exception>? failure = null) : IEngine
     {
         public string Platform => inner.Platform;
 
@@ -725,9 +779,9 @@ public sealed class StepTraceSessionTests
         public EngineCapabilities Capabilities => inner.Capabilities;
 
         public async Task<IEngineSession> StartAsync(EngineStartOptions options, CancellationToken cancellationToken) =>
-            new Session(await inner.StartAsync(options, cancellationToken).ConfigureAwait(false), lost, recover);
+            new Session(await inner.StartAsync(options, cancellationToken).ConfigureAwait(false), lost, recover, failure);
 
-        private sealed class Session(IEngineSession inner, Func<bool> lost, Action recover) : IEngineSession
+        private sealed class Session(IEngineSession inner, Func<bool> lost, Action recover, Func<Exception>? failure) : IEngineSession
         {
             public string Route => inner.Route;
 
@@ -738,7 +792,7 @@ public sealed class StepTraceSessionTests
                 if (lost())
                 {
                     recover();
-                    throw new EngineException("ENGINE_FAILURE", "surface went away");
+                    throw failure?.Invoke() ?? new EngineException("ENGINE_FAILURE", "surface went away");
                 }
 
                 return inner.ObserveAsync(cancellationToken);
