@@ -7,7 +7,10 @@ using E2E.Internal;
 
 namespace E2E.Tests.Image;
 
-/// <summary>The in-memory image operations <c>ToHaveScreenshotAsync</c> is built on: clipping, cropping, painting, the PNG round trip, and the comparison's tolerance.</summary>
+/// <summary>
+/// The in-memory image operations <c>ToHaveScreenshotAsync</c> is built on: clipping, cropping, painting, the PNG round trip, and the comparison's tolerance.
+/// The five decode tests are partial: upstream compares the decode with what pngjs reads from the same file, and the port has no such oracle, so they compare it with the RGBA written by hand.
+/// </summary>
 public sealed class ImageTests
 {
     private static readonly ImageTolerance Exact = new(0, null, null);
@@ -92,7 +95,7 @@ public sealed class ImageTests
     }
 
     [Fact]
-    public void Decodes_gray_to_RGBA()
+    public void Decodes_gray_to_the_RGBA_expected_by_hand()
     {
         byte[] samples = [0, 90, 180, 255, 30, 60];
         var decoded = ImageOps.DecodePng(Png(3, 2, 0, 8, samples));
@@ -100,7 +103,7 @@ public sealed class ImageTests
     }
 
     [Fact]
-    public void Decodes_gray_with_alpha_to_RGBA()
+    public void Decodes_gray_with_alpha_to_the_RGBA_expected_by_hand()
     {
         byte[] samples = [0, 255, 90, 128, 180, 0, 255, 255, 30, 10, 60, 200];
         var decoded = ImageOps.DecodePng(Png(3, 2, 4, 8, samples));
@@ -108,7 +111,7 @@ public sealed class ImageTests
     }
 
     [Fact]
-    public void Decodes_RGB_to_RGBA()
+    public void Decodes_RGB_to_the_RGBA_expected_by_hand()
     {
         byte[] samples = [255, 0, 0, 0, 255, 0, 0, 0, 255, 10, 20, 30, 40, 50, 60, 70, 80, 90];
         var decoded = ImageOps.DecodePng(Png(3, 2, 2, 8, samples));
@@ -116,7 +119,7 @@ public sealed class ImageTests
     }
 
     [Fact]
-    public void Decodes_16_bit_RGBA_to_RGBA_scaled_to_the_nearest_8_bit_sample()
+    public void Decodes_16_bit_RGBA_to_the_RGBA_expected_by_hand_within_one_level()
     {
         ushort[] samples = [65535, 0, 0, 65535, 0, 32768, 0, 65535, 0, 0, 65535, 0, 4096, 8192, 12288, 65535, 1, 2, 3, 4, 60000, 50000, 40000, 30000];
         var rows = samples.SelectMany(sample => new[] { (byte)(sample >> 8), (byte)(sample & 0xFF) }).ToArray();
@@ -130,7 +133,7 @@ public sealed class ImageTests
     }
 
     [Fact]
-    public void Decodes_a_palette_to_RGBA()
+    public void Decodes_a_palette_to_the_RGBA_expected_by_hand()
     {
         byte[] palette = [255, 0, 0, 0, 255, 0, 0, 0, 255];
         int[] indexes = [0, 1, 2, 1, 0, 2];

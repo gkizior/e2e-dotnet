@@ -9,9 +9,8 @@ using E2E.Tests.Fetch;
 namespace E2E.Tests.Openai;
 
 /// <summary>
-/// "serves generateText with a forced tool call from a backend that only streams" is not ported: the port's model
-/// requests always leave the tool choice to the model. "carries the encrypted reasoning of an earlier turn itself
-/// instead of referring to it by id" is not ported: the port's model messages carry no reasoning items.
+/// "carries the encrypted reasoning of an earlier turn itself instead of referring to it by id" is not ported: the port's
+/// model messages carry no reasoning items.
 /// </summary>
 public sealed class CodexRequestsTests
 {
@@ -35,6 +34,50 @@ public sealed class CodexRequestsTests
         Assert.Equal("eu", request.Headers.GetValues("x-openai-internal-codex-residency").Single());
         var expected = JsonNode.Parse("""{ "model": "gpt-5.5", "input": [], "stream": true, "store": false, "instructions": "Follow the user request.", "include": ["x", "reasoning.encrypted_content"] }""");
         Assert.True(JsonNode.DeepEquals(expected, JsonNode.Parse(await request.Content!.ReadAsStringAsync())), await request.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// Partial: the port's model requests leave the tool choice to the model, so the call is not forced. The model is
+    /// built as <c>Subscriptions.ChatGpt</c> builds it, over a fake backend, because that constructor takes no handler.
+    /// </summary>
+    [Fact]
+    public async Task Serves_generateText_with_a_tool_call_from_a_backend_that_only_streams()
+    {
+        // As the Codex backend answers: items streamed one by one, and an empty output on the final event.
+        var stream = string.Concat(
+            """event: response.created""" + "\n" + """data: {"type":"response.created","response":{"id":"resp_1"}}""" + "\n\n",
+            """event: response.output_item.done""" + "\n" + """data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"report","arguments":"{\"color\":\"red\"}","status":"completed"}}""" + "\n\n",
+            """event: response.completed""" + "\n" + """data: {"type":"response.completed","response":{"id":"resp_1","object":"response","created_at":1,"status":"completed","model":"gpt-5.5","output":[],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}}""" + "\n\n");
+        var api = new FakeApi(_ => (System.Net.HttpStatusCode.OK, stream));
+        var store = new MemoryCredentialStore(new() { ["openai"] = new OAuthCredentials { Access = "tok", Refresh = "r", Expires = 0, Extra = new Dictionary<string, string> { ["accountId"] = "acct_9" } } });
+        using var model = new OpenAiResponsesModel(
+            new OpenAiResponsesModelOptions
+            {
+                Model = "gpt-5.5",
+                BaseUrl = CodexProvider.DefaultApiUrl[..^"/responses".Length],
+                ApiKey = "oauth",
+                PromptCacheHints = false,
+            },
+            Subscriptions.Client(new CodexProvider(), store, inner: api));
+        var report = new ModelTool
+        {
+            Name = "report",
+            Description = "report",
+            Parameters = System.Text.Json.JsonSerializer.SerializeToElement(new { type = "object", properties = new { color = new { type = "string" } } }),
+        };
+
+        var result = await model.CompleteAsync(new ModelRequest { System = "", Tools = [report], Messages = [new ModelMessage { Role = "user", Content = "What color?" }] }, CancellationToken.None);
+
+        var call = Assert.Single(result.ToolCalls);
+        Assert.Equal("report", call.Name);
+        Assert.Equal("red", call.Arguments.GetProperty("color").GetString());
+        Assert.Equal(10, result.Usage!.InputTokens);
+        var seen = api.Requests.Single();
+        var body = JsonNode.Parse(seen.Body)!;
+        Assert.True(body["stream"]!.GetValue<bool>());
+        Assert.False(body["store"]!.GetValue<bool>());
+        Assert.Equal("Bearer tok", seen.Header("authorization"));
+        Assert.Equal("acct_9", seen.Header("chatgpt-account-id"));
     }
 
     [Fact]

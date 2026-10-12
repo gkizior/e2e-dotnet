@@ -60,8 +60,9 @@ public sealed class LocatorExpressionsTests
         Assert.Equal(scope.Query.Describe(), query.Parent?.Describe());
     }
 
+    /// <summary>Partial: a fractional index cannot be written against the port's int parameter, and the error is an <see cref="ArgumentOutOfRangeException"/> with no message about a nonnegative integer asserted.</summary>
     [Fact]
-    public void Rejects_negative_and_fractional_nth_indices()
+    public void Rejects_a_negative_nth_index()
     {
         var source = _screen.GetByTestId("card");
         Assert.Throws<ArgumentOutOfRangeException>(() => source.Nth(-1));

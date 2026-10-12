@@ -13,8 +13,6 @@ using E2E.Tests.Store;
 namespace E2E.Tests.OpencodeConsole;
 
 /// <summary>
-/// "marks Anthropic cache breakpoints: the system prompt, the newest message in a tool loop, none over the caller's own"
-/// is not ported: the port's model messages carry no per-message provider options, so a caller cannot place its own breakpoint.
 /// The class sets OPENCODE_API_KEY in one test, so it runs with the other tests that set the process environment.
 /// </summary>
 [Collection(ProcessEnvironment.Name)]
@@ -103,6 +101,50 @@ public sealed class OpencodeConsoleTests
         Assert.Equal("Bearer st_tok", google.Header("authorization"));
         Assert.Null(google.Header("x-goog-api-key"));
     }
+
+    /// <summary>
+    /// Partial: the port also marks the newest message of a call with no tools, and a caller cannot place its own
+    /// breakpoint, so only the system prompt and the newest message of a tool loop are asserted.
+    /// </summary>
+    [Fact]
+    public async Task Marks_Anthropic_cache_breakpoints_on_the_system_prompt_and_the_newest_message_in_a_tool_loop()
+    {
+        var api = OpencodeConsoleWorkspace.Serve();
+        var provider = new OpenCodeConsoleProvider(consoleUrl: OpencodeConsoleWorkspace.ConsoleUrl);
+        using var model = new OpenCodeConsoleModel("claude-sonnet-5", provider, Subscriptions.Client(provider, Login(), inner: api));
+        var click = new ModelTool
+        {
+            Name = "click",
+            Description = "click",
+            Parameters = JsonSerializer.SerializeToElement(new { type = "object", properties = new { id = new { type = "string" } } }),
+        };
+
+        await model.CompleteAsync(
+            new ModelRequest
+            {
+                System = "You test web apps.",
+                Tools = [click],
+                Messages =
+                [
+                    new ModelMessage { Role = "user", Content = "first" },
+                    new ModelMessage { Role = "assistant", Content = "ok" },
+                    new ModelMessage { Role = "user", Content = "newest" },
+                ],
+            },
+            CancellationToken.None);
+        await model.CompleteAsync(OpencodeConsoleWorkspace.Prompt("Is the cart empty?", "You judge screens."), CancellationToken.None);
+
+        var calls = OpencodeConsoleWorkspace.Inference(api);
+        var loop = JsonNode.Parse(calls[0].Body)!;
+        var judgment = JsonNode.Parse(calls[1].Body)!;
+        Assert.Equal("ephemeral", loop["system"]!.AsArray()[^1]!["cache_control"]!["type"]!.GetValue<string>());
+        Assert.Equal(["newest"], MarkedTexts(loop));
+        Assert.Equal("ephemeral", judgment["system"]!.AsArray()[^1]!["cache_control"]!["type"]!.GetValue<string>());
+    }
+
+    /// <summary>The texts of the message parts an Anthropic request marks as cache breakpoints.</summary>
+    private static IEnumerable<string?> MarkedTexts(JsonNode body) =>
+        body["messages"]!.AsArray().SelectMany(message => message!["content"]!.AsArray()).Where(part => part!["cache_control"] is not null).Select(part => part!["text"]?.GetValue<string>());
 
     [Fact]
     public async Task Says_what_to_do_when_the_login_reaches_no_Go_subscription_or_the_workspace_does_not_serve_the_model()

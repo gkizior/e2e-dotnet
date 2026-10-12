@@ -9,7 +9,6 @@ using E2E.Tests.Fetch;
 
 namespace E2E.Tests.Copilot;
 
-/// <summary>"serves generateText over the chat protocol with the stored GitHub token" is not ported: the port's model messages carry no image parts.</summary>
 public sealed class CopilotRequestsTests
 {
     [Fact]
@@ -34,6 +33,29 @@ public sealed class CopilotRequestsTests
         Assert.Equal("https://api.githubcopilot.com/chat/completions", plain.RequestUri!.AbsoluteUri);
         Assert.Equal("user", plain.Headers.GetValues("x-initiator").Single());
         Assert.False(plain.Headers.Contains("copilot-vision-request"));
+    }
+
+    /// <summary>Partial: the port's model messages carry no image parts, so the request has no <c>copilot-vision-request</c> header, and it cannot force a tool choice.</summary>
+    [Fact]
+    public async Task Serves_a_tool_call_over_the_chat_protocol_with_the_stored_GitHub_token()
+    {
+        var api = new FakeApi(_ => (HttpStatusCode.OK, """
+            { "id": "chatcmpl-1", "object": "chat.completion", "created": 1, "model": "gpt-4.1",
+              "choices": [{ "index": 0, "finish_reason": "tool_calls", "message": { "role": "assistant", "content": null,
+                "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": "report", "arguments": "{\"color\":\"red\"}" } }] } }],
+              "usage": { "prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10 } }
+            """));
+        var store = new MemoryCredentialStore(new() { ["github-copilot"] = new OAuthCredentials { Access = "gho_x", Refresh = "", Expires = 0 } });
+        using var model = new CopilotModel("gpt-4.1", Subscriptions.Client(new CopilotProvider(), store, inner: api));
+
+        var result = await model.CompleteAsync(new ModelRequest { System = "", Tools = [], Messages = [new ModelMessage { Role = "user", Content = "color?" }] }, CancellationToken.None);
+
+        var call = Assert.Single(result.ToolCalls);
+        Assert.Equal("report", call.Name);
+        Assert.Equal("red", call.Arguments.GetProperty("color").GetString());
+        var seen = api.Requests.Last();
+        Assert.Equal("/chat/completions", seen.Uri.AbsolutePath);
+        Assert.Equal("Bearer gho_x", seen.Header("authorization"));
     }
 
     /// <summary>The port's model names no provider, so the check that the delegate switches from chat to Responses is not ported.</summary>
