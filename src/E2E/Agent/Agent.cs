@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Schema;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using E2E.Cache;
 using E2E.Engine;
@@ -53,7 +54,12 @@ public sealed class Agent
     // How often waitFor looks for a changed screen once its interval has passed.
     private static readonly TimeSpan WaitForTick = TimeSpan.FromMilliseconds(250);
 
-    private static readonly JsonSerializerOptions ExtractJson = CreateExtractJson();
+    private static readonly JsonSerializerOptions ExtractJson = CreateExtractJson(JsonDefaults.Options.NumberHandling);
+
+    // The schema the model sees names a number as a number. Reading stays lenient: a model may still answer "3" for 3.
+    private static readonly JsonSerializerOptions ExtractSchemaJson = CreateExtractJson(JsonNumberHandling.Strict);
+
+    private static readonly JsonSchemaExporterOptions ExtractSchemaOptions = new() { TreatNullObliviousAsNonNullable = true };
 
     private static readonly HashSet<string> ActionTools =
         new(["navigate", "tap", "double_tap", "fill", "fill_secret", "press", "select", "check", "uncheck", "clear", "back", "scroll", "scroll_to"], StringComparer.Ordinal);
@@ -437,7 +443,7 @@ public sealed class Agent
         var token = linked.Token;
         var observation = await _scope.Session.ObserveAsync(token).ConfigureAwait(false);
         var snapshot = SnapshotText.Render(observation, _scope.Redactor, _scope.AppOrigin);
-        var schema = JsonSchemaExporter.GetJsonSchemaAsNode(ExtractJson, typeof(T));
+        var schema = JsonSchemaExporter.GetJsonSchemaAsNode(ExtractSchemaJson, typeof(T), ExtractSchemaOptions);
         var tools = AgentTools.ExtractFor(schema);
         var messages = new List<ModelMessage>
         {
@@ -1978,12 +1984,13 @@ public sealed class Agent
         return value;
     }
 
-    private static JsonSerializerOptions CreateExtractJson()
+    private static JsonSerializerOptions CreateExtractJson(JsonNumberHandling numberHandling)
     {
         var options = new JsonSerializerOptions(JsonDefaults.Options)
         {
             RespectNullableAnnotations = true,
             RespectRequiredConstructorParameters = true,
+            NumberHandling = numberHandling,
             WriteIndented = false,
             TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
         };

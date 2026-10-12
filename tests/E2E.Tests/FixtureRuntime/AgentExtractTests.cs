@@ -9,9 +9,7 @@ namespace E2E.Tests.FixtureRuntime;
 /// <summary>
 /// The port takes the C# type as the schema, with no Standard Schema and no <c>found</c>, <c>value</c>, and
 /// <c>missing</c> envelope, and it records no steps. So the upstream it "asks for the same envelope in text mode, when
-/// the caller schema has no JSON Schema projection" is not ported: every C# type has one. "Sends the caller schema as a
-/// shape: types and required fields, no value constraints" is not ported: the schema the port sends for a number allows
-/// a string and carries a <c>pattern</c>, so the test would fail.
+/// the caller schema has no JSON Schema projection" is not ported: every C# type has one.
 /// </summary>
 public sealed class AgentExtractTests
 {
@@ -56,6 +54,25 @@ public sealed class AgentExtractTests
         Assert.Equal(1, model.CallCount);
     }
 
+    [Fact]
+    public async Task Sends_the_caller_schema_as_a_shape_types_and_required_fields_no_value_constraints()
+    {
+        var model = new ScriptedModel(_ => ModelResponses.Call("extract", new { data = new { count = 3 } }));
+
+        var (error, value) = await ExtractAsync<TodoShape>(model, "the number of todos");
+
+        Assert.Null(error);
+        Assert.Equal(3, value!.Count);
+        var sent = model.Requests[0].Tools.Single(tool => tool.Name == "extract").Parameters.GetRawText();
+        Assert.Contains("\"count\":{\"type\":\"integer\"}", sent, StringComparison.Ordinal);
+        Assert.Contains("\"required\":[\"count\"]", sent, StringComparison.Ordinal);
+        Assert.Contains("\"label\":{\"type\":\"string\"}", sent, StringComparison.Ordinal);
+        foreach (var constraint in new[] { "minimum", "maximum", "minLength", "pattern", "$schema" })
+        {
+            Assert.DoesNotContain(constraint, sent, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>Partial: the data the first answer gets wrong is a count that is text, where upstream's schema also bounds it to 100 or more.</summary>
     [Fact]
     public async Task Lets_the_model_decline_on_the_repair_round_instead_of_bending_the_value_to_the_type()
@@ -78,6 +95,13 @@ public sealed class AgentExtractTests
     private sealed class TodoCount
     {
         public required int Count { get; init; }
+    }
+
+    private sealed class TodoShape
+    {
+        public required int Count { get; init; }
+
+        public string Label { get; init; } = "";
     }
 
     private sealed class Phone
