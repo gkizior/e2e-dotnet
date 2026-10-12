@@ -965,7 +965,15 @@ public sealed class Agent
         if (string.Equals(call.Name, "navigate", StringComparison.Ordinal))
         {
             var url = Args.String(call.Arguments, "url") ?? "/";
-            await _scope.Session.OpenAsync(Routes.Resolve(_scope.BaseUrl, url), token).ConfigureAwait(false);
+            try
+            {
+                await _scope.Session.OpenAsync(Routes.Resolve(_scope.BaseUrl, url), token).ConfigureAwait(false);
+            }
+            catch (E2EException ex)
+            {
+                return ToolOutcome.Fail(ex);
+            }
+
             actions.Add(new RecordedAction { Kind = "navigate", Url = CacheKeys.Template(url, parameters) });
             return ToolOutcome.Ok(await DescribeAsync("navigated to " + Routes.PathOf(url), actions[^1], token).ConfigureAwait(false));
         }

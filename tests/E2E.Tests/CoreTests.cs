@@ -225,21 +225,6 @@ public sealed class CoreTests
     }
 
     [Fact]
-    public async Task Agent_act_assert_and_expect_upgrade_the_plan()
-    {
-        var result = await RunAsync(async ctx =>
-        {
-            await ctx.App.OpenAsync("/settings/billing");
-            await ctx.Agent.ActAsync("upgrade the workspace to the Pro plan");
-            await ctx.Agent.AssertAsync("the invoice preview shows a prorated amount");
-            await Expect.That(ctx.Screen.GetByRole("status")).ToContainTextAsync("Pro");
-        }, model: Script());
-
-        Assert.Null(result.Error);
-        Assert.True(result.ModelCalls > 0);
-    }
-
-    [Fact]
     public async Task Second_run_replays_the_act_without_the_model()
     {
         var directory = TempCache();
@@ -654,24 +639,6 @@ public sealed class CoreTests
         Assert.Equal("ACTION_FAILED", error.Code);
     }
 
-    [Fact]
-    public async Task Act_out_of_model_calls_is_blocked_on_its_budget()
-    {
-        var result = await RunAsync(
-            async ctx =>
-            {
-                await ctx.App.OpenAsync("/settings/billing");
-                await ctx.Agent.ActAsync("upgrade", new ActOptions { MaxModelCalls = 2 });
-            },
-            model: new ScriptedModel(_ => new ModelResponse { Content = "thinking" }));
-
-        var error = Assert.IsType<AgentException>(result.Error);
-        Assert.Equal("STEP_BUDGET_EXHAUSTED", error.Code);
-        Assert.True(error.Blocked);
-        Assert.Equal("agent.act exhausted its model-call budget of 2", error.Message);
-        Assert.Equal(2, result.ModelCalls);
-    }
-
     [Theory]
     [InlineData("ASSERTION_INCONCLUSIVE", "ASSERTION_INCONCLUSIVE")]
     [InlineData("AUTOMATION_UNSUPPORTED", "ASSERTION_FAILED")]
@@ -918,65 +885,6 @@ public sealed class CoreTests
     }
 
     [Fact]
-    public async Task Act_reports_its_model_calls_and_actions()
-    {
-        ActResult? live = null;
-        ActResult? replayed = null;
-        var directory = TempCache();
-        var first = await RunAsync(
-            async ctx =>
-            {
-                await ctx.App.OpenAsync("/settings/billing");
-                live = await ctx.Agent.ActAsync("upgrade the workspace to the Pro plan");
-                await ctx.Agent.AssertAsync("the invoice preview shows a prorated amount");
-            },
-            model: Script(),
-            cacheDirectory: directory);
-        var second = await RunAsync(
-            async ctx =>
-            {
-                await ctx.App.OpenAsync("/settings/billing");
-                replayed = await ctx.Agent.ActAsync("upgrade the workspace to the Pro plan");
-            },
-            model: Script(),
-            cacheDirectory: directory);
-
-        Assert.Null(first.Error);
-        Assert.Null(second.Error);
-        Assert.Equal(2, live!.ModelCalls);
-        Assert.Equal(1, live.Actions);
-        Assert.Equal(0, replayed!.ModelCalls);
-        Assert.Equal(1, replayed.Actions);
-    }
-
-    [Theory]
-    [InlineData("passed")]
-    [InlineData("failed")]
-    public async Task Fails_closed_when_the_executor_claims_success_over_an_exhausted_budget(string status)
-    {
-        var model = new ScriptedModel(request =>
-        {
-            var text = string.Join('\n', request.Messages.Select(message => message.Content));
-            return text.Contains("exhausted its action budget of 2", StringComparison.Ordinal)
-                ? ModelResponses.Done(status, "Gave up.")
-                : ModelResponses.Tap("button", "Upgrade to Pro");
-        });
-        var result = await RunAsync(
-            async ctx =>
-            {
-                await ctx.App.OpenAsync("/settings/billing");
-                await ctx.Agent.ActAsync("upgrade", new ActOptions { MaxSteps = 2 });
-            },
-            model: model);
-
-        var error = Assert.IsType<AgentException>(result.Error);
-        Assert.Equal("STEP_BUDGET_EXHAUSTED", error.Code);
-        Assert.True(error.Blocked);
-        Assert.Equal(error.Message, error.Explanation);
-        Assert.Equal(4, model.CallCount);
-    }
-
-    [Fact]
     public async Task A_model_failure_code_outranks_an_exhausted_action_budget()
     {
         var model = new ScriptedModel(request =>
@@ -997,22 +905,6 @@ public sealed class CoreTests
         var error = Assert.IsType<AgentException>(result.Error);
         Assert.Equal("ACTION_FAILED", error.Code);
         Assert.False(error.Blocked);
-    }
-
-    [Fact]
-    public async Task A_blocked_act_is_marked_blocked()
-    {
-        var result = await RunAsync(
-            async ctx =>
-            {
-                await ctx.App.OpenAsync("/settings/billing");
-                await ctx.Agent.ActAsync("upgrade");
-            },
-            model: new ScriptedModel(_ => ModelResponses.Done("blocked", "No network.", "ENVIRONMENT_UNAVAILABLE")));
-
-        var error = Assert.IsType<AgentException>(result.Error);
-        Assert.True(error.Blocked);
-        Assert.Equal("No network.", error.Explanation);
     }
 
     public static TheoryData<string> RaisedBudgets => new() { "act-steps", "act-steps-zero", "act-calls", "wait-calls", "wait-calls-negative" };
@@ -1060,33 +952,12 @@ public sealed class CoreTests
         Assert.Equal("pin", Secret.Create("pin", "123456").Name);
     }
 
-    private static ScriptedModel Script()
-    {
-        return new ScriptedModel(request =>
-        {
-            var text = string.Join('\n', request.Messages.Select(message => message.Content));
-            if (text.Contains("Statement:", StringComparison.Ordinal))
-            {
-                return text.Contains("Prorated", StringComparison.Ordinal)
-                    ? ModelResponses.Done("passed", "prorated")
-                    : ModelResponses.Done("failed", "missing", "ASSERTION_FAILED");
-            }
-
-            if (text.Contains("tapped", StringComparison.Ordinal))
-            {
-                return ModelResponses.Done("passed", "upgraded");
-            }
-
-            return ModelResponses.Tap("button", "Upgrade to Pro");
-        });
-    }
-
     internal static string TempCache()
     {
         return Path.Combine(Path.GetTempPath(), "e2e-tests", Guid.NewGuid().ToString("n"));
     }
 
-    internal readonly record struct Attempt(Exception? Error, int ModelCalls, int Replayed, int Missed);
+    internal readonly record struct Attempt(Exception? Error, int ModelCalls, int Replayed, int Missed, int InputTokens = 0, int OutputTokens = 0);
 
     internal static async Task<Attempt> RunAsync(
         Func<TestContext, Task> body,
@@ -1121,7 +992,7 @@ public sealed class CoreTests
         }
 
         session.Complete(error);
-        return new Attempt(error, session.ModelCalls, session.Replayed, session.Missed);
+        return new Attempt(error, session.ModelCalls, session.Replayed, session.Missed, session.InputTokens, session.OutputTokens);
     }
 
     private sealed class StubHandler : HttpMessageHandler

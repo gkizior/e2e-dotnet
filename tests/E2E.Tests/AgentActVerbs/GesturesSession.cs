@@ -179,6 +179,16 @@ internal static class GesturesSession
             screen => Expect.That(screen.GetByRole("heading", "Gestures")).ToBeVisibleAsync()),
     ];
 
+    /// <summary>
+    /// Upstream's "double-taps and long-presses" flow, without the long press: the port has no long_press tool.
+    /// It is not in <see cref="ReplayFlows"/>, as upstream's replay pass does not run it either.
+    /// </summary>
+    public static readonly Flow DoubleTapFlow = new(
+        "double-taps",
+        "double-tap the twice button",
+        (calls, prompt) => calls == 0 ? ModelResponses.Call("double_tap", new { @ref = RefFor(prompt, "button \"Tap me twice\"") }) : null,
+        screen => Expect.That(screen.GetByRole("status", "Gesture state")).ToHaveTextAsync("double-tapped"));
+
     /// <summary>Serves the gestures page, and the about page at /about.</summary>
     public static Task<TinySite> StartSiteAsync()
     {
