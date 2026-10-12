@@ -110,8 +110,6 @@ public sealed class DeviceFixtureTests
             args?["action"]?.GetValue<string>() == "read" ? new JsonObject { ["action"] = "read", ["text"] = "pasted" } : new JsonObject { ["action"] = "write", ["textLength"] = 1 });
         var device = session.Device;
         var before = h.Fake.Calls.Count;
-        await device.SetNetworkAsync(NetworkState.Offline);
-        await device.SetAirplaneModeAsync(true);
         await device.SetPermissionAsync(DevicePermission.Camera, PermissionState.Grant);
         await device.SetLocationAsync(new Coordinates(37.3349, -122.009));
         await device.ClearLocationAsync();
@@ -133,8 +131,6 @@ public sealed class DeviceFixtureTests
         JsonAssert.Calls(
             h.Fake.Calls,
             before,
-            ("settings.update", """{"setting":"wifi","state":"off"}"""),
-            ("settings.update", """{"setting":"airplane","state":"on"}"""),
             ("settings.update", """{"setting":"permission","permission":"camera","state":"grant","platform":"ios","app":"Settings"}"""),
             ("settings.update", """{"setting":"location","state":"set","latitude":37.3349,"longitude":-122.009}"""),
             ("settings.update", """{"setting":"location","state":"off"}"""),
@@ -361,6 +357,41 @@ public sealed class DeviceFixtureTests
             ("settings.update", """{"setting":"permission","permission":"photos","state":"reset","platform":"ios","app":"com.other"}"""),
             ("apps.open", """{"platform":"ios","app":"com.other"}"""),
             ("apps.open", """{"platform":"ios","app":"com.other"}"""));
+    }
+
+    [Fact]
+    public async Task Switches_Wi_Fi_and_airplane_mode_on_Android_and_on_iOS_where_simctl_only_repaints_the_status_bar_refuses_going_offline_and_restores_with_no_device_command()
+    {
+        var ios = Harness.Create();
+        var iosSession = await OpenAttempt(ios);
+        var before = ios.Fake.Calls.Count;
+        var device = iosSession.Device;
+        var offline = await Assert.ThrowsAsync<EngineException>(() => device.SetNetworkAsync(NetworkState.Offline));
+        Assert.Equal("UNSUPPORTED_CAPABILITY", offline.Code);
+        Assert.Contains("status bar", offline.Message);
+        var airplane = await Assert.ThrowsAsync<EngineException>(() => device.SetAirplaneModeAsync(true));
+        Assert.Equal("UNSUPPORTED_CAPABILITY", airplane.Code);
+        Assert.Contains("status bar", airplane.Message);
+
+        // The restore a cleanup hook shared with Android runs: nothing went offline, so there is nothing to send.
+        await device.SetNetworkAsync(NetworkState.Online);
+        await device.SetAirplaneModeAsync(false);
+        Assert.Equal(before, ios.Fake.Calls.Count);
+
+        var android = Android("com.example.app");
+        var androidSession = await OpenAttempt(android);
+        var count = android.Fake.Calls.Count;
+        await androidSession.Device.SetNetworkAsync(NetworkState.Offline);
+        await androidSession.Device.SetNetworkAsync(NetworkState.Online);
+        await androidSession.Device.SetAirplaneModeAsync(true);
+        await androidSession.Device.SetAirplaneModeAsync(false);
+        JsonAssert.Calls(
+            android.Fake.Calls,
+            count,
+            ("settings.update", """{"setting":"wifi","state":"off"}"""),
+            ("settings.update", """{"setting":"wifi","state":"on"}"""),
+            ("settings.update", """{"setting":"airplane","state":"on"}"""),
+            ("settings.update", """{"setting":"airplane","state":"off"}"""));
     }
 
     [Fact]

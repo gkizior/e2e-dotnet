@@ -88,6 +88,12 @@ internal static class DeviceFixtureNames
 /// </summary>
 public sealed class Device
 {
+    // Why iOS refuses to take the device offline, before any device command: agent-device's iOS wifi and airplane
+    // settings only override a simulator's status bar, and a physical iPhone takes no settings at all. A success would
+    // let a test read the repainted indicator as the app going offline.
+    private const string IosOffline =
+        "on iOS agent-device can only repaint a simulator's status bar, since the simulator shares the Mac's network, and cannot switch an iPhone's radios, so the app would stay online";
+
     private readonly DeviceSession _session;
 
     internal Device(DeviceSession session)
@@ -95,13 +101,39 @@ public sealed class Device
         _session = session;
     }
 
-    /// <summary>Toggles the device's Wi-Fi.</summary>
-    public Task SetNetworkAsync(NetworkState state, CancellationToken cancellationToken = default) =>
-        Setting("device.setNetwork", "wifi", state == NetworkState.Offline ? "off" : "on", cancellationToken);
+    /// <summary>
+    /// Switches an Android device's Wi-Fi. Cellular data stays on, so an emulator hands the app over to its cellular
+    /// link; <see cref="SetAirplaneModeAsync"/> with <c>true</c> cuts both. On iOS <see cref="NetworkState.Offline"/> is
+    /// <c>UNSUPPORTED_CAPABILITY</c>, since a simulator shares the Mac's network and simctl can only repaint its status
+    /// bar; <see cref="NetworkState.Online"/> sends nothing there, so a cleanup hook shared with Android passes.
+    /// </summary>
+    public Task SetNetworkAsync(NetworkState state, CancellationToken cancellationToken = default)
+    {
+        if (_session.Options.Platform == MobilePlatform.Ios)
+        {
+            return state == NetworkState.Offline
+                ? Task.FromException(DeviceSupport.Unsupported($"device.setNetwork('offline') turns off an Android device's Wi-Fi; {IosOffline}"))
+                : Task.CompletedTask;
+        }
 
-    /// <summary>Toggles airplane mode.</summary>
-    public Task SetAirplaneModeAsync(bool enabled, CancellationToken cancellationToken = default) =>
-        Setting("device.setAirplaneMode", "airplane", enabled ? "on" : "off", cancellationToken);
+        return Setting("device.setNetwork", "wifi", state == NetworkState.Offline ? "off" : "on", cancellationToken);
+    }
+
+    /// <summary>
+    /// Switches an Android device's airplane mode, Wi-Fi and cellular together; Android 11 or newer. On iOS, as for
+    /// <see cref="SetNetworkAsync"/>, <c>true</c> is <c>UNSUPPORTED_CAPABILITY</c> and <c>false</c> sends nothing.
+    /// </summary>
+    public Task SetAirplaneModeAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (_session.Options.Platform == MobilePlatform.Ios)
+        {
+            return enabled
+                ? Task.FromException(DeviceSupport.Unsupported($"device.setAirplaneMode(true) cuts an Android device's radios; {IosOffline}"))
+                : Task.CompletedTask;
+        }
+
+        return Setting("device.setAirplaneMode", "airplane", enabled ? "on" : "off", cancellationToken);
+    }
 
     /// <summary>
     /// Grants, denies, or resets one permission for the pinned app, which need not be running. A change terminates a
