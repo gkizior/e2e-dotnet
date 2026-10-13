@@ -61,6 +61,9 @@ public abstract class E2EFixture
     /// <summary><c>agents.default.system</c>: text appended to the act rules.</summary>
     protected virtual string? AgentSystem => Config.Agent.System;
 
+    /// <summary>The project tools of <c>agents.default</c>, offered to the model beside the agent's own. None by default; a device test passes <c>MobileTools.Create(engine)</c>.</summary>
+    protected virtual IReadOnlyDictionary<string, AgentTool>? AgentTools => null;
+
     /// <summary><c>agents.default.context</c>: project context told to every model call.</summary>
     protected virtual string? AgentContext => Config.Agent.Context;
 
@@ -142,6 +145,7 @@ public abstract class E2EFixture
                 Model = CreateModel(),
                 Judge = CreateJudge(),
                 AgentSystem = AgentSystem,
+                AgentTools = AgentTools,
                 AgentContext = AgentContext,
                 JudgmentTimeout = JudgmentTimeout,
                 ProviderOptions = ProviderOptions,

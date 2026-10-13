@@ -965,12 +965,14 @@ public sealed class CoreTests
         IAgentModel? model = null,
         string? cacheDirectory = null,
         TimeSpan? assertionTimeout = null,
-        TimeSpan? actionTimeout = null)
+        TimeSpan? actionTimeout = null,
+        IReadOnlyDictionary<string, AgentTool>? agentTools = null)
     {
         await using var session = await E2ESession.StartAsync(new E2ESessionOptions
         {
             Engine = new DocumentEngine(world ?? BillingWorld.Create()),
             Model = model,
+            AgentTools = agentTools,
             BaseUrl = "https://billing.test",
             Cache = cacheDirectory is null ? null : new FileStepCache(cacheDirectory),
             CacheEnabled = cacheDirectory is not null,

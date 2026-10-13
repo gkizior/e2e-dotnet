@@ -2,6 +2,7 @@
 // Modified by Dario Kondratiuk.
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Text.Json.Nodes;
 using E2E.Engine;
 using static E2E.Tests.TraceRecorder.RecordedEntries;
 
@@ -9,12 +10,12 @@ namespace E2E.Tests.TraceRecorder;
 
 /// <summary>
 /// The port records inside the agent, with a plain action list: no summaries, CSS selectors, positions, scroll spans,
-/// truncation flag, action cap, tool gaps, secret names, or entry validation, and no hover, long-press, secondary-tap,
+/// truncation flag, action cap, secret names, or entry validation, and no hover, long-press, secondary-tap,
 /// drag, upload, or point-hover verbs. So these upstream its are not ported: "poisons a trace whose target is an unnamed
 /// twin no named row tells apart, and keeps one that a row does",
 /// "masks a secret resolved after the node was captured", "masks a secret resolved after capture in the container the
 /// node sat within", "poisons the trace instead of bending a replay input", "keeps the smallest coverage when folding
-/// scrolls, and none when a repeat lacks one", "marks a gap that ends replay for a mutating project tool", "truncates
+/// scrolls, and none when a repeat lacks one", "truncates
 /// past the action cap instead of dropping the flag", "records every node verb, a state, a drag with its destination,
 /// files, and a back step, and reads them back", and "rejects a stored check, upload, or drag that lost a field".
 /// </summary>
@@ -89,17 +90,37 @@ public sealed class TraceRecorderTests
             entry.Actions.Select(action => (action.Kind, action.Url, action.Role, action.Name, action.TestId, action.Value)));
     }
 
-    /// <summary>Partial port of "always finalizes into a trace the reader accepts": the port has no tool gaps, so a plain recording is read back.</summary>
+    /// <summary>The port's entry has no summary or CSS selector, so the reader's acceptance is the store reading the entry back.</summary>
     [Fact]
-    public async Task Finalizes_into_an_entry_the_store_reads_back()
+    public async Task Always_finalizes_into_an_entry_the_store_reads_back()
     {
-        var directory = await RecordAsync(SettingsWorld(), null, ModelResponses.Call("navigate", new { url = "/billing" }), ModelResponses.Tap("button", "Upgrade"));
+        var directory = await RecordAsync(SettingsWorld(), null, SeedCartTools, ModelResponses.Call("navigate", new { url = "/billing" }), ModelResponses.Tap("button", "Upgrade"), ModelResponses.Call("seed_cart", new { }));
 
         var read = new FileStepCache(directory).Read(Path.GetFileNameWithoutExtension(Assert.Single(Directory.GetFiles(directory, "*.json"))));
 
         Assert.NotNull(read.Entry);
-        Assert.Equal(2, read.Entry.Actions.Count);
+        Assert.Equal(3, read.Entry.Actions.Count);
     }
+
+    /// <summary>The port's gap is an action of kind <c>tool</c> whose text is the tool name; it has no summary.</summary>
+    [Fact]
+    public async Task Marks_a_gap_that_ends_replay_for_a_mutating_project_tool()
+    {
+        var directory = await RecordAsync(SettingsWorld(), null, SeedCartTools, ModelResponses.Call("navigate", new { url = "/billing" }), ModelResponses.Tap("button", "Upgrade"), ModelResponses.Call("seed_cart", new { }));
+
+        var entry = ReadEntry(directory);
+
+        Assert.Equal(("tool", "seed_cart"), (entry.Actions[2].Kind, entry.Actions[2].Text));
+    }
+
+    private static readonly IReadOnlyDictionary<string, AgentTool> SeedCartTools = new Dictionary<string, AgentTool>
+    {
+        ["seed_cart"] = new(
+            "Fill the cart.",
+            new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() },
+            true,
+            (_, _) => Task.FromResult("Seeded the cart.")),
+    };
 
     /// <summary>Partial port of "records a secret fill by name only, with page strings redacted": the port has no truncation flag to leave unset.</summary>
     [Fact]

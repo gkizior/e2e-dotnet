@@ -36,7 +36,10 @@ internal static class RecordedEntries
         }
     });
 
-    internal static async Task<string> RecordAsync(DocumentWorld world, IReadOnlyDictionary<string, object?>? parameters, params ModelResponse[] steps)
+    internal static async Task<string> RecordAsync(DocumentWorld world, IReadOnlyDictionary<string, object?>? parameters, params ModelResponse[] steps) =>
+        await RecordAsync(world, parameters, null, steps);
+
+    internal static async Task<string> RecordAsync(DocumentWorld world, IReadOnlyDictionary<string, object?>? parameters, IReadOnlyDictionary<string, AgentTool>? tools, params ModelResponse[] steps)
     {
         var directory = TempCache();
         var next = 0;
@@ -50,7 +53,8 @@ internal static class RecordedEntries
             },
             world,
             model,
-            directory);
+            directory,
+            agentTools: tools);
         Assert.Null(attempt.Error);
         return directory;
     }

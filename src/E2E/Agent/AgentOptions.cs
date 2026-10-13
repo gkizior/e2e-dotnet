@@ -49,6 +49,12 @@ public sealed class AgentOptions
     /// adds the fields under its <see cref="OpenAiCompatibleModelOptions.Provider"/> key to the request body as given.
     /// </summary>
     public IReadOnlyDictionary<string, JsonElement>? ProviderOptions { get; init; }
+
+    /// <summary>
+    /// Project tools offered to the model beside the agent's own, by name. A tool is offered only on the platforms it
+    /// declares, and a name the agent already uses is refused.
+    /// </summary>
+    public IReadOnlyDictionary<string, AgentTool>? Tools { get; init; }
 }
 
 /// <summary>An agent with its settings checked and its judge resolved.</summary>
@@ -78,6 +84,8 @@ internal sealed class ResolvedAgent
 
     public IReadOnlyDictionary<string, JsonElement>? ProviderOptions { get; init; }
 
+    public IReadOnlyDictionary<string, AgentTool>? Tools { get; init; }
+
     /// <summary>Checks one agent's settings. Throws <see cref="ConfigurationException"/> with <c>INVALID_CONFIG</c>.</summary>
     public static ResolvedAgent From(string name, AgentOptions options)
     {
@@ -92,6 +100,7 @@ internal sealed class ResolvedAgent
 
         CheckContext(options.Context, label + ".context");
         CheckProviderOptions(options.ProviderOptions, label);
+        CheckTools(options.Tools, label);
         return new ResolvedAgent
         {
             Name = name,
@@ -103,6 +112,7 @@ internal sealed class ResolvedAgent
             MaxModelCalls = options.MaxModelCalls,
             JudgmentTimeout = options.JudgmentTimeout,
             ProviderOptions = options.ProviderOptions,
+            Tools = options.Tools,
         };
     }
 
@@ -129,6 +139,22 @@ internal sealed class ResolvedAgent
             throw new ConfigurationException(
                 "INVALID_CONFIG",
                 label + " is " + bytes.ToString(CultureInfo.InvariantCulture) + " bytes; the maximum is " + MaxContextBytes.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    internal static void CheckTools(IReadOnlyDictionary<string, AgentTool>? tools, string label)
+    {
+        if (tools is null)
+        {
+            return;
+        }
+
+        foreach (var name in tools.Keys)
+        {
+            if (AgentTools.IsReserved(name))
+            {
+                throw new ConfigurationException("INVALID_CONFIG", label + ".tools." + name + ": the " + name + " tool name is reserved for the agent's own tools");
+            }
         }
     }
 

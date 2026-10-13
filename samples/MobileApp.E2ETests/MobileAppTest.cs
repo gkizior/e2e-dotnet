@@ -46,6 +46,9 @@ public abstract class MobileAppTest : E2ETest
         App = new E2E.Mobile.MobileApp { BundleId = AppId, AppPath = BuildPath() },
     });
 
+    /// <summary>The agent can open another app, swipe from point to point, and answer a system alert.</summary>
+    protected override IReadOnlyDictionary<string, AgentTool>? AgentTools => MobileTools.Create(_engine ?? throw new InvalidOperationException("The engine starts with the test session."));
+
     /// <summary>A device is slower than a browser: each action waits for the screen to settle, and the model sees a new snapshot after it.</summary>
     protected override TimeSpan StepTimeout => TimeSpan.FromSeconds(90);
 

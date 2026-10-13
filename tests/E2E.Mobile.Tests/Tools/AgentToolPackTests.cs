@@ -11,7 +11,7 @@ public sealed class AgentToolPackTests
 {
     private static Harness Android() => Harness.Create(options => options with { Platform = MobilePlatform.Android });
 
-    private static Task<string> Run(IReadOnlyDictionary<string, DeviceTool> tools, string name, string input) =>
+    private static Task<string> Run(IReadOnlyDictionary<string, AgentTool> tools, string name, string input) =>
         tools[name].ExecuteAsync((JsonObject)JsonNode.Parse(input)!, CancellationToken.None);
 
     [Fact]
@@ -21,8 +21,8 @@ public sealed class AgentToolPackTests
         var android = Android().Engine;
         var tools = MobileTools.Create(ios);
         Assert.Equal(["alert", "open_app", "swipe"], tools.Keys.Order());
-        Assert.All(tools.Values, tool => Assert.Equal([MobilePlatform.Ios], tool.Platforms));
-        Assert.All(MobileTools.Create(ios, android).Values, tool => Assert.Equal([MobilePlatform.Ios, MobilePlatform.Android], tool.Platforms));
+        Assert.All(tools.Values, tool => Assert.Equal(["ios"], tool.Platforms));
+        Assert.All(MobileTools.Create(ios, android).Values, tool => Assert.Equal(["ios", "android"], tool.Platforms));
     }
 
     [Fact]

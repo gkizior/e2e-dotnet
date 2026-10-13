@@ -293,6 +293,7 @@ public sealed class E2ESession : IAsyncDisposable
                 MaxModelCalls = options.MaxModelCalls,
                 JudgmentTimeout = options.JudgmentTimeout,
                 ProviderOptions = options.ProviderOptions,
+                Tools = options.AgentTools,
             }),
         };
         if (options.Agents is null)
@@ -311,7 +312,7 @@ public sealed class E2ESession : IAsyncDisposable
             {
                 throw new ConfigurationException(
                     "INVALID_CONFIG",
-                    "Agents cannot hold \"default\"; the session's Model, Judge, AgentSystem, AgentContext, MaxSteps, MaxModelCalls, JudgmentTimeout, and ProviderOptions are the default agent");
+                    "Agents cannot hold \"default\"; the session's Model, Judge, AgentSystem, AgentTools, AgentContext, MaxSteps, MaxModelCalls, JudgmentTimeout, and ProviderOptions are the default agent");
             }
 
             agents[pair.Key] = ResolvedAgent.From(pair.Key, pair.Value);
@@ -408,6 +409,9 @@ public sealed class E2ESessionOptions
 
     /// <summary>The default agent's upstream <c>system</c>: text appended to the act rules. Judges never see it.</summary>
     public string? AgentSystem { get; init; }
+
+    /// <summary>The default agent's project tools, offered to the model beside the agent's own. See <see cref="AgentOptions.Tools"/>.</summary>
+    public IReadOnlyDictionary<string, AgentTool>? AgentTools { get; init; }
 
     /// <summary>The default agent's upstream <c>context</c>: told to every model call, at most 16384 UTF-8 bytes.</summary>
     public string? AgentContext { get; init; }

@@ -122,7 +122,7 @@ internal static class AgentTools
     private static readonly ModelTool Navigate = Tool("navigate", "Open a path or URL.", Parse("""{ "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] }"""));
 
     /// <summary>The act tools an engine with these capabilities can honor. Scroll and back tools need their capability.</summary>
-    public static IReadOnlyList<ModelTool> ActFor(EngineCapabilities capabilities)
+    public static IReadOnlyList<ModelTool> ActFor(EngineCapabilities capabilities, IReadOnlyList<ModelTool>? project = null)
     {
         var tools = new List<ModelTool> { Observe };
         tools.AddRange(Verbs);
@@ -138,9 +138,22 @@ internal static class AgentTools
             tools.Add(Back);
         }
 
+        if (project is not null)
+        {
+            tools.AddRange(project);
+        }
+
         tools.Add(Tool("done", "End the step with a verdict. blocked requires a code naming what blocked you.", Done));
         return tools;
     }
+
+    /// <summary>True when <paramref name="name"/> is a tool the agent offers itself, whatever the engine.</summary>
+    public static bool IsReserved(string name) =>
+        ActFor(EngineCapabilities.Scroll | EngineCapabilities.History).Any(tool => string.Equals(tool.Name, name, StringComparison.Ordinal));
+
+    /// <summary>The model's view of a project tool: its name, description, and input schema.</summary>
+    public static ModelTool Project(string name, AgentTool tool) =>
+        Tool(name, tool.Description, JsonSerializer.SerializeToElement(tool.InputSchema));
 
     public static IReadOnlyList<ModelTool> Judge { get; } =
     [

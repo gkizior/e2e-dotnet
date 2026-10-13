@@ -49,4 +49,6 @@ Without `E2E_MOBILE_DEVICE`, the engine drives the booted device of the platform
 
 A device target has no URL, so a test does not call `App.OpenAsync()`. The base class launches the app with `Device.OpenAppAsync(AppId, new OpenAppOptions { Relaunch = true })`. A test reaches the `Device` fixture through the engine's active session.
 
+The agent also gets `open_app`, `swipe`, and `alert` from `MobileTools.Create`, which the base class passes as `AgentTools`. A step that uses one of them is not replayed whole from the cache.
+
 Agent steps take longer on a device than in a browser, so the base class raises `StepTimeout` to 90 seconds. The default of 30 seconds timed out a two-field step.

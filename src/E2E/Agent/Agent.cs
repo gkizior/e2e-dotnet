@@ -5,6 +5,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -91,6 +92,8 @@ public sealed class Agent
         var timeout = ResolveTimeout(options?.Timeout, _scope.StepTimeout);
         ActParams.Validate(options?.Params);
         var callsBefore = _scope.ModelCalls;
+        var projectTools = ProjectToolsFor(agent);
+        var offeredProject = projectTools.Select(pair => AgentTools.Project(pair.Key, pair.Value)).ToList();
         using var linked = Link(cancellationToken, timeout);
         var token = linked.Token;
         _scope.Remember(options?.Params);
@@ -189,7 +192,7 @@ public sealed class Agent
                 });
             }
 
-            var tools = AgentTools.ActFor(_scope.EngineCapabilities);
+            var tools = AgentTools.ActFor(_scope.EngineCapabilities, offeredProject);
             var offered = stopped ? tools.Where(tool => string.Equals(tool.Name, "done", StringComparison.Ordinal)).ToList() : tools;
             ModelResponse response;
             try
@@ -238,7 +241,7 @@ public sealed class Agent
             {
                 var outcome = stopped && !string.Equals(toolCall.Name, "done", StringComparison.Ordinal)
                     ? ToolOutcome.Fail("The loop guard stopped the step. Only done is available.")
-                    : await ExecuteAsync(toolCall, options?.Params, actions, budget, token).ConfigureAwait(false);
+                    : await ExecuteAsync(toolCall, options?.Params, actions, budget, projectTools, token).ConfigureAwait(false);
                 messages.Add(new ModelMessage
                 {
                     Role = "tool",
@@ -718,6 +721,12 @@ public sealed class Agent
 
         foreach (var action in entry.Actions)
         {
+            // A project tool ran here, and the grammar cannot reproduce it: the replay ends and the model takes over.
+            if (string.Equals(action.Kind, "tool", StringComparison.Ordinal))
+            {
+                return Lost("tool");
+            }
+
             // An action with no target reads no screen, so the screen the previous action left would go unseen.
             // Look at it, settled as the previous action's policy asks, until one on the recorded end route has been seen.
             if (Look() is { } before && !HasTarget(action) && !CacheRoute.Same(screens[^1].Route, Recorded(entry.EndRoute, parameters)))
@@ -971,13 +980,14 @@ public sealed class Agent
     /// it, with no model, no replay cache, and no action budget. A refusal comes back as a failed outcome.
     /// </summary>
     internal Task<ToolOutcome> RunToolAsync(string name, JsonElement arguments, CancellationToken token) =>
-        _scope.Track(ExecuteAsync(new ModelToolCall { Id = name, Name = name, Arguments = arguments }, null, [], new ActionBudget(int.MaxValue), token));
+        _scope.Track(ExecuteAsync(new ModelToolCall { Id = name, Name = name, Arguments = arguments }, null, [], new ActionBudget(int.MaxValue), null, token));
 
     private async Task<ToolOutcome> ExecuteAsync(
         ModelToolCall call,
         IReadOnlyDictionary<string, object?>? parameters,
         List<RecordedAction> actions,
         ActionBudget budget,
+        IReadOnlyDictionary<string, AgentTool>? projectTools,
         CancellationToken token)
     {
         if (string.Equals(call.Name, "done", StringComparison.Ordinal))
@@ -1009,6 +1019,11 @@ public sealed class Agent
         if (string.Equals(call.Name, "observe", StringComparison.Ordinal))
         {
             return ToolOutcome.Ok(await DescribeAsync("observed", null, token).ConfigureAwait(false));
+        }
+
+        if (projectTools is not null && projectTools.TryGetValue(call.Name, out var projectTool))
+        {
+            return await RunProjectToolAsync(call, projectTool, actions, budget, token).ConfigureAwait(false);
         }
 
         if (!ActionTools.Contains(call.Name))
@@ -1130,6 +1145,52 @@ public sealed class Agent
         {
             return ToolOutcome.Fail(ex);
         }
+    }
+
+    // The project tools this engine's platform may be offered.
+    private IReadOnlyDictionary<string, AgentTool> ProjectToolsFor(ResolvedAgent agent) =>
+        agent.Tools is null
+            ? new Dictionary<string, AgentTool>()
+            : agent.Tools.Where(pair => pair.Value.AppliesTo(_scope.EnginePlatform)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+
+    // A mutating tool takes an action slot and is recorded as a gap: the grammar cannot reproduce it, so a replay ends there
+    // and hands the step to the model. The gap is recorded before the tool runs, since a failed tool may have changed the app.
+    private async Task<ToolOutcome> RunProjectToolAsync(ModelToolCall call, AgentTool tool, List<RecordedAction> actions, ActionBudget budget, CancellationToken token)
+    {
+        if (call.Arguments.ValueKind is not (JsonValueKind.Object or JsonValueKind.Undefined or JsonValueKind.Null))
+        {
+            return ToolOutcome.Fail(call.Name + " takes an object of arguments.");
+        }
+
+        if (tool.Mutates && !budget.TryReserve())
+        {
+            return ToolOutcome.Fail(budget.Message + ". Take no more actions. Call done with a verdict.");
+        }
+
+        RecordedAction? gap = null;
+        if (tool.Mutates)
+        {
+            gap = new RecordedAction { Kind = "tool", Text = Redact(call.Name, _scope.Redactor) };
+            actions.Add(gap);
+        }
+
+        string output;
+        try
+        {
+            var input = call.Arguments.ValueKind == JsonValueKind.Object ? (JsonObject)JsonNode.Parse(call.Arguments.GetRawText())! : new JsonObject();
+            output = await tool.ExecuteAsync(input, token).ConfigureAwait(false);
+        }
+        catch (E2EException ex)
+        {
+            return ToolOutcome.Fail(ex);
+        }
+        catch (Exception ex) when (!token.IsCancellationRequested)
+        {
+            return ToolOutcome.Fail(call.Name + " failed: " + ex.Message);
+        }
+
+        output = output.Length > OverflowShrink.TextClipChars ? output[..OverflowShrink.TextClipChars] + "\n[output cut]" : output;
+        return ToolOutcome.Ok(gap is null ? output : await DescribeAsync(output, gap, token).ConfigureAwait(false));
     }
 
     private async Task<ToolOutcome> BackAsync(List<RecordedAction> actions, CancellationToken token)
