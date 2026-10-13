@@ -57,8 +57,9 @@ public sealed class SettleObservationTests
     [Fact]
     public async Task Settles_on_stability_alone_without_a_pre_action_shape()
     {
+        var time = new SteppingTime();
         var source = new Scripted("a", "b", "b");
-        Assert.Equal("b", await SettleAsync(source, TimeProvider.System, Fast(TimeProvider.System, changedFrom: false)));
+        Assert.Equal("b", await RunAllTimersAsync(time, SettleAsync(source, time, Fast(time, changedFrom: false))));
         Assert.Equal(3, source.Calls);
     }
 
