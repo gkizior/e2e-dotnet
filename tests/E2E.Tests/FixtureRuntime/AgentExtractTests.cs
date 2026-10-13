@@ -54,6 +54,20 @@ public sealed class AgentExtractTests
         Assert.Equal(1, model.CallCount);
     }
 
+    /// <summary>Upstream sends extract its own EXTRACT_REQUEST. The judge's text says to call only done, which a model that follows its system prompt obeys.</summary>
+    [Fact]
+    public async Task Asks_for_the_extract_tool_instead_of_sending_the_judges_done_only_policy()
+    {
+        var model = new ScriptedModel(_ => ModelResponses.Call("extract", new { data = new { count = 3 } }));
+
+        var (error, _) = await ExtractAsync<TodoShape>(model, "the number of todos");
+
+        Assert.Null(error);
+        var system = model.Requests[0].System;
+        Assert.Contains("Call extract with the data", system, StringComparison.Ordinal);
+        Assert.DoesNotContain("Do not call any tool except done", system, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Sends_the_caller_schema_as_a_shape_types_and_required_fields_no_value_constraints()
     {
