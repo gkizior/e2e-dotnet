@@ -46,6 +46,15 @@ public sealed class Agent
         "It is about one value shown twice, not about different items: a claim about some item, such as \"a todo is marked done\", holds when one item matches. " +
         "You do not see earlier steps. Do not call any tool except done.";
 
+    // Upstream's EXTRACT_REQUEST, for the extract and done tools. Extract cannot share the judge's
+    // text: that says to call only done, and a model that follows its system prompt then never extracts.
+    private const string ExtractSystem =
+        "You read the requested data from the current screen. Call extract with the data when the screen shows it. " +
+        "Call done only when it does not: the data is not on screen, is still loading, or cannot be read; say what is missing in summary. " +
+        "Never fill a gap with a placeholder such as an empty string or 0. " +
+        "An instruction that says what to answer when the data is absent, such as \"or null when none is shown\", is answered by calling extract with that value. " +
+        "Take every value from the screen as it reads; never invent data. You do not see earlier steps.";
+
     // assert and extract make one model call and one repair round.
     private const int JudgmentModelCalls = 2;
 
@@ -458,7 +467,7 @@ public sealed class Agent
         };
         for (var call = 1; ; call++)
         {
-            var response = await CallModelAsync(agent.Judge, JudgeSystemFor(agent), messages, tools, agent, token).ConfigureAwait(false);
+            var response = await CallModelAsync(agent.Judge, ExtractSystemFor(agent), messages, tools, agent, token).ConfigureAwait(false);
             var extract = response.ToolCalls.FirstOrDefault(item => string.Equals(item.Name, "extract", StringComparison.Ordinal));
             string issue;
             string? previous = null;
@@ -2004,6 +2013,13 @@ public sealed class Agent
         return string.IsNullOrWhiteSpace(agent.Context)
             ? JudgeSystem
             : JudgeSystem + "\n\n<project-context>\n" + agent.Context + "\n</project-context>";
+    }
+
+    private static string ExtractSystemFor(ResolvedAgent agent)
+    {
+        return string.IsNullOrWhiteSpace(agent.Context)
+            ? ExtractSystem
+            : ExtractSystem + "\n\n<project-context>\n" + agent.Context + "\n</project-context>";
     }
 
     private static void CheckInstruction(string instruction)
